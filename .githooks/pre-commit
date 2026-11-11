@@ -1,0 +1,22 @@
+#!/bin/sh
+# Scan staged changes for secrets with gitleaks. Fails closed: if gitleaks is
+# missing the commit is rejected. Output is redacted.
+
+GITLEAKS="$(command -v gitleaks 2>/dev/null)"
+if [ -z "$GITLEAKS" ] && [ -n "$LOCALAPPDATA" ]; then
+  for p in "$LOCALAPPDATA"/Microsoft/WinGet/Packages/Gitleaks.Gitleaks_*/gitleaks.exe; do
+    [ -x "$p" ] && GITLEAKS="$p" && break
+  done
+fi
+
+if [ -z "$GITLEAKS" ]; then
+  echo "pre-commit: gitleaks not found; install it (winget install Gitleaks.Gitleaks) - commit rejected" >&2
+  exit 1
+fi
+
+"$GITLEAKS" git --pre-commit --staged --redact --verbose --no-banner --no-color
+status=$?
+if [ $status -ne 0 ]; then
+  echo "pre-commit: gitleaks blocked this commit (possible secret in staged changes)" >&2
+  exit 1
+fi

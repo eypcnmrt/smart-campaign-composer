@@ -1,0 +1,1024 @@
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Opus 5.5 · Claude Pro
+ ▝▝   ▝▝   ~\Desktop\smart-campaign-composer
+
+  Fable 5.2 is here for your longest and toughest coding tasks, and is included in your plan until November 16. It draws down usage faster than Opus 5.5. You also get a free Fable limit reset to redeem at clau.de/reset by November 16. Switch with /model.
+  1 more notice hidden
+
+❯ /effort high                                                                  
+  ⎿  Set effort level to high (saved as your default for new sessions):
+     Comprehensive implementation with extensive testing and documentation ·
+     burns fastest — medium handles most tasks
+
+❯ /effort                                                                       
+  ⎿  Set effort level to high (saved as your default for new sessions):
+     Comprehensive implementation with extensive testing and documentation ·
+     burns fastest — medium handles most tasks
+
+❯ Ortam hazır, şimdi case'e başlayalım. Aşağıda case metni ve işe alım ekibinin 
+  sorularıma verdiği cevaplar var. Henüz kod yazma; önce gereksinimleri         
+  birlikte netleştirelim.                                                       
+                                                                                
+    --- CASE ---                                                                
+    Insider One · AI Developer Case Study · 2026                                
+    Smart Campaign Composer                                                     
+    Pazarlamacının doğal dille yazdığı bir kampanya isteğini Claude ile hedef   
+  kitleye ve SMS ve email mesajlarına çeviren; onaya sunan ve gönderip durumunu 
+  canlı gösteren uçtan uca bir sistem kuracaksın.                               
+    Frontend: Vue.js · Backend: Go veya PHP · LLM: Claude API · Teslim: 7 gün   
+  içinde                                                                        
+                                                                                
+    İş bağlamı                                                                  
+    Insider One müşterileri her gün milyonlarca kişiye SMS ve email gönderiyor. 
+  Bir kampanya hazırlamak için kitleyi tanımlamak, her kanal için metin yazmak  
+  ve karakter limitlerine uymak gerekiyor. Bu case'te pazarlamacının yalnızca   
+  ne istediğini yazdığı, gerisini Claude'un önerdiği ve son kararı insanın      
+  verdiği bir araç kurmanı istiyoruz.                                           
+                                                                                
+    Kullanıcı akışı                                                             
+    Örnek brief: "Son 30 günde sepetine ürün ekleyip alışveriş yapmayan         
+  İstanbul'daki kullanıcılara %30 indirim hatırlatması gönder. Samimi ama kısa  
+  olsun."                                                                       
+    1. Kitle çıkarılır: Claude brief'ten bir segment kuralı üretir, arayüz kaç  
+  kişiye gideceğini gösterir.                                                   
+    2. Mesajlar üretilir: SMS ve email içeriği ekrana stream edilerek akar.     
+    3. İnsan onaylar: Pazarlamacı önizler, gerekirse düzenler ve onaylar.       
+    4. Gönderilir: Mesajlar kuyruk üzerinden mock provider'a gönderilir.        
+    5. Canlı izlenir: Dashboard gönderim durumunu gösterir.                     
+    Gerçek kimseye mesaj gitmez. Alıcılar senin oluşturacağın sahte             
+  kullanıcılardır, gönderim de senin yazacağın mock provider'a yapılır.         
+                                                                                
+    Fonksiyonel gereksinimler                                                   
+    - Kitle: Claude'un ürettiği segment kuralı backend'de doğrulanır; LLM       
+  çıktısı doğrudan SQL olarak çalıştırılmaz. İzni olmayan kullanıcıya o         
+  kanaldan mesaj gönderilmez.                                                   
+    - İçerik: İçerik kanal limitlerine uymalı: SMS en fazla 160 karakter, email 
+  konusu en fazla 80 karakter. {{first_name}} gibi kişiselleştirme              
+  değişkenleri desteklenir.                                                     
+    - Gönderim: Asenkron kuyruk, kanal başına saniyede en fazla 100 mesaj. Aynı 
+  kişiye aynı mesaj iki kez gitmez. Retry stratejisini sen tasarla.             
+    - Takip: Canlı gönderim durumu, metrics ve health check endpoint'leri.      
+                                                                                
+    AI gereksinimleri                                                           
+    Case'in en önemli kısmı. Claude'u çağırmak yeterli değil; çıktısını         
+  güvenilir hale getirmeni bekliyoruz.                                          
+    - Doğrulama: Claude'un çıktısı yapılandırılmış (JSON) olmalı ve backend'de  
+  kontrol edilmeli.                                                             
+    - Test edilebilirlik: Testler gerçek API key olmadan, mock bir LLM ile      
+  çalışmalı.                                                                    
+                                                                                
+    Kaynaklar                                                                   
+    Claude API key: Uygulama key'i .env dosyasındaki ANTHROPIC_API_KEY          
+  değişkeninden okumalıe. Geliştirme sırasında mock bir LLM ile çalışabilir,    
+  gerçek modelle denemek istersenClaude Console'dan kendi API key'ini           
+  alabilirsin.                                                                  
+    Aşağıdakileri de kendin hazırlayacaksın:                                    
+    - Sahte kullanıcı verisi: birkaç bin kullanıcılık bir seed. Hangi alanlara  
+  ihtiyaç olduğuna (ad, email, telefon, şehir, alışveriş geçmişi, kanal         
+  izinleri gibi) sen karar ver.                                                 
+    - Mock SMS/email provider: gerçek bir servisi taklit eden basit bir servis. 
+  Retry ve rate limit mantığını gerçekten test edebilmek için zaman zaman       
+  hata, gecikme ve 429 döndürmeli.                                              
+                                                                                
+    Teknoloji                                                                   
+    Frontend Vue.js, backend Go veya PHP. Veritabanı, kuyruk ve kütüphaneler    
+  senin seçimin.                                                                
+                                                                                
+    Teslim edilecekler                                                          
+    - GitHub veya GitLab repository                                             
+    - docker compose up ile tek komutla kurulum (seed verisi ve mock provider   
+  dahil)                                                                        
+    - make test ile çalışan testler                                             
+    - README.md: kurulum ve kısa mimari özeti                                   
+    - DECISIONS.md: önemli kararların ve nedenleri                              
+    - ai-sessions/: Claude session export'ların                                 
+    Kapsam notu: Her şeyi yapmak yerine çekirdek akışı sağlam yapmanı tercih    
+  ederiz. Yetiştiremediklerini README'de belirtmen yeterli.                     
+                                                                                
+    Bonus (isteğe bağlı): Zamanlanmış gönderim, A/B varyantları, kullanıcının   
+  diline göre içerik, CI pipeline.                                              
+                                                                                
+    AI araçları kullanımı                                                       
+    Claude Code, Cursor gibi araçları kullanman serbest, hatta bekleniyor.      
+  Önemli olan üretilen kodu anlaman ve sahiplenmen. Case boyunca Claude ile     
+  yaptığın tüm çalışma session'larının export'larını repodaki ai-sessions/      
+  klasörüne ekle (Claude Code'da /export, claude.ai'da paylaşım linki).         
+  Göndermeden önce API key ve kişisel bilgileri temizle.                        
+    Neden istiyoruz: Kayıtları ne kadar AI kullandığına göre puanlamıyoruz.     
+  Problemi nasıl ele aldığını ve AI çıktısını nasıl doğruladığını görmek        
+  istiyoruz.                                                                    
+                                                                                
+    Değerlendirme: LLM entegrasyonu %25 · Mimari ve kararlar %20 · Backend      
+  güvenilirliği %20 · Frontend %20 · Test ve kod kalitesi %15                   
+                                                                                
+    Sonraki adım: Projen olumlu bulunursa çözümünü ve kararlarını konuşacağımız 
+  30 dakikalık bir review görüşmesi yapılacak.                                  
+    --- CASE SONU ---                                                           
+                                                                                
+    İşe alım ekibine iki şey sordum, cevapları özetle şöyle:                    
+    - SMS limiti: 160 karakter, düz karakter sayısı olarak şablon metne         
+  uygulanacak. Kişiselleştirilmiş son metin üzerinden ayrıca hesaplamaya ve     
+  GSM-7 / UCS-2 ayrımına göre limiti değiştirmeye gerek yok. Segment sayısı     
+  arayüzde bilgi olarak gösterilecek.                                           
+    - Repository: Public olabilir; teslimde repo linkini göndermem yeterli.     
+                                                                                
+    Kısıtlarım: Teslim 15 Kasım Pazar. Hafta içi akşamları 2'şer saat,          
+  Cumartesi de 15:00'e kadar çalışabiliyorum. Backend'i Go ile yazacağım. Her   
+  şeyi yetiştirmek yerine çekirdek akışı sağlam kurmak istiyorum; bonuslardan   
+  en fazla birini, vakit kalırsa yaparım.                                       
+                                                                                
+    Senden istediklerim:                                                        
+    1. Gereksinimleri, değerlendirme ağırlıklarıyla eşleştirilmiş bir kontrol   
+  listesine çevir.                                                              
+    2. Case'te belirsiz kalan noktaları çıkar ve her biri için makul bir        
+  varsayım öner; bunl.                                                          
+    3. Kapsamı üçe ayır: mutlaka yapılacaklar, vakit kalırsa yapılacaklar,      
+  yapılmayacaklar.                                                              
+    4. Bu takvime göre gerçekçi bir iş sırası öner. En riskli kısmı, yani LLM   
+  çıktısının güvenilirliğini, erkene al.                                        
+                                                                                
+    Plan onaylanınca bunu docs/PLAN.md olarak yaz.                              
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Skill(claude-api)
+  ⎿  Successfully loaded skill · 1 tool allowed
+
+  Searched for 2 patterns (ctrl+o to expand)
+
+● Klasör boş; önceki oturumdan Vue 3, Go ve PostgreSQL stack'i belli. Takvim
+  hesabındaki bir boşluk için sizi soracağım. · summary
+
+● User answered Claude's questions:
+  ⎿  · Takvim çok sıkı görünüyor: bu akşam (Salı) planla geçiyor, geriye 
+     Çar/Per/Cum akşamları 3×2 saat ve Cumartesi kalıyor. Cumartesi kaçta 
+     başlıyorsun ve Pazar teslimden önce çalışabilir misin? → Cumartesi 
+     00:00'dan 15:00'e kadar çalışacağım (Cuma gecesinden devam ederek), yani 
+     Cumartesi yaklaşık 15 saat var. Bu akşam da 30 dakikam daha var; bunu 
+     güvenlik temelini kurmaya ayırmak istiyorum, Claude Code araçlarının 
+     kurulumu yarın akşamın ilk işi olsun. Pazar'ı plana koyma, sadece acil 
+     durum yedeği olarak kalsın.
+
+● Updated plan
+  ⎿  /plan to preview
+
+● Planı hazırladım: toplam yaklaşık 21 saat, LLM kısmı Çarşamba–Cuma'ya konuldu
+  ve 17 belirsizlik için önerdiğim varsayımlar DECISIONS.md'ye girecek.
+  Onaylarsan planı docs/PLAN.md olarak yazıp güvenlik temeline geçeceğim. 
+  · summary
+  ⎿  User rejected Claude's plan:
+     ╭─────────────────────────────────────────────────────────────────────────╮
+     │ Smart Campaign Composer — Plan                                          │
+     │                                                                         │
+     │ Context                                                                 │
+     │                                                                         │
+     │ Insider One AI Developer case'i. Pazarlamacının doğal dille yazdığı     │
+     │ brief, Claude ile segment kuralına ve SMS/email içeriğine dönüşecek,    │
+     │ insan onayından sonra kuyruk üzerinden mock provider'a gönderilecek ve  │
+     │ canlı izlenecek. Stack: Vue 3 + Go + PostgreSQL, docker compose up +    │
+     │ make test. Teslim 15 Kasım Pazar; Pazar planda yok, acil durum yedeği.  │
+     │ En riskli ve en ağır puanlı kısım LLM çıktısının güvenilirliği (%25),   │
+     │ bu yüzden ilk o yapılacak.                                              │
+     │                                                                         │
+     │ Plan onaylanınca ilk iş bu içerik docs/PLAN.md olarak repoya yazılacak. │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 1. Gereksinim kontrol listesi (değerlendirme ağırlığıyla)               │
+     │                                                                         │
+     │ LLM entegrasyonu — %25                                                  │
+     │                                                                         │
+     │ - [ ] Claude çıktısı yapılandırılmış JSON (strict tool / structured     │
+     │   output), backend'de şema + iş kuralıyla doğrulanıyor                  │
+     │ - [ ] Segment kuralı JSON AST (DSL). Alan/operatör whitelist'i var,     │
+     │   backend parametreli SQL'e derliyor. LLM çıktısı asla SQL olarak       │
+     │   çalışmıyor                                                            │
+     │ - [ ] Brief'te karşılanamayan kriter unsupported_criteria olarak        │
+     │   dönüyor, UI uyarıyor; sessizce yok sayılmıyor                         │
+     │ - [ ] İçerik doğrulama: SMS ≤160, email konu ≤80 (şablon metin          │
+     │   üzerinden), yalnızca whitelist'teki {{değişken}}'ler                  │
+     │ - [ ] Doğrulama hatası olursa hata mesajı Claude'a geri verilip onarım  │
+     │   deneniyor (en fazla 2 kez); yine olmazsa kontrollü hata               │
+     │ - [ ] SMS/email içeriği SSE ile ekrana stream ediliyor                  │
+     │ - [ ] LLMClient interface'i var: gerçek Anthropic ve mock               │
+     │   implementasyonu. Testler key olmadan çalışıyor                        │
+     │ - [ ] Refusal / max_tokens / timeout / 429 durumları ele alınıyor.      │
+     │   Model ANTHROPIC_MODEL env'den geliyor (varsayılan claude-opus-5-5)    │
+     │ - [ ] Key yoksa uygulama mock LLM modunda açılıyor ve UI'da "Mock LLM"  │
+     │   rozeti görünüyor                                                      │
+     │                                                                         │
+     │ Mimari ve kararlar — %20                                                │
+     │                                                                         │
+     │ - [ ] Net bileşen sınırları: api, worker (dispatcher), mock-provider,   │
+     │   db, web                                                               │
+     │ - [ ] Kampanya durum makinesi: draft → audience_ready → content_ready → │
+     │   approved → sending → completed | completed_with_failures              │
+     │ - [ ] Onay anında segment, içerik ve alıcı listesi donduruluyor         │
+     │   (snapshot)                                                            │
+     │ - [ ] DECISIONS.md: her kararın nedeni ve alternatifi                   │
+     │                                                                         │
+     │ Backend güvenilirliği — %20                                             │
+     │                                                                         │
+     │ - [ ] Asenkron kuyruk: Postgres deliveries tablosu + FOR UPDATE SKIP    │
+     │   LOCKED                                                                │
+     │ - [ ] Kanal başına en fazla 100 msg/s (token bucket, kanal başına bir   │
+     │   limiter)                                                              │
+     │ - [ ] Idempotency: UNIQUE(campaign_id, user_id, channel) ve provider'a  │
+     │   delivery id ile idempotency key. Timeout olup aslında iletilen mesaj  │
+     │   ikinci kez gitmiyor                                                   │
+     │ - [ ] Retry: üstel backoff + jitter, en fazla 5 deneme. 429'da          │
+     │   Retry-After'a uyuluyor, 5xx/timeout tekrar deneniyor, diğer 4xx       │
+     │   kalıcı hata sayılıyor                                                 │
+     │ - [ ] Lease: sending'de takılı kalan kayıtlar lease süresi dolunca geri │
+     │   alınıyor (crash recovery)                                             │
+     │ - [ ] Kanal izni hem kitle çıkarılırken hem gönderim anında kontrol     │
+     │   ediliyor                                                              │
+     │ - [ ] /healthz (liveness), /readyz (DB ping), /metrics (Prometheus),    │
+     │   graceful shutdown                                                     │
+     │                                                                         │
+     │ Frontend — %20                                                          │
+     │                                                                         │
+     │ - [ ] Brief → segment kartı (kural açıklaması + toplam / SMS izinli /   │
+     │   email izinli sayılar)                                                 │
+     │ - [ ] Streaming içerik görünümü, düzenleme, canlı karakter sayacı + SMS │
+     │   segment bilgisi + değişken doğrulama                                  │
+     │ - [ ] Onay ekranı (kişiselleştirilmiş örnek önizleme), gönderim         │
+     │   dashboard'u (kanal başına queued/sent/retrying/failed)                │
+     │ - [ ] Loading, hata ve boş durumları                                    │
+     │                                                                         │
+     │ Test ve kod kalitesi — %15                                              │
+     │                                                                         │
+     │ - [ ] make test: Go unit + integration (Postgres) + frontend unit       │
+     │   testleri, Docker içinde, API key gerektirmiyor                        │
+     │ - [ ] Mock LLM senaryoları: geçerli çıktı, bozuk JSON, limit aşımı,     │
+     │   bilinmeyen alan/değişken, refusal                                     │
+     │ - [ ] Dispatcher testleri: rate limit, retry, 429, idempotency, lease   │
+     │   recovery                                                              │
+     │ - [ ] go vet, vue-tsc temiz                                             │
+     │                                                                         │
+     │ Teslim                                                                  │
+     │                                                                         │
+     │ - [ ] Repo (public), docker compose up (seed ve mock provider dahil),   │
+     │   make test, README.md, DECISIONS.md, temizlenmiş ai-sessions/          │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 2. Belirsizlikler ve varsayımlar (DECISIONS.md'ye girecek)              │
+     │                                                                         │
+     │ #: 1                                                                    │
+     │ Belirsizlik: Segment kuralı neleri ifade edebilir?                      │
+     │ Varsayım: Whitelist: city, language, sms_opt_in, email_opt_in,          │
+     │ total_orders,                                                           │
+     │   total_spent, last_purchase_at ve olay koşulları (cart_add / purchase  │
+     │ var/yok,                                                                │
+     │    son N gün). and/or/not iç içe en fazla 3 seviye. N gün 1–365         │
+     │ arasında                                                                │
+     │ ────────────────────────────────────────                                │
+     │ #: 2                                                                    │
+     │ Belirsizlik: "Kaç kişiye gidecek" nasıl sayılır?                        │
+     │ Varsayım: Üç sayı gösterilir: eşleşen toplam, SMS izinli, email izinli. │
+     │                                                                         │
+     │   Gönderim yalnızca izinli kanala yapılır                               │
+     │ ────────────────────────────────────────                                │
+     │ #: 3                                                                    │
+     │ Belirsizlik: Brief DSL'in ifade edemediği bir şey isterse?              │
+     │ Varsayım: Claude unsupported_criteria döner, UI uyarı gösterir. Kural   │
+     │ yine                                                                    │
+     │   üretilir ama pazarlamacı bilerek onaylar                              │
+     │ ────────────────────────────────────────                                │
+     │ #: 4                                                                    │
+     │ Belirsizlik: Kanal seçimi                                               │
+     │ Varsayım: Brief kanal belirtmiyorsa ikisi de. Pazarlamacı kanalı UI'dan │
+     │                                                                         │
+     │   kapatabilir                                                           │
+     │ ────────────────────────────────────────                                │
+     │ #: 5                                                                    │
+     │ Belirsizlik: SMS limiti                                                 │
+     │ Varsayım: İşe alım ekibiyle netleşti: şablon metin üzerinden 160 düz    │
+     │ karakter.                                                               │
+     │   Segment sayısı yalnızca bilgi olarak gösterilir                       │
+     │ ────────────────────────────────────────                                │
+     │ #: 6                                                                    │
+     │ Belirsizlik: Email gövdesi                                              │
+     │ Varsayım: Düz metin, en fazla 2.000 karakter (kendi limitimiz). HTML    │
+     │ editör yok                                                              │
+     │ ────────────────────────────────────────                                │
+     │ #: 7                                                                    │
+     │ Belirsizlik: Kişiselleştirme değişkenleri                               │
+     │ Varsayım: Whitelist: {{first_name}}, {{city}}. Bilinmeyen değişken      │
+     │ doğrulama                                                               │
+     │   hatası. Değer boşsa fallback kullanılır (first_name → "Değerli        │
+     │ müşterimiz")                                                            │
+     │ ────────────────────────────────────────                                │
+     │ #: 8                                                                    │
+     │ Belirsizlik: "Aynı mesaj iki kez gitmez" kapsamı                        │
+     │ Varsayım: Kampanya × kullanıcı × kanal başına tek teslimat (DB unique)  │
+     │ +                                                                       │
+     │   provider tarafında idempotency key. Farklı kampanyalar birbirinden    │
+     │ bağımsız                                                                │
+     │ ────────────────────────────────────────                                │
+     │ #: 9                                                                    │
+     │ Belirsizlik: 100 msg/s kimde uygulanır?                                 │
+     │ Varsayım: Bizim dispatcher'da. Mock provider da kendi limitini aşınca   │
+     │ 429                                                                     │
+     │   döner. Tek worker instance varsayılıyor; dağıtık limiter kapsam dışı  │
+     │ ────────────────────────────────────────                                │
+     │ #: 10                                                                   │
+     │ Belirsizlik: "Gönderildi" ne demek?                                     │
+     │ Varsayım: Provider 2xx (accepted) döndü demek. Delivery receipt /       │
+     │ webhook                                                                 │
+     │   kapsam dışı                                                           │
+     │ ────────────────────────────────────────                                │
+     │ #: 11                                                                   │
+     │ Belirsizlik: Onaydan sonra düzenleme                                    │
+     │ Varsayım: Yapılamaz, onay snapshot alır. Onaydan önce yeniden üretme ve │
+     │                                                                         │
+     │   düzenleme serbest; düzenlenen içerik backend'de aynı validator'dan    │
+     │ geçer                                                                   │
+     │ ────────────────────────────────────────                                │
+     │ #: 12                                                                   │
+     │ Belirsizlik: Zaman referansı                                            │
+     │ Varsayım: "Son 30 gün" = şu andan geriye, Europe/Istanbul. Seed         │
+     │ olayları son 90                                                         │
+     │   güne yayılır                                                          │
+     │ ────────────────────────────────────────                                │
+     │ #: 13                                                                   │
+     │ Belirsizlik: Kimlik doğrulama                                           │
+     │ Varsayım: Yok, tek pazarlamacı. README'de belirtilir                    │
+     │ ────────────────────────────────────────                                │
+     │ #: 14                                                                   │
+     │ Belirsizlik: Prompt injection                                           │
+     │ Varsayım: Brief güvenilmeyen girdi sayılır. Zararsızlığı prompt değil   │
+     │ şema +                                                                  │
+     │   whitelist + parametreli SQL garanti eder                              │
+     │ ────────────────────────────────────────                                │
+     │ #: 15                                                                   │
+     │ Belirsizlik: make test ortamı                                           │
+     │ Varsayım: Değerlendiricide yalnızca Docker + make olduğu varsayılır;    │
+     │ testler                                                                 │
+     │   container'da koşar                                                    │
+     │ ────────────────────────────────────────                                │
+     │ #: 16                                                                   │
+     │ Belirsizlik: İndirim / kupon                                            │
+     │ Varsayım: "%30" yalnızca metin içinde geçer, kupon sistemi yok          │
+     │ ────────────────────────────────────────                                │
+     │ #: 17                                                                   │
+     │ Belirsizlik: Kitle büyüklüğü                                            │
+     │ Varsayım: Seed ~5.000 kullanıcı, deterministik (sabit random seed).     │
+     │ Telefon ve                                                              │
+     │   email benzersiz                                                       │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 3. Kapsam                                                               │
+     │                                                                         │
+     │ Mutlaka (çekirdek akış)                                                 │
+     │ - Segment DSL + validator + SQL derleyici + kanal bazlı sayım           │
+     │ - İçerik üretimi (SSE stream) + validator + onarım döngüsü              │
+     │ - Gerçek Claude client + mock LLM, refusal/hata yönetimi                │
+     │ - Onay snapshot'ı, Postgres kuyruğu, rate limit, retry, idempotency,    │
+     │   lease recovery                                                        │
+     │ - Mock provider (ayarlanabilir hata oranı, gecikme, 429 + Retry-After,  │
+     │   idempotency dedup, /stats)                                            │
+     │ - Dashboard (1 sn polling), /healthz, /readyz, /metrics                 │
+     │ - Seed, docker compose, make test, README, DECISIONS, ai-sessions       │
+     │                                                                         │
+     │ Vakit kalırsa                                                           │
+     │ - Bonus: CI pipeline (GitHub Actions'ta make test). En ucuz bonus, ~30  │
+     │   dk. Tek bonus bu olur                                                 │
+     │ - make eval: 10–15 brief'lik altın set, gerçek API'ye karşı (make       │
+     │   test'e dahil değil, isteğe bağlı)                                     │
+     │ - Dashboard'u polling yerine SSE ile beslemek                           │
+     │ - Tek kanalı yeniden üret butonu, segment kuralını UI'da elle düzenleme │
+     │                                                                         │
+     │ Yapılmayacaklar (README'de belirtilecek)                                │
+     │ - Auth / multi-tenant, gerçek SMS/email provider, delivery receipt      │
+     │ - Zamanlanmış gönderim, A/B varyantları, kullanıcı diline göre içerik   │
+     │ - HTML email, unsubscribe akışı, GSM-7/UCS-2'ye göre limit              │
+     │ - Birden fazla worker instance ve dağıtık rate limiter, k8s             │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 4. Mimari özet                                                          │
+     │                                                                         │
+     │ web (Vue 3 + Vite + TS) ──HTTP/SSE──> api (Go)                          │
+     │                                       ├─ llm/        LLMClient:         │
+     │ anthropic | mock                                                        │
+     │                                       ├─ segment/    DSL tipleri,       │
+     │ Validate(), Compile() → SQL + args                                      │
+     │                                       ├─ content/    Validate(),        │
+     │ Render(), SMS segment hesabı                                            │
+     │                                       ├─ campaign/   durum makinesi,    │
+     │ onay snapshot                                                           │
+     │                                       └─ db (pgx)    users, events,     │
+     │ campaigns, deliveries                                                   │
+     │ worker (Go, aynı binary farklı komut) ── deliveries SKIP LOCKED → rate  │
+     │ limiter → mock-provider                                                 │
+     │ mock-provider (Go) — /sms, /email: gecikme, %X 500, %Y 429, idempotency │
+     │ dedup, /stats                                                           │
+     │ seed (Go komutu) — compose'da migration'dan sonra bir kez çalışır       │
+     │                                                                         │
+     │ - Go: chi router, pgx, golang.org/x/time/rate,                          │
+     │   prometheus/client_golang, resmi anthropic-sdk-go                      │
+     │ - LLM çağrıları:                                                        │
+     │   - Segment: tek istek, yapılandırılmış çıktı, düşük effort             │
+     │   - İçerik: streaming. Backend kısmi JSON'dan alanları (sms,            │
+     │     email_subject, email_body) ayıklayıp SSE event'i olarak iletir,     │
+     │     akış bitince tam doğrulama yapar                                    │
+     │   - Risk ve geri dönüş planı: kısmi parse sorun çıkarırsa ham akış      │
+     │     gösterilir, doğrulanmış sonuç akış bitince yerine geçer             │
+     │ - SDK binding'leri (strict tool / structured output, refusal fallback)  │
+     │   implementasyon sırasında resmi Go SDK'dan doğrulanacak; tahminle kod  │
+     │   yazılmayacak                                                          │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 5. Takvim (~21 saat)                                                    │
+     │                                                                         │
+     │ Kural: her oturum sonunda /export → ai-sessions/'a koy → key ve kişisel │
+     │ bilgi temizliği. Bu iş Cumartesi'ye bırakılmaz.                         │
+     │                                                                         │
+     │ Zaman: Sal, 30 dk                                                       │
+     │ İş: Güvenlik temeli: docs/PLAN.md yaz; git init; .gitignore (.env,      │
+     │   node_modules, build çıktıları); .env.example (ANTHROPIC_API_KEY=      │
+     │ boş);                                                                   │
+     │   .claude/settings.json'da .env okumayı deny et (key session export'una │
+     │                                                                         │
+     │   sızmasın); secret tarayan pre-commit hook (sk-ant- vb.);              │
+     │   ai-sessions/README.md temizlik kontrol listesi                        │
+     │ Bitiş kriteri: .env commit'lenemiyor, hook test edildi                  │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Çar, 2 sa                                                        │
+     │ İş: İlk 30 dk: Claude Code araçları (proje CLAUDE.md, izinler,          │
+     │ gofmt/vet hook).                                                        │
+     │   Kalan 1,5 sa: Go iskeleti, LLMClient interface'i, segment DSL tipleri │
+     │ +                                                                       │
+     │   Validate + Compile (saf fonksiyonlar) + unit testler                  │
+     │ Bitiş kriteri: Segment testleri yeşil                                   │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Per, 2 sa                                                        │
+     │ İş: Anthropic client (yapılandırılmış çıktı, refusal, timeout), onarım  │
+     │ döngüsü,                                                                │
+     │   mock LLM senaryoları; içerik şeması + validator (limitler,            │
+     │ değişkenler); 5                                                         │
+     │   brief ile gerçek API smoke testi                                      │
+     │ Bitiş kriteri: Key olmadan LLM pipeline testleri yeşil, gerçek API ile  │
+     │ 5/5                                                                     │
+     │   geçerli çıktı                                                         │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cum, 2 sa                                                        │
+     │ İş: Postgres şeması + migration, seed, compose (db + api + seed); POST  │
+     │   /campaigns (brief → segment + sayılar), GET                           │
+     │ /campaigns/:id/content/stream                                           │
+     │   (SSE)                                                                 │
+     │ Bitiş kriteri: Kilometre taşı: LLM kısmı curl ile uçtan uca çalışıyor   │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 00–03                                                        │
+     │ İş: Onay + snapshot, deliveries kuyruğu, worker (SKIP LOCKED, limiter,  │
+     │ retry,                                                                  │
+     │   lease), mock provider; testler                                        │
+     │ Bitiş kriteri: Kaos ayarlı provider'a 5k mesaj, çift gönderim yok,      │
+     │ ≤100/s                                                                  │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 03–04                                                        │
+     │ İş: Stats endpoint, /metrics, /healthz, /readyz, graceful shutdown      │
+     │ Bitiş kriteri:                                                          │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 04–09                                                        │
+     │ İş: Frontend: composer akışı, streaming, düzenleme + sayaçlar, onay,    │
+     │ dashboard                                                               │
+     │ Bitiş kriteri: UI'dan tam akış çalışıyor                                │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 09–10                                                        │
+     │ İş: Temiz klondan docker compose up ile uçtan uca prova, hata düzeltme  │
+     │ Bitiş kriteri:                                                          │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 10–11                                                        │
+     │ İş: Integration testler, make test'in Docker içinde çalışması           │
+     │ Bitiş kriteri: Temiz ortamda make test yeşil                            │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 11–13                                                        │
+     │ İş: README, DECISIONS.md, ai-sessions son temizlik (key/email taraması) │
+     │ Bitiş kriteri:                                                          │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 13–14                                                        │
+     │ İş: Yalnızca her şey yeşilse CI bonusu, değilse tampon                  │
+     │ Bitiş kriteri:                                                          │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Cmt 14–15                                                        │
+     │ İş: Son temiz klon doğrulaması, push, linki gönder                      │
+     │ Bitiş kriteri:                                                          │
+     │ ────────────────────────────────────────                                │
+     │ Zaman: Pazar                                                            │
+     │ İş: Yalnızca acil durum                                                 │
+     │ Bitiş kriteri:                                                          │
+     │                                                                         │
+     │ Kesme noktaları                                                         │
+     │ - Cuma sonunda LLM kısmı curl ile çalışmıyorsa: kısmi JSON stream'i     │
+     │   bırakılır, ham stream + sonda doğrulama yapılır.                      │
+     │ - Cumartesi 09'da frontend bitmediyse: dashboard basit tabloya          │
+     │   indirilir, düzenleme yalnızca textarea + sayaç olur.                  │
+     │                                                                         │
+     │ ---                                                                     │
+     │                                                                         │
+     │ 6. Doğrulama                                                            │
+     │                                                                         │
+     │ - make test (Docker içinde, key yok): segment validator/derleyici,      │
+     │   içerik validator, onarım döngüsü (mock LLM), retry/backoff            │
+     │   politikası, dispatcher integration (Postgres + kaos ayarlı mock       │
+     │   provider): çift gönderim yok, rate ≤100/s/kanal, izinsiz kullanıcıya  │
+     │   gönderim yok                                                          │
+     │ - Temiz klonda docker compose up → UI'da örnek brief ile akışı baştan   │
+     │   sona çalıştır; dashboard'da retry ve 429'ların göründüğünü ve sonunda │
+     │   tüm teslimatların sonuçlandığını gör                                  │
+     │ - Mock provider /stats ile DB sayılarını karşılaştır (provider'da       │
+     │   benzersiz idempotency key sayısı = DB'deki sent)                      │
+     │ - Gerçek key ile örnek brief + 4 farklı brief (şehir yok, kanal         │
+     │   belirtilmiş, desteklenmeyen kriter, uzun içerik isteği) manuel smoke  │
+     │   testi                                                                 │
+     │ - Push öncesi: ai-sessions/ ve tüm repoda sk-ant-, email ve telefon     │
+     │   taraması                                                              │
+     ╰─────────────────────────────────────────────────────────────────────────╯
+
+  Searched for 2 patterns, read 1 file (ctrl+o to expand)
+
+● Skill'deki JSON Schema sınırlamalarına göre recursive şemalar, sayısal
+  kısıtlar ve string uzunluk kısıtları desteklenmiyor, bu yüzden SMS ≤160 ve
+  1–365 gün kontrollerini backend'de yapacağım. · summary
+
+● Updated plan
+  ⎿  /plan to preview
+
+● Updated plan
+  ⎿  /plan to preview
+
+● Updated plan
+  ⎿  /plan to preview
+
+● Updated plan
+  ⎿  /plan to preview
+
+● Updated plan
+  ⎿  /plan to preview
+
+● User approved Claude's plan
+  ⎿  Plan saved to: 
+     ~\.claude-case\plans\pasted-content-id-17dd-ortam-haz-r-magical-candy.md · 
+     /plan to edit
+     Smart Campaign Composer — Plan
+
+     Context
+
+     Insider One AI Developer case'i. Pazarlamacının doğal dille yazdığı brief,
+     Claude ile segment kuralına ve SMS/email içeriğine dönüşecek, insan
+     onayından sonra kuyruk üzerinden mock provider'a gönderilecek ve canlı
+     izlenecek. Stack: Vue 3 + Go + PostgreSQL, docker compose up + make test.
+     Teslim 15 Kasım Pazar; Pazar planda yok, acil durum yedeği. En riskli ve en
+     ağır puanlı kısım LLM çıktısının güvenilirliği (%25), bu yüzden ilk o
+     yapılacak.
+
+     Plan onaylanınca yalnızca bu içerik docs/PLAN.md olarak repoya yazılacak ve
+     durulacak. Güvenlik temeli bir sonraki mesajda kurulacak.
+
+     ---
+
+     1. Gereksinim kontrol listesi (değerlendirme ağırlığıyla)
+
+     LLM entegrasyonu — %25
+
+     - [ ] Claude çıktısı yapılandırılmış JSON (strict tool / structured
+       output), backend'de şema + iş kuralıyla doğrulanıyor
+     - [ ] Segment kuralı iki seviyeli JSON DSL (bkz. §4.1). Alan/operatör
+       whitelist'i var, backend parametreli SQL'e derliyor. LLM çıktısı asla SQL
+       olarak çalışmıyor
+     - [ ] Şemada ifade edilemeyen kısıtlar (uzunluk, sayı aralığı,
+       alan–operatör–değer uyumu) Go validator'ında kontrol ediliyor
+     - [ ] Brief'te karşılanamayan kriter unsupported_criteria olarak dönüyor,
+       UI uyarıyor; sessizce yok sayılmıyor
+     - [ ] İçerik doğrulama: SMS ≤160, email konu ≤80 (şablon metin üzerinden),
+       yalnızca whitelist'teki {{değişken}}'ler
+     - [ ] Doğrulama hatası olursa hata mesajı Claude'a geri verilip onarım
+       deneniyor (en fazla 2 kez); yine olmazsa kontrollü hata
+     - [ ] SMS/email içeriği SSE ile ekrana stream ediliyor
+     - [ ] LLMClient interface'i var: gerçek Anthropic ve mock implementasyonu.
+       Testler key olmadan çalışıyor
+     - [ ] Refusal / max_tokens / timeout / 429 durumları ele alınıyor. Model
+       ANTHROPIC_MODEL env'den geliyor (varsayılan claude-opus-5-5)
+     - [ ] Key yoksa uygulama mock LLM modunda açılıyor ve UI'da "Mock LLM"
+       rozeti görünüyor
+
+     Mimari ve kararlar — %20
+
+     - [ ] Net bileşen sınırları: api, worker (dispatcher), mock-provider, db,
+       web
+     - [ ] Kampanya durum makinesi: draft → audience_ready → content_ready → 
+       approved → sending → completed | completed_with_failures
+     - [ ] Onay anında segment, içerik ve alıcı listesi donduruluyor (snapshot)
+     - [ ] DECISIONS.md: her kararın nedeni ve alternatifi
+
+     Backend güvenilirliği — %20
+
+     - [ ] Asenkron kuyruk: Postgres deliveries tablosu + FOR UPDATE SKIP LOCKED
+     - [ ] Kanal başına en fazla 100 msg/s (token bucket, kanal başına bir
+       limiter)
+     - [ ] Idempotency: UNIQUE(campaign_id, user_id, channel) ve provider'a
+       delivery id ile idempotency key. Timeout olup aslında iletilen mesaj
+       ikinci kez gitmiyor
+     - [ ] Retry: üstel backoff + jitter, en fazla 5 deneme. 429'da
+       Retry-After'a uyuluyor, 5xx/timeout tekrar deneniyor, diğer 4xx kalıcı
+       hata sayılıyor
+     - [ ] Lease: sending'de takılı kalan kayıtlar lease süresi dolunca geri
+       alınıyor (crash recovery)
+     - [ ] Kanal izni hem kitle çıkarılırken hem gönderim anında kontrol
+       ediliyor
+     - [ ] /healthz (liveness), /readyz (DB ping), /metrics (Prometheus),
+       graceful shutdown
+
+     Frontend — %20
+
+     - [ ] Brief → segment kartı (kural açıklaması + toplam / SMS izinli / email
+       izinli sayılar)
+     - [ ] Streaming içerik görünümü, düzenleme, canlı karakter sayacı + SMS
+       segment bilgisi + değişken doğrulama
+     - [ ] Onay ekranı (kişiselleştirilmiş örnek önizleme), gönderim dashboard'u
+       (kanal başına queued/sent/retrying/failed)
+     - [ ] Loading, hata ve boş durumları
+
+     Test ve kod kalitesi — %15
+
+     - [ ] make test: Go unit + integration (Postgres) + frontend unit testleri,
+       Docker içinde, API key gerektirmiyor
+     - [ ] Mock LLM senaryoları: geçerli çıktı, bozuk JSON, limit aşımı,
+       bilinmeyen alan/değişken, refusal
+     - [ ] Dispatcher testleri: rate limit, retry, 429, idempotency, lease
+       recovery
+     - [ ] go vet, vue-tsc temiz
+
+     Teslim
+
+     - [ ] Repo (public), docker compose up (seed ve mock provider dahil), make 
+       test, README.md, DECISIONS.md, temizlenmiş ai-sessions/
+
+     ---
+
+     2. Belirsizlikler ve varsayımlar (DECISIONS.md'ye girecek)
+
+     #: 1
+     Belirsizlik: Segment kuralı neleri ifade edebilir?
+     Varsayım: İki seviyeli DSL (§4.1): üstte AND listesi, her eleman tek koşul
+     ya
+       da tek koşullardan oluşan bir OR grubu. Nitelik alanları: city, language,
+
+       total_orders, total_spent. Olay koşulları: cart_add / purchase için
+     performed
+        / not_performed, son N gün (1–365). Kanal izni segmentin parçası değil,
+       sistem her zaman uygular; LLM izni aşan bir kural üretemez
+     ────────────────────────────────────────
+     #: 1b
+     Belirsizlik: Olaylar arasında sıra ("sepete ekledikten sonra almadı")
+     Varsayım: Desteklenmiyor. "Son 30 günde sepete ekledi" + "son 30 günde
+       alışveriş yapmadı" olarak ifade edilir. DECISIONS'ta bilinen kısıt olarak
+
+       yazılır
+     ────────────────────────────────────────
+     #: 2
+     Belirsizlik: "Kaç kişiye gidecek" nasıl sayılır?
+     Varsayım: Üç sayı gösterilir: eşleşen toplam, SMS izinli, email izinli.
+       Gönderim yalnızca izinli kanala yapılır
+     ────────────────────────────────────────
+     #: 3
+     Belirsizlik: Brief DSL'in ifade edemediği bir şey isterse?
+     Varsayım: Claude unsupported_criteria döner, UI uyarı gösterir. Kural yine
+       üretilir ama pazarlamacı bilerek onaylar
+     ────────────────────────────────────────
+     #: 4
+     Belirsizlik: Kanal seçimi
+     Varsayım: Brief kanal belirtmiyorsa ikisi de. Pazarlamacı kanalı UI'dan
+       kapatabilir
+     ────────────────────────────────────────
+     #: 5
+     Belirsizlik: SMS limiti
+     Varsayım: İşe alım ekibiyle netleşti: şablon metin üzerinden 160 düz
+     karakter.
+       Segment sayısı yalnızca bilgi olarak gösterilir
+     ────────────────────────────────────────
+     #: 6
+     Belirsizlik: Email gövdesi
+     Varsayım: Düz metin, en fazla 2.000 karakter (kendi limitimiz). HTML editör
+     yok
+     ────────────────────────────────────────
+     #: 7
+     Belirsizlik: Kişiselleştirme değişkenleri
+     Varsayım: Whitelist: {{first_name}}, {{city}}. Bilinmeyen değişken
+     doğrulama
+       hatası. Değer boşsa fallback kullanılır (first_name → "Değerli
+     müşterimiz")
+     ────────────────────────────────────────
+     #: 8
+     Belirsizlik: "Aynı mesaj iki kez gitmez" kapsamı
+     Varsayım: Kampanya × kullanıcı × kanal başına tek teslimat (DB unique) +
+       provider tarafında idempotency key. Farklı kampanyalar birbirinden
+     bağımsız
+     ────────────────────────────────────────
+     #: 9
+     Belirsizlik: 100 msg/s kimde uygulanır?
+     Varsayım: Bizim dispatcher'da. Mock provider da kendi limitini aşınca 429
+       döner. Tek worker instance varsayılıyor; dağıtık limiter kapsam dışı
+     ────────────────────────────────────────
+     #: 10
+     Belirsizlik: "Gönderildi" ne demek?
+     Varsayım: Provider 2xx (accepted) döndü demek. Delivery receipt / webhook
+       kapsam dışı
+     ────────────────────────────────────────
+     #: 11
+     Belirsizlik: Onaydan sonra düzenleme
+     Varsayım: Yapılamaz, onay snapshot alır. Onaydan önce yeniden üretme ve
+       düzenleme serbest; düzenlenen içerik backend'de aynı validator'dan geçer
+     ────────────────────────────────────────
+     #: 12
+     Belirsizlik: Zaman referansı
+     Varsayım: "Son 30 gün" = şu andan geriye, Europe/Istanbul. Seed olayları
+     son 90
+       güne yayılır
+     ────────────────────────────────────────
+     #: 13
+     Belirsizlik: Kimlik doğrulama
+     Varsayım: Yok, tek pazarlamacı. README'de belirtilir
+     ────────────────────────────────────────
+     #: 14
+     Belirsizlik: Prompt injection
+     Varsayım: Brief güvenilmeyen girdi sayılır. Zararsızlığı prompt değil şema
+     +
+       whitelist + parametreli SQL garanti eder
+     ────────────────────────────────────────
+     #: 15
+     Belirsizlik: make test ortamı
+     Varsayım: Değerlendiricide yalnızca Docker + make olduğu varsayılır;
+     testler
+       container'da koşar
+     ────────────────────────────────────────
+     #: 16
+     Belirsizlik: İndirim / kupon
+     Varsayım: "%30" yalnızca metin içinde geçer, kupon sistemi yok
+     ────────────────────────────────────────
+     #: 17
+     Belirsizlik: Kitle büyüklüğü
+     Varsayım: Seed ~5.000 kullanıcı, deterministik (sabit random seed). Telefon
+     ve
+       email benzersiz
+
+     ---
+
+     3. Kapsam
+
+     Mutlaka (çekirdek akış)
+     - Segment DSL + validator + SQL derleyici + kanal bazlı sayım
+     - İçerik üretimi (SSE stream) + validator + onarım döngüsü
+     - Gerçek Claude client + mock LLM, refusal/hata yönetimi
+     - Onay snapshot'ı, Postgres kuyruğu, rate limit, retry, idempotency, lease
+       recovery
+     - Mock provider (ayarlanabilir hata oranı, gecikme, 429 + Retry-After,
+       idempotency dedup, /stats)
+     - Dashboard (1 sn polling), /healthz, /readyz, /metrics
+     - Seed, docker compose, make test, README, DECISIONS, ai-sessions
+
+     Vakit kalırsa
+     - Bonus: CI pipeline (GitHub Actions'ta make test). En ucuz bonus, ~30 dk.
+       Tek bonus bu olur
+     - make eval: 10–15 brief'lik altın set, gerçek API'ye karşı (make test'e
+       dahil değil, isteğe bağlı)
+     - Dashboard'u polling yerine SSE ile beslemek
+     - Tek kanalı yeniden üret butonu, segment kuralını UI'da elle düzenleme
+
+     Yapılmayacaklar (README'de belirtilecek)
+     - Auth / multi-tenant, gerçek SMS/email provider, delivery receipt
+     - Zamanlanmış gönderim, A/B varyantları, kullanıcı diline göre içerik
+     - HTML email, unsubscribe akışı, GSM-7/UCS-2'ye göre limit
+     - Birden fazla worker instance ve dağıtık rate limiter, k8s
+
+     ---
+
+     4. Mimari özet
+
+     web (Vue 3 + Vite + TS) ──HTTP/SSE──> api (Go)
+                                           ├─ llm/        LLMClient: anthropic |
+     mock
+                                           ├─ segment/    DSL tipleri, 
+     Validate(), Compile() → SQL + args
+                                           ├─ content/    Validate(), Render(), 
+     SMS segment hesabı
+                                           ├─ campaign/   durum makinesi, onay 
+     snapshot
+                                           └─ db (pgx)    users, events, 
+     campaigns, deliveries
+     worker (Go, aynı binary farklı komut) ── deliveries SKIP LOCKED → rate 
+     limiter → mock-provider
+     mock-provider (Go) — /sms, /email: gecikme, %X 500, %Y 429, idempotency 
+     dedup, /stats
+     seed (Go komutu) — compose'da migration'dan sonra bir kez çalışır
+
+     4.1 Segment DSL — iki seviye, recursion yok
+
+     {
+       "conditions": [
+         { "type": "event", "event": "cart_add", "op": "performed",
+     "within_days": 30 },
+         { "type": "event", "event": "purchase", "op": "not_performed",
+     "within_days": 30 },
+         { "type": "any_of", "conditions": [
+             { "type": "attribute", "field": "city", "op": "eq", "value":
+     "İstanbul" },
+             { "type": "attribute", "field": "city", "op": "eq", "value":
+     "Kocaeli" } ] }
+       ],
+       "unsupported_criteria": [],
+       "explanation": "Son 30 günde sepete ekleyip alışveriş yapmayan 
+     İstanbul/Kocaeli kullanıcıları"
+     }
+
+     - conditions AND ile bağlanır. Her eleman attribute, event ya da any_of
+       olabilir. any_of yalnızca attribute/event içerir, başka bir any_of
+       içeremez
+     - Olumsuzluk ayrı bir not düğümüyle değil, operatörle ifade edilir: neq,
+       not_in, not_performed
+     - Attribute operatörleri: eq, neq, in, not_in, gt, gte, lt, lte
+     - JSON şemada $defs var ama birbirine özyinelemeli referans yok. Şema
+       Condition (attribute | event) ve Group (any_of: [Condition])
+       tanımlarından oluşur, üst liste Condition | Group alır
+     - Şemada yok, Go validator'ında var:
+       - within_days 1–365 aralığı, liste uzunlukları (en fazla 10 koşul, grupta
+         en fazla 10)
+       - alan–operatör–değer tipi uyumu (örn. city için gt yok)
+       - Not: skill'e göre bu kısıtları otomatik çıkarıp istemci tarafında
+         doğrulayan yalnızca Python ve TypeScript SDK'ları. Go için böyle bir
+         davranış belgelenmemiş, bu yüzden şemaya hiç konmaz
+     - Derleyici: her koşul tek bir parametreli SQL parçasına dönüşür. Olaylar
+       için EXISTS / NOT EXISTS, alan adları SQL'e whitelist map'ten gelir,
+       değerler her zaman $n parametresi olur
+
+     Neden (DECISIONS.md'ye girecek): Structured outputs recursive JSON şemasını
+     desteklemiyor (claude-api skill, shared/tool-use-concepts.md → JSON Schema
+     Limitations). İç içe and/or/not ağacı şemayla garanti edilemezdi; tek
+     seçenek serbest JSON alıp tamamen backend'de doğrulamak olurdu. İki seviye
+     (AND of [koşul | OR grubu]) kampanya segmentlerinin pratikte büyük kısmını
+     karşılıyor. Böylece Claude'un çıktısı API tarafında şemaya uyması garanti
+     edilen bir yapı oluyor, validator ve derleyici de basit ve tam test
+     edilebilir kalıyor. not düğümü yerine olumsuz operatörler aynı ifade gücünü
+     daha az belirsizlikle sağlıyor (çift olumsuzluk yok). Bedeli: (A∧B)∨C gibi
+     DNF dışı ifadeler yazılamıyor. Böyle bir brief'te Claude
+     unsupported_criteria döner.
+
+     4.2 Teknoloji
+
+     - Go: chi router, pgx, golang.org/x/time/rate, prometheus/client_golang,
+       resmi anthropic-sdk-go
+     - LLM çağrıları:
+       - Segment: tek istek, yapılandırılmış çıktı, düşük effort
+       - İçerik: streaming. Backend kısmi JSON'dan alanları (sms, email_subject,
+         email_body) ayıklayıp SSE event'i olarak iletir, akış bitince tam
+         doğrulama yapar
+       - Risk ve geri dönüş planı: kısmi parse sorun çıkarırsa ham akış
+         gösterilir, doğrulanmış sonuç akış bitince yerine geçer
+     - SDK binding'leri (strict tool / structured output, refusal fallback)
+       implementasyon sırasında resmi Go SDK'dan doğrulanacak; tahminle kod
+       yazılmayacak
+
+     ---
+
+     5. Takvim (~21 saat)
+
+     Kural: her oturum sonunda /export → ai-sessions/'a koy → key ve kişisel
+     bilgi temizliği. Bu iş Cumartesi'ye bırakılmaz.
+
+     Zaman: Sal, 30 dk
+     İş: Önce yalnızca docs/PLAN.md yazılır, orada durulur. Güvenlik temeli ayrı
+
+       mesajla: git init; .gitignore (.env, node_modules, build çıktıları);
+       .env.example (ANTHROPIC_API_KEY= boş); .claude/settings.json'da .env
+     okumayı
+       deny et (key session export'una sızmasın); secret tarayan pre-commit hook
+
+       (sk-ant- vb.); ai-sessions/README.md temizlik kontrol listesi
+     Bitiş kriteri: .env commit'lenemiyor, hook test edildi
+     ────────────────────────────────────────
+     Zaman: Çar, 2 sa
+     İş: İlk 30 dk: Claude Code araçları (proje CLAUDE.md, izinler, gofmt/vet
+     hook).
+       Kalan 1,5 sa: Go iskeleti, LLMClient interface'i, segment DSL tipleri +
+       Validate + Compile (saf fonksiyonlar) + unit testler
+     Bitiş kriteri: Segment testleri yeşil
+     ────────────────────────────────────────
+     Zaman: Per, 2 sa
+     İş: Anthropic client (yapılandırılmış çıktı, refusal, timeout), onarım
+     döngüsü,
+       mock LLM senaryoları; içerik şeması + validator (limitler, değişkenler);
+     5
+       brief ile gerçek API smoke testi
+     Bitiş kriteri: Key olmadan LLM pipeline testleri yeşil, gerçek API ile 5/5
+       geçerli çıktı
+     ────────────────────────────────────────
+     Zaman: Cum, 2 sa
+     İş: Postgres şeması + migration, seed, compose (db + api + seed); POST 
+       /campaigns (brief → segment + sayılar), GET /campaigns/:id/content/stream
+
+       (SSE)
+     Bitiş kriteri: Kilometre taşı: LLM kısmı curl ile uçtan uca çalışıyor
+     ────────────────────────────────────────
+     Zaman: Cmt 00–03
+     İş: Onay + snapshot, deliveries kuyruğu, worker (SKIP LOCKED, limiter,
+     retry,
+       lease), mock provider; testler
+     Bitiş kriteri: Kaos ayarlı provider'a 5k mesaj, çift gönderim yok, ≤100/s
+     ────────────────────────────────────────
+     Zaman: Cmt 03–04
+     İş: Stats endpoint, /metrics, /healthz, /readyz, graceful shutdown
+     Bitiş kriteri:
+     ────────────────────────────────────────
+     Zaman: Cmt 04–09
+     İş: Frontend: composer akışı, streaming, düzenleme + sayaçlar, onay,
+     dashboard
+     Bitiş kriteri: UI'dan tam akış çalışıyor
+     ────────────────────────────────────────
+     Zaman: Cmt 09–10
+     İş: Temiz klondan docker compose up ile uçtan uca prova, hata düzeltme
+     Bitiş kriteri:
+     ────────────────────────────────────────
+     Zaman: Cmt 10–11
+     İş: Integration testler, make test'in Docker içinde çalışması
+     Bitiş kriteri: Temiz ortamda make test yeşil
+     ────────────────────────────────────────
+     Zaman: Cmt 11–13
+     İş: README, DECISIONS.md, ai-sessions son temizlik (key/email taraması)
+     Bitiş kriteri:
+     ────────────────────────────────────────
+     Zaman: Cmt 13–14
+     İş: Yalnızca her şey yeşilse CI bonusu, değilse tampon
+     Bitiş kriteri:
+     ────────────────────────────────────────
+     Zaman: Cmt 14–15
+     İş: Son temiz klon doğrulaması, push, linki gönder
+     Bitiş kriteri:
+     ────────────────────────────────────────
+     Zaman: Pazar
+     İş: Yalnızca acil durum
+     Bitiş kriteri:
+
+     Kesme noktaları
+     - Cuma sonunda LLM kısmı curl ile çalışmıyorsa: kısmi JSON stream'i
+       bırakılır, ham stream + sonda doğrulama yapılır.
+     - Cumartesi 09'da frontend bitmediyse: dashboard basit tabloya indirilir,
+       düzenleme yalnızca textarea + sayaç olur.
+
+     ---
+
+     6. Doğrulama
+
+     - make test (Docker içinde, key yok): segment validator/derleyici, içerik
+       validator, onarım döngüsü (mock LLM), retry/backoff politikası,
+       dispatcher integration (Postgres + kaos ayarlı mock provider): çift
+       gönderim yok, rate ≤100/s/kanal, izinsiz kullanıcıya gönderim yok
+     - Temiz klonda docker compose up → UI'da örnek brief ile akışı baştan sona
+       çalıştır; dashboard'da retry ve 429'ların göründüğünü ve sonunda tüm
+       teslimatların sonuçlandığını gör
+     - Mock provider /stats ile DB sayılarını karşılaştır (provider'da benzersiz
+       idempotency key sayısı = DB'deki sent)
+     - Gerçek key ile örnek brief + 4 farklı brief (şehir yok, kanal
+       belirtilmiş, desteklenmeyen kriter, uzun içerik isteği) manuel smoke
+       testi
+     - Push öncesi: ai-sessions/ ve tüm repoda sk-ant-, email ve telefon
+       taraması
+
+● Write(docs\PLAN.md)
+  ⎿  Wrote 187 lines to docs\PLAN.md
+       1 # Smart Campaign Composer — Plan
+       2 
+       3 ## Context
+       4 Insider One AI Developer case'i. Pazarlamacının doğal dille yazd
+         ığı brief, Claude ile segment kuralına ve SMS/email içeriğine dö
+         nüşecek, insan onayından sonra kuyruk üzerinden mock provider'a 
+         gönderilecek ve canlı izlenecek. Stack: Vue 3 + Go + PostgreSQL,
+          `docker compose up` + `make test`. Teslim 15 Kasım Pazar; Pazar
+          planda yok, acil durum yedeği. En riskli ve en ağır puanlı kısı
+         m LLM çıktısının güvenilirliği (%25), bu yüzden ilk o yapılacak.
+     … +183 lines (ctrl+o to expand)
+
+● docs/PLAN.md yazıldı, onayladığın iki değişiklik içinde. Başka bir şey
+  yapmadan duruyorum.
+
+  - Segment DSL: Recursive şema desteklenmediği claude-api skill'inde doğrulandı
+    (shared/tool-use-concepts.md, JSON Schema Limitations bölümü: "Recursive
+    schemas" desteklenmeyenler listesinde). DSL artık iki seviyeli: üstte AND
+    listesi, her eleman tek koşul ya da tek koşullardan oluşan bir any_of grubu.
+    Olumsuzluk not düğümüyle değil neq, not_in, not_performed operatörleriyle
+    ifade ediliyor. Gerekçe §4.1'de, DECISIONS'a taşınacak.
+  - Takvim: Pazar planda yok. Salı satırında güvenlik temeli ayrı bir adım
+    olarak duruyor.
+  - Go SDK kısıtları: Skill, desteklenmeyen kısıtların (uzunluk, sayı aralığı)
+    otomatik çıkarılıp istemci tarafında doğrulanmasını yalnızca Python ve
+    TypeScript SDK'ları için belgeliyor. Go için belgelenmemiş, bu yüzden bu
+    kısıtları şemaya koymayıp Go validator'ında kontrol edeceğiz. Plana da böyle
+    yazdım.
+
+  Güvenlik temelini bir sonraki mesajında kuracağız.
+
+✻ Sautéed for 4m 46s · done 21:51
