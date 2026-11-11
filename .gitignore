@@ -21,3 +21,6 @@ coverage/
 Thumbs.db
 .idea/
 .vscode/
+
+# Third-party tool downloads awaiting scan (deleted after install)
+.quarantine/

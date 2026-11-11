@@ -1,7 +1,5 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "model": "opusplan",
-  "disableClaudeAiConnectors": true,
   "permissions": {
     "deny": [
       "Read(**/.env)",
@@ -13,6 +11,8 @@
       "Read(**/.env.*.local)"
     ]
   },
+  "model": "opusplan",
+  "disableClaudeAiConnectors": true,
   "hooks": {
     "PreToolUse": [
       {
@@ -25,5 +25,8 @@
         ]
       }
     ]
+  },
+  "enabledPlugins": {
+    "gopls-lsp@claude-plugins-official": true
   }
 }
