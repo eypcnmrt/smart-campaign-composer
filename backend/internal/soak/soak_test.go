@@ -10,7 +10,7 @@ import (
 
 func healthy(channel string) ChannelResult {
 	return ChannelResult{
-		Channel: channel, Deliveries: 100, Sent: 98, Failed: 2,
+		Channel: channel, Deliveries: 100, Sent: 98, Failed: 2, Expected: 100,
 		Provider: mockprovider.ChannelStats{
 			UniqueAccepted: 98, DuplicateKeys: 5, Throttled429: 12, Errors500: 9, LateResponses: 4,
 			MaxRequestsPerSecond: 97,
@@ -33,6 +33,10 @@ func TestVerify(t *testing.T) {
 		{"delivery still queued", func(r *ChannelResult) { r.Active, r.Sent = 1, 97; r.Provider.UniqueAccepted = 97 }, "not finished"},
 		{"states do not add up", func(r *ChannelResult) { r.Failed = 1 }, "add up"},
 		{"retry before Retry-After", func(r *ChannelResult) { r.Provider.RetryAfterViolations = 3 }, "Retry-After"},
+		{"wrong number of deliveries", func(r *ChannelResult) { r.Expected = 120 }, "set up for 120"},
+		{"skipped deliveries", func(r *ChannelResult) { r.Skipped, r.Sent = 1, 97; r.Provider.UniqueAccepted = 97 }, "skipped"},
+		{"too many failures", func(r *ChannelResult) { r.Failed, r.Sent = 10, 90; r.Provider.UniqueAccepted = 90 }, "over 2 %"},
+		{"different keys with the same count", func(r *ChannelResult) { r.KeyDifference = 2 }, "keys are accepted"},
 		{"no chaos happened", func(r *ChannelResult) { r.Provider.Errors500, r.Provider.Throttled429 = 0, 0 }, "no failures"},
 	}
 	for _, tt := range tests {

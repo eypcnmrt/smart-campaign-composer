@@ -284,7 +284,8 @@ func (q *Queue) RecoverLeases(ctx context.Context, maxAttempts int) (RecoverResu
 		UPDATE deliveries
 		SET status = CASE WHEN attempts >= $1 THEN 'failed' ELSE 'queued' END,
 		    next_attempt_at = now(), lease_until = NULL,
-		    last_error = CASE WHEN attempts >= $1 THEN 'gave up: lease expired on the last attempt' ELSE 'lease expired' END,
+		    last_error = CASE WHEN attempts >= $1 THEN 'gave up: lease expired on the last attempt' ELSE 'lease expired' END
+		                 || CASE WHEN last_error <> '' THEN ' (previous error: ' || last_error || ')' ELSE '' END,
 		    updated_at = now()
 		WHERE status = 'sending' AND lease_until < now()
 		RETURNING status`, maxAttempts)

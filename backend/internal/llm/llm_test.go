@@ -87,3 +87,22 @@ func TestDefaultModel(t *testing.T) {
 		t.Errorf("DefaultModel = %q, want claude-opus-5-5", DefaultModel)
 	}
 }
+
+func TestFallbackEnabled(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		in   string
+		want bool
+	}{
+		{"", true}, {"on", true}, {" ON ", true}, {"true", true}, {"1", true}, {"yes", true},
+		{"off", false}, {"false", false}, {"0", false}, {"no", false}, {"of", false}, {"enabled", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.in, func(t *testing.T) {
+			t.Parallel()
+			if got := fallbackEnabled(tt.in); got != tt.want {
+				t.Fatalf("fallbackEnabled(%q) = %v, want %v", tt.in, got, tt.want)
+			}
+		})
+	}
+}

@@ -75,7 +75,7 @@ func Classify(status int, retryAfter string, err error, now time.Time) Result {
 	case status >= 500, status == http.StatusRequestTimeout:
 		r.Kind = Transient
 	default:
-		// 3xx are not followed by the client, and any other 4xx is a mistake in the request.
+		// The sender does not follow redirects, so a 3xx arrives here, and any other 4xx is a mistake in the request.
 		r.Kind = Permanent
 	}
 	return r
@@ -208,4 +208,20 @@ func isTimeout(err error) bool {
 		return ne.Timeout()
 	}
 	return false
+}
+
+// Validate rejects a policy that would silently disable a protection: no attempts, a zero backoff (hot
+// retries) or a zero cap on Retry-After (which would make the worker ignore it).
+func (p Policy) Validate() error {
+	switch {
+	case p.MaxAttempts < 1:
+		return errors.New("max attempts must be at least 1")
+	case p.BaseDelay <= 0:
+		return errors.New("base delay must be positive")
+	case p.MaxDelay < p.BaseDelay:
+		return errors.New("max delay must not be below the base delay")
+	case p.MaxRetryAfter <= 0:
+		return errors.New("max retry-after must be positive, or a 429's Retry-After would be ignored")
+	}
+	return nil
 }

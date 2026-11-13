@@ -64,28 +64,24 @@ func NewWithURL(t testing.TB) (*pgxpool.Pool, string) {
 		t.Fatalf("creating test database: %v", err)
 	}
 
+	// From here on the database exists: whatever fails below, the cleanup drops it.
+	t.Cleanup(func() { dropDatabase(t, admin, name) })
+
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
-		admin.Close()
 		t.Fatalf("parsing %s: invalid format", EnvURL)
 	}
 	cfg.ConnConfig.Database = name
 	dbURL, err := withDatabase(url, name)
 	if err != nil {
-		admin.Close()
 		t.Fatalf("building the test database url: %v", err)
 	}
 	cfg.MaxConns = 30
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
-		dropDatabase(t, admin, name)
 		t.Fatalf("connecting to the test database: %v", err)
 	}
-
-	t.Cleanup(func() {
-		pool.Close()
-		dropDatabase(t, admin, name)
-	})
+	t.Cleanup(pool.Close) // runs before the drop registered above
 
 	if _, err := migrate.Up(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrating the test database: %v", err)

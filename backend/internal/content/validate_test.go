@@ -37,6 +37,7 @@ func TestValidate(t *testing.T) {
 
 		// Limits are inclusive and count characters, not bytes.
 		{name: "sms at limit", edit: func(c *Content) { c.SMS = strings.Repeat("a", MaxSMS) }},
+		{name: "replacement character", edit: func(c *Content) { c.SMS = "Merhaba " + string(rune(0xFFFD)) }, want: []string{"sms: contains a replacement character"}},
 		{name: "sms over limit", edit: func(c *Content) { c.SMS = strings.Repeat("a", MaxSMS+1) }, want: []string{"sms: is 161 characters long; the limit is 160"}},
 		{name: "sms at limit in two-byte characters", edit: func(c *Content) { c.SMS = strings.Repeat("ğ", MaxSMS) }},
 		{name: "sms over limit in two-byte characters", edit: func(c *Content) { c.SMS = strings.Repeat("ğ", MaxSMS+1) }, want: []string{"sms: is 161 characters"}},

@@ -154,6 +154,17 @@ func FromEnv(getenv func(string) string) Client {
 	return NewAnthropic(Config{
 		APIKey:   key,
 		Model:    model,
-		Fallback: !strings.EqualFold(strings.TrimSpace(getenv("ANTHROPIC_FALLBACK")), "off"),
+		Fallback: fallbackEnabled(getenv("ANTHROPIC_FALLBACK")),
 	})
+}
+
+// fallbackEnabled reads ANTHROPIC_FALLBACK. Empty and the usual spellings of "yes" keep the server-side
+// refusal fallback on (the documented default). Any other value, "off" and also a typo, turns it off: a
+// misspelt setting must not silently keep sending prompts to a model other than the configured one.
+func fallbackEnabled(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "on", "true", "1", "yes":
+		return true
+	}
+	return false
 }

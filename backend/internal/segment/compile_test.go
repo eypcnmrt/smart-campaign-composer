@@ -33,9 +33,21 @@ func ruleJSON(conds ...string) string {
 	return `{"conditions":[` + strings.Join(conds, ",") + `]}`
 }
 
+// withMeta adds the two properties every rule must carry (unsupported_criteria and explanation) to a test
+// rule that only spells out its conditions. Input that already has them, or is not an object, is unchanged.
+func withMeta(in string) string {
+	if !strings.HasPrefix(in, "{") || strings.Contains(in, "unsupported_criteria") || strings.Contains(in, "explanation") {
+		return in
+	}
+	if strings.HasPrefix(in, "{}") {
+		return `{"unsupported_criteria":[],"explanation":"test"}`
+	}
+	return `{"unsupported_criteria":[],"explanation":"test",` + in[1:]
+}
+
 func mustDecode(t *testing.T, in string) Rule {
 	t.Helper()
-	r, err := Decode([]byte(in))
+	r, err := Decode([]byte(withMeta(in)))
 	if err != nil {
 		t.Fatalf("Decode(%s) error = %v", in, err)
 	}

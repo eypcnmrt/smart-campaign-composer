@@ -663,3 +663,15 @@ func TestComposer_withTheDemoMock(t *testing.T) {
 		}
 	}
 }
+
+func TestSegment_failedRepairKeepsTheEarlierProblems(t *testing.T) {
+	t.Parallel()
+	client := llm.NewScripted(llm.Reply(`{"conditions":[`), llm.Fail(fmt.Errorf("slow: %w", llm.ErrTimeout)))
+	_, err := New(client).Segment(t.Context(), brief)
+	if !errors.Is(err, llm.ErrTimeout) {
+		t.Fatalf("error = %v, want the timeout to stay in the chain", err)
+	}
+	if !strings.Contains(err.Error(), "repairing") {
+		t.Fatalf("error = %q, want it to say that an invalid answer was being repaired", err)
+	}
+}

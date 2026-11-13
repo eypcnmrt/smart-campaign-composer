@@ -32,7 +32,7 @@ func TestRun_smallScale(t *testing.T) {
 
 	pool := testdb.New(t)
 	w, err := worker.New(queue.New(pool), worker.NewHTTPSender(ts.URL), worker.Config{
-		RatePerSecond: 200, RequestTimeout: 250 * time.Millisecond, Lease: 5 * time.Second, MaintenanceInterval: 100 * time.Millisecond,
+		RatePerSecond: 200, RequestTimeout: 250 * time.Millisecond, Lease: 15 * time.Second, MaintenanceInterval: 100 * time.Millisecond,
 		Retry: retry.Policy{MaxAttempts: 5, BaseDelay: 20 * time.Millisecond, MaxDelay: 200 * time.Millisecond, MaxRetryAfter: time.Minute},
 	})
 	if err != nil {

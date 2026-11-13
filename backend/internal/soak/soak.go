@@ -38,7 +38,12 @@ type Config struct {
 type ChannelResult struct {
 	Channel                                   string
 	Deliveries, Sent, Failed, Skipped, Active int // Active: still queued or sending
-	Provider                                  mockprovider.ChannelStats
+	// Expected is the number of deliveries the run was set up to create for this channel.
+	Expected int
+	// KeyDifference is the number of keys that only one side has: accepted by the provider but not sent
+	// according to the database, or the other way round.
+	KeyDifference int
+	Provider      mockprovider.ChannelStats
 }
 
 // Verify returns every guarantee the run broke; an empty list means the run passed.
@@ -47,6 +52,18 @@ func Verify(rate int, results ...ChannelResult) []string {
 	for _, r := range results {
 		p := r.Provider
 		bad := func(format string, args ...any) { v = append(v, r.Channel+": "+fmt.Sprintf(format, args...)) }
+		if r.Deliveries != r.Expected {
+			bad("%d deliveries exist, the run was set up for %d", r.Deliveries, r.Expected)
+		}
+		if r.Skipped != 0 {
+			bad("%d deliveries were skipped, but every soak user has consent", r.Skipped)
+		}
+		if r.Failed*50 > r.Deliveries {
+			bad("%d of %d deliveries failed (over 2 %%); only a handful of five bad attempts in a row is expected", r.Failed, r.Deliveries)
+		}
+		if r.KeyDifference != 0 {
+			bad("%d keys are accepted by the provider but not sent in the database, or the other way round", r.KeyDifference)
+		}
 		if r.Active != 0 {
 			bad("%d deliveries are not finished", r.Active)
 		}
@@ -83,7 +100,7 @@ func Report(w io.Writer, rate int, results ...ChannelResult) {
 		fmt.Fprintf(w, "\nFAIL\n  - %s\n", strings.Join(v, "\n  - "))
 		return
 	}
-	fmt.Fprintf(w, "\nPASS: provider accepted exactly the %s messages the database calls sent (no double sends), at most %d requests in any second and channel, no early retries\n",
+	fmt.Fprintf(w, "\nPASS: the provider accepted exactly the %s messages (the same keys) the database calls sent, at most %d requests in any second and channel, no early retries\n",
 		total(results), rate)
 }
 
@@ -101,6 +118,7 @@ func Run(ctx context.Context, pool *pgxpool.Pool, cfg Config, out io.Writer) err
 	if cfg.Users < 1 || cfg.RateCap < 1 || cfg.Timeout <= 0 {
 		return fmt.Errorf("invalid soak config %+v", cfg)
 	}
+	parent := ctx
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
@@ -129,12 +147,21 @@ func Run(ctx context.Context, pool *pgxpool.Pool, cfg Config, out io.Writer) err
 		}
 		if time.Since(lastPrint) >= 5*time.Second {
 			lastPrint = time.Now()
-			counts, _ := summary(ctx, pool, id)
+			counts, err := summary(ctx, pool, id)
+			if err != nil {
+				counts = "(progress unavailable: " + err.Error() + ")"
+			}
 			fmt.Fprintf(out, "soak: %5.0fs  %s\n", time.Since(started).Seconds(), counts)
 		}
 		select {
 		case <-ctx.Done():
-			counts, _ := summary(context.WithoutCancel(ctx), pool, id)
+			counts, err := summary(context.WithoutCancel(ctx), pool, id)
+			if err != nil {
+				counts = "progress unavailable: " + err.Error()
+			}
+			if parent.Err() != nil {
+				return fmt.Errorf("soak interrupted (%s): %w", counts, parent.Err())
+			}
 			return fmt.Errorf("campaign %d did not finish within %s (%s)", id, cfg.Timeout, counts)
 		case <-tick.C:
 		}
@@ -148,6 +175,10 @@ func Run(ctx context.Context, pool *pgxpool.Pool, cfg Config, out io.Writer) err
 	for _, ch := range []string{mockprovider.ChannelSMS, mockprovider.ChannelEmail} {
 		r, err := channelResult(ctx, pool, id, ch)
 		if err != nil {
+			return err
+		}
+		r.Expected = cfg.Users
+		if r.KeyDifference, err = keyDifference(ctx, pool, id, ch, cfg.ProviderURL); err != nil {
 			return err
 		}
 		r.Provider = stats.SMS
@@ -234,6 +265,54 @@ func channelResult(ctx context.Context, pool *pgxpool.Pool, id int64, channel st
 		return r, fmt.Errorf("counting %s deliveries: %w", channel, err)
 	}
 	return r, nil
+}
+
+// keyDifference compares the keys the provider accepted for the channel with the delivery ids the database
+// calls sent, and returns the size of the symmetric difference.
+func keyDifference(ctx context.Context, pool *pgxpool.Pool, campaign int64, channel, providerURL string) (int, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(providerURL, "/")+"/accepted/"+channel, nil)
+	if err != nil {
+		return 0, fmt.Errorf("building the accepted-keys request: %w", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("reading the accepted keys: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return 0, fmt.Errorf("accepted keys answered %d", resp.StatusCode)
+	}
+	var accepted []string
+	if err := json.NewDecoder(resp.Body).Decode(&accepted); err != nil {
+		return 0, fmt.Errorf("decoding the accepted keys: %w", err)
+	}
+
+	diff := map[string]int{}
+	for _, k := range accepted {
+		diff[k]++
+	}
+	rows, err := pool.Query(ctx, `SELECT id::text FROM deliveries WHERE campaign_id = $1 AND channel = $2 AND status = 'sent'`, campaign, channel)
+	if err != nil {
+		return 0, fmt.Errorf("reading the sent deliveries: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var k string
+		if err := rows.Scan(&k); err != nil {
+			return 0, fmt.Errorf("scanning a delivery id: %w", err)
+		}
+		diff[k]--
+	}
+	if err := rows.Err(); err != nil {
+		return 0, fmt.Errorf("reading the sent deliveries: %w", err)
+	}
+	n := 0
+	for _, c := range diff {
+		if c != 0 {
+			n++
+		}
+	}
+	return n, nil
 }
 
 func fetchStats(ctx context.Context, base string) (mockprovider.Stats, error) {

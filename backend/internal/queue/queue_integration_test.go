@@ -615,3 +615,25 @@ func TestCompleteFinished(t *testing.T) {
 		})
 	}
 }
+
+func TestRecoverLeases_keepsThePreviousError(t *testing.T) {
+	ctx := context.Background()
+	pool, q, _ := enqueued(t, 3, "sms")
+	d, ok, err := q.Claim(ctx, "sms", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim = %v, %v", ok, err)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE deliveries SET lease_until = now() - interval '1 second', last_error = 'http 500' WHERE id = $1`, d.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := q.RecoverLeases(ctx, 5); err != nil {
+		t.Fatal(err)
+	}
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM deliveries WHERE id = $1`, d.ID).Scan(&lastError); err != nil {
+		t.Fatal(err)
+	}
+	if lastError != "lease expired (previous error: http 500)" {
+		t.Fatalf("last_error = %q", lastError)
+	}
+}

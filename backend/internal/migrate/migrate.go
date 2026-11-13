@@ -24,6 +24,10 @@ const lockKey int64 = 0x5343435f4d49 // "SCC_MI"
 
 var fileName = regexp.MustCompile(`^(\d{4})_([a-z0-9_]+)\.sql$`)
 
+// ErrUnknownMigration means the database has a migration that this binary does not contain, which
+// happens when an older binary is started against a newer database.
+var ErrUnknownMigration = errors.New("database is ahead of this binary")
+
 // ErrChecksum means an applied migration file was changed afterwards.
 var ErrChecksum = errors.New("applied migration was modified")
 
@@ -89,8 +93,11 @@ func Up(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]int, error) {
 		return nil, fmt.Errorf("taking migration lock: %w", err)
 	}
 	defer func() {
-		// Best effort: closing the session releases the lock anyway.
-		_, _ = conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, lockKey)
+		// Conn.Release hands a live session back to the pool, so a lock that is not released here would stay
+		// held. If unlocking fails, destroy the session: that releases the lock for certain.
+		if _, err := conn.Exec(context.WithoutCancel(ctx), `SELECT pg_advisory_unlock($1)`, lockKey); err != nil {
+			_ = conn.Hijack().Close(context.WithoutCancel(ctx))
+		}
 	}()
 
 	if _, err := conn.Exec(ctx, `CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -105,6 +112,17 @@ func Up(ctx context.Context, pool *pgxpool.Pool, fsys fs.FS) ([]int, error) {
 	applied, err := appliedChecksums(ctx, conn)
 	if err != nil {
 		return nil, err
+	}
+
+	// A database that is ahead of this binary (applied versions it has no file for) must not be used silently.
+	known := make(map[int]bool, len(migrations))
+	for _, m := range migrations {
+		known[m.Version] = true
+	}
+	for v := range applied {
+		if !known[v] {
+			return nil, fmt.Errorf("version %04d is applied but this binary has no such migration: %w", v, ErrUnknownMigration)
+		}
 	}
 
 	var done []int

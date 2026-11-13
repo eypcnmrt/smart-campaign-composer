@@ -7,6 +7,7 @@ package mockprovider
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"time"
 )
@@ -50,7 +51,7 @@ type Config struct {
 func (c Config) Validate() error {
 	rates := map[string]float64{"error rate": c.ErrorRate, "throttle rate": c.ThrottleRate, "late rate": c.LateRate}
 	for name, r := range rates {
-		if r < 0 || r > 1 {
+		if math.IsNaN(r) || r < 0 || r > 1 {
 			return fmt.Errorf("%s must be between 0 and 1, got %v", name, r)
 		}
 	}

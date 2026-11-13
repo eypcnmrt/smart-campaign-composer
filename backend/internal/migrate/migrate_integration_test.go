@@ -113,3 +113,14 @@ func TestUp_concurrentRunnersApplyOnce(t *testing.T) {
 		t.Fatalf("migration 3 was applied %d times in total, want once", applied)
 	}
 }
+
+func TestUp_refusesADatabaseAheadOfTheBinary(t *testing.T) {
+	pool := testdb.New(t)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `INSERT INTO schema_migrations (version, name, checksum) VALUES (99, 'from_the_future', 'x')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := migrate.Up(ctx, pool, migrations.FS); !errors.Is(err, migrate.ErrUnknownMigration) {
+		t.Fatalf("error = %v, want ErrUnknownMigration", err)
+	}
+}

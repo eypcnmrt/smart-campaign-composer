@@ -31,6 +31,10 @@ func AddUsers(t testing.TB, pool *pgxpool.Pool, n int) {
 			t.Fatalf("inserting user %d: %v", i, err)
 		}
 	}
+	// The ids were given explicitly: move the identity sequence past them, or the next default id collides.
+	if _, err := pool.Exec(ctx, `SELECT setval(pg_get_serial_sequence('users', 'id'), GREATEST($1::bigint, 1))`, n); err != nil {
+		t.Fatalf("advancing the user id sequence: %v", err)
+	}
 }
 
 // AddApprovedCampaign inserts an approved campaign for every user, over the given channels, and

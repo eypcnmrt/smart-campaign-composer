@@ -413,6 +413,77 @@ here when the README is written.
   start-up order. A separate project means `make soak` never touches the normal database.
 - **Alternative:** a Go test with a build tag. Easier, but it would not test the shipped binaries.
 
+## Fixed after the review
+- **Redirects were followed by the HTTP sender** (a redirected POST becomes a GET, and its final 200 would have been
+  recorded as `sent`): redirects are no longer followed and a 3xx is a permanent error.
+- A claimed delivery with unreadable campaign content now fails at once with the cause; it used to wait out its lease and
+  be retried until attempts ran out, with only "lease expired" in the row.
+- A database blip while recording a result is retried (4 tries) before the delivery is left to lease recovery;
+  `Counters.RecordErrors` counts the ones that still failed. Lease recovery keeps the last real error in `last_error`.
+- A last maintenance pass runs after the drain, so a campaign whose final sends finished during shutdown is completed.
+- `worker.Config` is validated: lease must exceed request timeout plus the database timeout, channels must be known,
+  and `retry.Policy.Validate` rejects a zero backoff or a zero Retry-After cap (which would ignore Retry-After).
+- The soak compares the provider's accepted keys with the database's sent ids key for key (`GET /accepted/{channel}`),
+  and checks the number of deliveries, zero skipped and under 2 % failed; progress errors are no longer discarded.
+- `migrate`: an unlock failure destroys the session, and a database that is ahead of the binary is refused
+  (`ErrUnknownMigration`). `db.WaitReady` fails at once on an unparseable URL. The mock provider rejects `NaN` rates.
+  `testdb` drops its database even when setup fails halfway and keeps the user id sequence in step.
+- `segment.Decode` requires `unsupported_criteria` and `explanation` (a missing one hid that part of a brief was not
+  understood); a failed repair call keeps the problems of the answer it was repairing; a stream that ends without a stop
+  reason is `ErrUnavailable`, and the SDK error stays in the chain of API errors; generated text containing U+FFFD is
+  rejected; `ANTHROPIC_FALLBACK` is parsed explicitly (a typo turns the fallback off instead of leaving it on).
+
 ## Open issues
 
-(Things that were not finished or need a human decision; one entry per issue.)
+(Things that were not finished or need a human decision; one entry per issue. The first block comes from the
+silent-failure review of the overnight session; defects that were clear-cut were fixed and are listed under
+"Fixed after the review" above.)
+
+### LLM layer (internal/llm, internal/compose)
+- **A brief with nothing expressible becomes a match-all rule.** The prompt tells the model to emit `language in [tr, en]`
+  when nothing can be said, and the validator accepts it (mock mode does the same). The only signal is
+  `unsupported_criteria`. Needs a product decision before the API exists: a flag on `SegmentResult`
+  (for example `MatchesEveryone`), or a compose-level rejection of that shape, and an approval step that requires the
+  marketer to acknowledge a non-empty `unsupported_criteria`. (Severity: high, design.)
+- **Without a key the system silently serves the demo mock** (`llm.FromEnv`). It is the documented behaviour (PLAN
+  section 1, "Mock LLM" badge), but a key that fails to load looks like a working system. When the API is wired: log a
+  warning at start-up and consider an explicit `LLM_MODE=mock` opt-in.
+- **`compose.Content` emits no terminal event and calls `onEvent` inside the SDK read loop.** After a final error the text
+  already streamed stays on screen, and a blocking SSE writer stalls the provider read. The API layer must send a
+  failure/discard event and keep `onEvent` non-blocking (buffer, cancel on overflow).
+- **No task-level deadline in compose**: up to 3 repair attempts times 3 HTTP tries is 9 requests, about 12 minutes in the
+  worst case for content. Add a per-task timeout when the API calls it.
+- Duplicate JSON keys resolve to last-wins in `segment.Decode` and `content.Parse` (the preview extractor rejects them),
+  and the stored snapshot is the raw model text, not a re-encoding of the validated value.
+- The demo mock drops or inverts some criteria: an amount without a direction ("500 TL altında") produces no condition and
+  no `unsupported_criteria` entry, "son 400 gün" becomes 30 days, "sepete ürün eklemeyen" selects people who did add to
+  cart. The mocks also return a bare `ctx.Err()` where the real client returns `ErrTimeout`. Demo-only, low.
+- Low: an empty `end_turn` answer costs a repair round instead of its own error; `model_context_window_exceeded` is
+  reported as `ErrMaxTokens` (the remedy is a shorter prompt, not a larger limit); `RefusalError.Error()` omits the
+  provider's explanation; an error that is not an API error (for example a local schema-marshal failure) is classed
+  `ErrUnavailable` and would be retried; a blank city renders as "Türkiye" inside prose.
+
+### Worker, queue and operations
+- **The rate cap is per worker process.** Two workers allow twice the cap at the provider. PLAN assumption 9 says one
+  instance; a shared limiter is out of scope. The compose file runs exactly one worker.
+- **The idempotency key is the bare delivery id.** If the database is restored or reset while a long-lived provider keeps
+  its memory, ids repeat and new messages are treated as duplicates (and recorded as `sent`). Adding the campaign id to
+  the key costs nothing but changes every test that expects key = id; left for a quiet moment.
+- **A lease that expires on the confirmation attempt (a worker killed mid-send) fails the delivery**, although the provider
+  may have accepted the message. Accepted: there is no further information to confirm with. The `soak` would show
+  it as a key difference.
+- **The retry window is short** (five attempts span about 7-15 s plus request time). A provider outage longer than that, or
+  a wrong `PROVIDER_URL` (not validated at start-up; a URL without a scheme is classed transient), sends every delivery to
+  `failed` for good. A circuit breaker that parks `queued` rows while the provider is down would be the real fix.
+- `composer api` is still a stub that exits 0, which a restart policy or healthcheck would read as a finished healthy
+  service. It should exit non-zero until implemented (nothing in compose runs it yet).
+- Low: `Finish` reports every "no row updated" as a lost lease (it may also be a deleted campaign); `seed` treats a
+  conflict with an unrelated row as "already seeded"; the mock provider counts a request whose client disconnected during
+  its delay in `requests` but in no outcome, and its `arrivals` slice grows without bound; the soak leaves users with
+  `total_orders = 1,000,000` in the database it runs against (the compose soak project is thrown away afterwards).
+
+### Environment
+- The guard test cases with Windows drive paths run only on Windows (see "Docker and the test commands"). The guard has no
+  Linux counterpart for them.
+- Nothing was blocked by a hook in a way that needs a dotenv change: the optional compose settings were added to
+  `.env.example` as comments; no variable is required.

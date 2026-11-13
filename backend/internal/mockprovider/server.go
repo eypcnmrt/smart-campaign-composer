@@ -103,6 +103,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /sms", s.send(ChannelSMS))
 	mux.HandleFunc("POST /email", s.send(ChannelEmail))
 	mux.HandleFunc("GET /stats", s.stats)
+	mux.HandleFunc("GET /accepted/{channel}", s.accepted)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return mux
 }
@@ -139,6 +140,21 @@ func (s *Server) snapshot(channel string) ChannelStats {
 	out := ch.stats
 	out.MaxRequestsPerSecond = maxInWindow(ch.arrivals, time.Second)
 	return out
+}
+
+// accepted serves GET /accepted/{channel}: the accepted idempotency keys as a JSON array. A debugging aid for the
+// soak run, which compares them with the database key by key.
+func (s *Server) accepted(w http.ResponseWriter, r *http.Request) {
+	channel := r.PathValue("channel")
+	if _, ok := s.channels[channel]; !ok {
+		writeError(w, http.StatusNotFound, "unknown channel")
+		return
+	}
+	keys := s.AcceptedKeys(channel)
+	if keys == nil {
+		keys = []string{}
+	}
+	writeJSON(w, http.StatusOK, keys)
 }
 
 func (s *Server) stats(w http.ResponseWriter, _ *http.Request) {

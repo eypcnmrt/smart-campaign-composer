@@ -24,7 +24,10 @@ func TestNew_validatesTheConfig(t *testing.T) {
 		{"defaults", Config{}, false},
 		{"lease shorter than the request timeout", Config{RequestTimeout: 10 * time.Second, Lease: 5 * time.Second}, true},
 		{"lease equal to the request timeout", Config{RequestTimeout: 10 * time.Second, Lease: 10 * time.Second}, true},
-		{"lease just longer", Config{RequestTimeout: 10 * time.Second, Lease: 11 * time.Second}, false},
+		{"lease just too short for the result write", Config{RequestTimeout: 10 * time.Second, Lease: 20 * time.Second}, true},
+		{"lease long enough", Config{RequestTimeout: 10 * time.Second, Lease: 21 * time.Second}, false},
+		{"unknown channel", Config{Channels: []string{"sms", "SMS"}}, true},
+		{"retry policy without a Retry-After cap", Config{Retry: retry.Policy{MaxAttempts: 5, BaseDelay: time.Second, MaxDelay: time.Minute}}, true},
 		{"negative in-flight limit", Config{MaxInFlight: -1}, true},
 	}
 	for _, tt := range tests {
@@ -163,6 +166,35 @@ func TestHTTPSender_Send(t *testing.T) {
 				if len(got.body) != len(tt.wantBody) {
 					t.Fatalf("body = %v, want exactly %v", got.body, tt.wantBody)
 				}
+			}
+		})
+	}
+}
+
+func TestHTTPSender_Send_doesNotFollowRedirects(t *testing.T) {
+	t.Parallel()
+	for _, status := range []int{http.StatusMovedPermanently, http.StatusFound, http.StatusTemporaryRedirect, http.StatusPermanentRedirect} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			t.Parallel()
+			landed := make(chan struct{}, 1)
+			target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				landed <- struct{}{}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer target.Close()
+			redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				http.Redirect(w, r, target.URL+"/sms", status)
+			}))
+			defer redirector.Close()
+
+			res := NewHTTPSender(redirector.URL).Send(context.Background(), SendRequest{Channel: "sms", Key: "1", To: "x", Body: "y"})
+			if res.Kind != retry.Permanent || res.Status != status {
+				t.Fatalf("result = %+v, want a permanent error with status %d, never a delivery", res, status)
+			}
+			select {
+			case <-landed:
+				t.Fatal("the redirect was followed")
+			default:
 			}
 		})
 	}

@@ -41,6 +41,9 @@ func checkField(path, text string, limit int) []FieldError {
 		return []FieldError{{Path: path, Msg: "must not be empty"}}
 	}
 	var errs []FieldError
+	if strings.ContainsRune(text, utf8.RuneError) {
+		errs = append(errs, FieldError{Path: path, Msg: "contains a replacement character (U+FFFD), the text was damaged; write it again without it"})
+	}
 	if n := utf8.RuneCountInString(text); n > limit {
 		errs = append(errs, FieldError{Path: path, Msg: fmt.Sprintf("is %d characters long; the limit is %d", n, limit)})
 	}

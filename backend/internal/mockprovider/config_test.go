@@ -62,3 +62,12 @@ func TestConfigFromEnv(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigFromEnv_rejectsNaN(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{EnvErrorRate, EnvThrottleRate, EnvLateRate} {
+		if _, err := ConfigFromEnv(env(map[string]string{name: "NaN"})); err == nil {
+			t.Errorf("%s=NaN was accepted; every comparison with NaN is false, so the rate would silently be off", name)
+		}
+	}
+}

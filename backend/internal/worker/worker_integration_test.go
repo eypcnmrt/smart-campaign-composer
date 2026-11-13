@@ -180,7 +180,7 @@ func TestWorker_exactlyOnceUnderChaos(t *testing.T) {
 	})
 	id := e.campaign(t, 400, "sms", "email") // 800 deliveries
 	w, stop := e.start(t, worker.Config{
-		RatePerSecond: 300, RequestTimeout: 300 * time.Millisecond, Lease: 5 * time.Second,
+		RatePerSecond: 300, RequestTimeout: 300 * time.Millisecond, Lease: 15 * time.Second,
 		MaintenanceInterval: 100 * time.Millisecond, Retry: fastRetry(),
 	})
 
@@ -509,7 +509,7 @@ func TestWorker_gracefulShutdown(t *testing.T) {
 func TestWorker_timeoutOfADeliveredMessageIsNotResent(t *testing.T) {
 	e := newEnv(t, mockprovider.Config{LateRate: 1, LateDelay: 600 * time.Millisecond})
 	id := e.campaign(t, 30, "sms")
-	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 5 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
 	e.waitFinished(t, id, 60*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -588,7 +588,7 @@ func TestWorker_timeoutOnTheLastAttemptIsConfirmed(t *testing.T) {
 	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
 		t.Fatal(err)
 	}
-	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 5 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
 	status := e.waitFinished(t, id, 60*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -623,5 +623,34 @@ func TestWorker_serverErrorOnTheLastAttemptFailsWithoutConfirmation(t *testing.T
 	}
 	if n := e.count(t, "SELECT count(*) FROM deliveries WHERE status = 'failed' AND attempts = 5"); n != 3 {
 		t.Fatalf("%d deliveries failed at attempt 5, want 3; %s", n, e.summary(t))
+	}
+}
+
+// A campaign whose stored content cannot be read must fail its deliveries at once and say why, not wait for
+// leases to expire again and again.
+func TestWorker_unusableContentFailsWithItsCause(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 4, "sms")
+	if _, err := e.pool.Exec(context.Background(), `UPDATE campaigns SET content = '[1, 2]'::jsonb WHERE id = $1`, id); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, stop := e.start(t, worker.Config{Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
+	status := e.waitFinished(t, id, 30*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed_with_failures" {
+		t.Fatalf("campaign = %q", status)
+	}
+	if time.Since(started) > 20*time.Second {
+		t.Fatalf("took %v: the deliveries must fail at once, not after lease expiry", time.Since(started))
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'failed' AND attempts = 1 AND last_error LIKE 'unusable campaign content%'`); n != 4 {
+		t.Fatalf("%d deliveries failed with the cause, want 4; %s", n, e.summary(t))
+	}
+	if got := e.provider.Stats().SMS.Requests; got != 0 {
+		t.Fatalf("the provider got %d requests, want none", got)
 	}
 }

@@ -264,3 +264,30 @@ func TestDescribe_timeouts(t *testing.T) {
 }
 
 func fmtErr(err error) error { return errors.Join(errors.New("post"), err) }
+
+func TestPolicy_Validate(t *testing.T) {
+	t.Parallel()
+	good := DefaultPolicy()
+	if err := good.Validate(); err != nil {
+		t.Fatalf("default policy: %v", err)
+	}
+	tests := []struct {
+		name   string
+		change func(*Policy)
+	}{
+		{"no attempts", func(p *Policy) { p.MaxAttempts = 0 }},
+		{"zero base delay would retry at once", func(p *Policy) { p.BaseDelay = 0 }},
+		{"max delay below base", func(p *Policy) { p.MaxDelay = p.BaseDelay - 1 }},
+		{"zero Retry-After cap would ignore Retry-After", func(p *Policy) { p.MaxRetryAfter = 0 }},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			p := good
+			tt.change(&p)
+			if err := p.Validate(); err == nil {
+				t.Fatalf("policy %+v was accepted", p)
+			}
+		})
+	}
+}

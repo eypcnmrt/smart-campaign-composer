@@ -58,14 +58,22 @@ func (d *decoder) rule(top map[string]json.RawMessage) Rule {
 			r.Conditions = append(r.Conditions, d.node(elem("conditions", i), item, false))
 		}
 	}
-	if raw, ok := top["unsupported_criteria"]; ok {
+	// Both are required: a missing unsupported_criteria would hide that part of the brief was not
+	// understood, and a missing explanation leaves the marketer with nothing to check the rule against.
+	if raw, ok := top["unsupported_criteria"]; !ok || isNull(raw) {
+		d.add("unsupported_criteria", "is required (use an empty array when nothing is unsupported)")
+	} else {
 		d.unmarshal("unsupported_criteria", raw, &r.UnsupportedCriteria, "an array of strings")
 	}
-	if raw, ok := top["explanation"]; ok {
+	if raw, ok := top["explanation"]; !ok || isNull(raw) {
+		d.add("explanation", "is required")
+	} else {
 		d.unmarshal("explanation", raw, &r.Explanation, "a string")
 	}
 	return r
 }
+
+func isNull(raw json.RawMessage) bool { return bytes.Equal(bytes.TrimSpace(raw), []byte("null")) }
 
 // node decodes one condition. It never returns nil for an object with a known
 // type; problems are recorded in d.errs and the caller discards the result.

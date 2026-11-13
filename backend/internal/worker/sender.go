@@ -42,7 +42,13 @@ func NewHTTPSender(baseURL string) *HTTPSender {
 	// Two channels at about 100 requests per second each: keep connections around instead of re-dialling.
 	transport.MaxIdleConns = 400
 	transport.MaxIdleConnsPerHost = 400
-	return &HTTPSender{base: strings.TrimRight(baseURL, "/"), client: &http.Client{Transport: transport}, now: time.Now}
+	client := &http.Client{
+		Transport: transport,
+		// A redirect must not be followed: Go would turn a redirected POST into a body-less GET and report the
+		// final 200 as a delivery. The 3xx itself is returned and classified as a permanent error.
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	return &HTTPSender{base: strings.TrimRight(baseURL, "/"), client: client, now: time.Now}
 }
 
 // Send implements Sender.

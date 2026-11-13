@@ -371,3 +371,30 @@ func TestSend_delayHonoursClientCancel(t *testing.T) {
 		t.Fatal("expected the client to time out")
 	}
 }
+
+func TestAcceptedEndpoint(t *testing.T) {
+	t.Parallel()
+	_, ts := newServer(t, Config{})
+	post(t, ts.URL, "/sms", "b-key", smsBody)
+	post(t, ts.URL, "/sms", "a-key", smsBody)
+
+	get := func(path string) (int, []string) {
+		resp, err := http.Get(ts.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var keys []string
+		_ = json.NewDecoder(resp.Body).Decode(&keys)
+		return resp.StatusCode, keys
+	}
+	if status, keys := get("/accepted/sms"); status != 200 || len(keys) != 2 || keys[0] != "a-key" || keys[1] != "b-key" {
+		t.Fatalf("sms: status %d, keys %v, want the two keys sorted", status, keys)
+	}
+	if status, keys := get("/accepted/email"); status != 200 || keys == nil || len(keys) != 0 {
+		t.Fatalf("email: status %d, keys %#v, want an empty array", status, keys)
+	}
+	if status, _ := get("/accepted/fax"); status != 404 {
+		t.Fatalf("unknown channel: status %d, want 404", status)
+	}
+}

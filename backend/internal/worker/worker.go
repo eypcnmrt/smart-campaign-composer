@@ -97,8 +97,18 @@ func (c Config) withDefaults() Config {
 }
 
 func (c Config) validate() error {
-	if c.Lease <= c.RequestTimeout {
-		return fmt.Errorf("lease (%v) must be longer than the request timeout (%v)", c.Lease, c.RequestTimeout)
+	// The lease must outlive the request AND the write of its result, or a normal result arrives after the
+	// lease expired and is dropped, and the message is sent again.
+	if c.Lease <= c.RequestTimeout+dbTimeout {
+		return fmt.Errorf("lease (%v) must be longer than the request timeout (%v) plus the database timeout (%v)", c.Lease, c.RequestTimeout, dbTimeout)
+	}
+	for _, ch := range c.Channels {
+		if ch != "sms" && ch != "email" {
+			return fmt.Errorf("unknown channel %q (want sms or email)", ch)
+		}
+	}
+	if err := c.Retry.Validate(); err != nil {
+		return fmt.Errorf("retry policy: %w", err)
 	}
 	if c.MaxInFlight < 1 {
 		return errors.New("max in flight must be at least 1")
@@ -109,6 +119,9 @@ func (c Config) validate() error {
 // Counters are totals since the worker was created.
 type Counters struct {
 	Sent, Retried, Failed, Skipped, LeaseLost int64
+	// RecordErrors counts outcomes that could not be written to the database even after retrying; the
+	// deliveries concerned are picked up again when their lease expires.
+	RecordErrors int64
 }
 
 // Worker is the dispatcher. Create it with New and run it with Run.
@@ -117,7 +130,7 @@ type Worker struct {
 	q      *queue.Queue
 	sender Sender
 
-	sent, retried, failed, skipped, leaseLost atomic.Int64
+	sent, retried, failed, skipped, leaseLost, recordErrors atomic.Int64
 }
 
 // New returns a worker.
@@ -133,12 +146,15 @@ func New(q *queue.Queue, sender Sender, cfg Config) (*Worker, error) {
 func (w *Worker) Counters() Counters {
 	return Counters{
 		Sent: w.sent.Load(), Retried: w.retried.Load(), Failed: w.failed.Load(),
-		Skipped: w.skipped.Load(), LeaseLost: w.leaseLost.Load(),
+		Skipped: w.skipped.Load(), LeaseLost: w.leaseLost.Load(), RecordErrors: w.recordErrors.Load(),
 	}
 }
 
 // dbTimeout bounds every queue call; they are short statements.
 const dbTimeout = 10 * time.Second
+
+// recordTries is how often the outcome of a send is written before the worker leaves it to lease recovery.
+const recordTries = 4
 
 // Run serves until ctx ends and every started send has been recorded. It returns an error only for a
 // setup problem; failures while running are logged and retried.
@@ -160,6 +176,9 @@ func (w *Worker) Run(ctx context.Context) error {
 	}
 	loops.Wait() // no new sends can start after this
 	sends.Wait() // let the ones in flight finish and record their outcome
+	// The maintenance loop stopped before the last sends were recorded; one more pass completes a campaign
+	// whose final deliveries were in flight at shutdown.
+	w.maintainOnce(ctx)
 	return nil
 }
 
@@ -192,9 +211,14 @@ func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Li
 			w.pause(ctx, time.Second)
 			continue
 		case err != nil:
-			// Claimed but unusable (corrupt content): the lease expires and recovery handles it.
-			release()
+			// Claimed but unusable (corrupt campaign content). Waiting for the lease to expire would repeat this
+			// for every attempt and leave a misleading "lease expired" in the row, so fail it now with the cause.
 			log.Error("claimed delivery is unusable", "delivery", d.ID, "err", err)
+			sends.Go(func() {
+				defer release()
+				w.record(context.WithoutCancel(ctx), log.With("delivery", d.ID), d,
+					queue.Outcome{Status: queue.StatusFailed, Reason: "unusable campaign content: " + err.Error()}, &w.failed)
+			})
 			continue
 		case !ok:
 			release()
@@ -239,15 +263,26 @@ func (w *Worker) process(ctx context.Context, d queue.Delivery) {
 // record writes the outcome. A lost lease is expected now and then and harmless (the provider
 // de-duplicates); any other error leaves the delivery in sending, and its lease expiry will requeue it.
 func (w *Worker) record(ctx context.Context, log *slog.Logger, d queue.Delivery, o queue.Outcome, counter *atomic.Int64) {
-	ctx, cancel := context.WithTimeout(ctx, dbTimeout)
-	defer cancel()
-	switch err := w.q.Finish(ctx, d, o); {
+	var err error
+	for try := 1; try <= recordTries; try++ {
+		attemptCtx, cancel := context.WithTimeout(ctx, dbTimeout)
+		err = w.q.Finish(attemptCtx, d, o)
+		cancel()
+		if err == nil || errors.Is(err, queue.ErrLeaseLost) {
+			break
+		}
+		// A database blip must not cost the delivery an attempt: the provider may already have it.
+		log.Warn("recording the outcome failed, trying again", "outcome", o.Status, "try", try, "err", err)
+		w.pause(ctx, time.Duration(try)*500*time.Millisecond)
+	}
+	switch {
 	case err == nil:
 		counter.Add(1)
 	case errors.Is(err, queue.ErrLeaseLost):
 		w.leaseLost.Add(1)
 		log.Warn("result dropped, the lease was lost", "outcome", o.Status)
 	default:
+		w.recordErrors.Add(1)
 		log.Error("recording the outcome failed; the lease will expire and the delivery will be retried", "outcome", o.Status, "err", err)
 	}
 }

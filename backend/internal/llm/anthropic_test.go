@@ -14,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/anthropics/anthropic-sdk-go/v2"
+
 	"smartcampaign/internal/streamjson"
 )
 
@@ -903,5 +905,13 @@ func TestRetryAfter(t *testing.T) {
 				t.Errorf("retryAfter() = %s, want between %s and %s", got, tt.min, tt.max)
 			}
 		})
+	}
+}
+
+func TestResult_streamEndedWithoutStopReason(t *testing.T) {
+	t.Parallel()
+	_, err := result(&anthropic.BetaMessage{})
+	if !errors.Is(err, ErrUnavailable) || errors.Is(err, ErrUnexpectedStop) {
+		t.Fatalf("error = %v, want ErrUnavailable (a cut connection), not a model decision", err)
 	}
 }

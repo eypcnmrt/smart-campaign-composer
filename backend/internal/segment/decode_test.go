@@ -46,7 +46,7 @@ func TestDecode(t *testing.T) {
 
 func TestDecode_keepsNumbersAsText(t *testing.T) {
 	t.Parallel()
-	r, err := Decode([]byte(`{"conditions":[{"type":"attribute","field":"total_spent","op":"gt","value":1500.50}]}`))
+	r, err := Decode([]byte(withMeta(`{"conditions":[{"type":"attribute","field":"total_spent","op":"gt","value":1500.50}]}`)))
 	if err != nil {
 		t.Fatalf("Decode() error = %v", err)
 	}
@@ -172,7 +172,7 @@ func TestDecode_structuralErrors(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := Decode([]byte(tt.in))
+			_, err := Decode([]byte(withMeta(tt.in)))
 			verrs, ok := errors.AsType[ValidationErrors](err)
 			if !ok {
 				t.Fatalf("Decode() error = %v, want ValidationErrors", err)
@@ -205,6 +205,40 @@ func TestDecode_malformedJSON(t *testing.T) {
 			_, err := Decode([]byte(tt.in))
 			if !errors.Is(err, ErrMalformedJSON) {
 				t.Errorf("Decode(%q) error = %v, want ErrMalformedJSON", tt.in, err)
+			}
+		})
+	}
+}
+
+func TestDecode_requiresUnsupportedCriteriaAndExplanation(t *testing.T) {
+	t.Parallel()
+	const cond = `{"type":"attribute","field":"city","op":"eq","value":"Ankara"}`
+	tests := []struct {
+		name string
+		in   string
+		want []FieldError
+	}{
+		{"both given", `{"conditions":[` + cond + `],"unsupported_criteria":[],"explanation":"x"}`, nil},
+		{"unsupported criteria missing", `{"conditions":[` + cond + `],"explanation":"x"}`,
+			[]FieldError{{"unsupported_criteria", "is required (use an empty array when nothing is unsupported)"}}},
+		{"explanation missing", `{"conditions":[` + cond + `],"unsupported_criteria":[]}`,
+			[]FieldError{{"explanation", "is required"}}},
+		{"null is not an answer", `{"conditions":[` + cond + `],"unsupported_criteria":null,"explanation":null}`,
+			[]FieldError{{"unsupported_criteria", "is required (use an empty array when nothing is unsupported)"}, {"explanation", "is required"}}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := Decode([]byte(tt.in))
+			if tt.want == nil {
+				if err != nil {
+					t.Fatalf("Decode() error = %v", err)
+				}
+				return
+			}
+			verrs, ok := errors.AsType[ValidationErrors](err)
+			if !ok || !slices.Equal([]FieldError(verrs), tt.want) {
+				t.Fatalf("Decode() = %v, want %v", err, tt.want)
 			}
 		})
 	}

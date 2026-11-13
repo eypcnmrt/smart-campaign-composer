@@ -152,7 +152,7 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, onText func(string)
 	for stream.Next() {
 		event := stream.Current()
 		if err := msg.Accumulate(event); err != nil {
-			return Response{}, fmt.Errorf("anthropic: assemble streamed message: %w", err)
+			return Response{}, fmt.Errorf("anthropic: assemble streamed message: %w: %w", ErrUnavailable, err)
 		}
 		delta, ok := event.AsAny().(anthropic.BetaRawContentBlockDeltaEvent)
 		if !ok || onText == nil {
@@ -179,6 +179,9 @@ func result(msg *anthropic.BetaMessage) (Response, error) {
 			Category:    string(msg.StopDetails.Category),
 			Explanation: msg.StopDetails.Explanation,
 		}
+	case "":
+		// The stream ended before the message said why: a cut connection, not a decision of the model.
+		return Response{}, fmt.Errorf("anthropic: the stream ended before a stop reason: %w", ErrUnavailable)
 	case anthropic.BetaStopReasonMaxTokens, anthropic.BetaStopReasonModelContextWindowExceeded:
 		return Response{}, fmt.Errorf("anthropic: stop reason %q after %d output tokens: %w",
 			msg.StopReason, msg.Usage.OutputTokens, ErrMaxTokens)
@@ -216,13 +219,13 @@ func mapError(err error) error {
 		kind := string(apiErr.Type())
 		switch {
 		case apiErr.StatusCode == http.StatusTooManyRequests || kind == "rate_limit_error":
-			return fmt.Errorf("%s: %w", detail, &RateLimitError{RetryAfter: retryAfter(apiErr.Response)})
+			return fmt.Errorf("%s: %w: %w", detail, &RateLimitError{RetryAfter: retryAfter(apiErr.Response)}, apiErr)
 		case apiErr.StatusCode == http.StatusRequestTimeout || kind == "timeout_error":
-			return fmt.Errorf("%s: %w", detail, ErrTimeout)
+			return fmt.Errorf("%s: %w: %w", detail, ErrTimeout, apiErr)
 		case apiErr.StatusCode >= 500 || kind == "overloaded_error" || kind == "api_error": // 529 is overloaded
-			return fmt.Errorf("%s: %w", detail, ErrUnavailable)
+			return fmt.Errorf("%s: %w: %w", detail, ErrUnavailable, apiErr)
 		default:
-			return fmt.Errorf("%s: %w", detail, ErrBadRequest)
+			return fmt.Errorf("%s: %w: %w", detail, ErrBadRequest, apiErr)
 		}
 	}
 	if errors.Is(err, context.Canceled) {

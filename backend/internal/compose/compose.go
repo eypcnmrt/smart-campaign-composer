@@ -239,6 +239,11 @@ func repair[T any](
 		}
 		text, err := ask(ctx, prev)
 		if err != nil {
+			if prev != nil {
+				// The model had already given an answer that failed validation; say so, or the caller sees only
+				// the transport error and loses the reason a repair was needed.
+				return zero, attempt, fmt.Errorf("%s: attempt %d (repairing: %s): %w", stage, attempt, strings.Join(prev.problems, "; "), err)
+			}
 			return zero, attempt, fmt.Errorf("%s: attempt %d: %w", stage, attempt, err)
 		}
 		value, problems := check(text)

@@ -3,11 +3,16 @@ package db
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrInvalidURL means the database URL cannot be parsed. The text of the parse error is left out because
+// it can echo parts of the URL.
+var ErrInvalidURL = errors.New("parsing database url: invalid format")
 
 // Options tunes the pool. The zero value gives the defaults below.
 type Options struct {
@@ -20,7 +25,7 @@ func Open(ctx context.Context, url string, opts Options) (*pgxpool.Pool, error) 
 	cfg, err := pgxpool.ParseConfig(url)
 	if err != nil {
 		// pgx error text can echo parts of the URL; keep it out of the message.
-		return nil, fmt.Errorf("parsing database url: invalid format")
+		return nil, ErrInvalidURL
 	}
 	cfg.MaxConns = 20
 	if opts.MaxConns > 0 {
@@ -48,6 +53,9 @@ func WaitReady(ctx context.Context, url string, opts Options) (*pgxpool.Pool, er
 		pool, err := Open(ctx, url, opts)
 		if err == nil {
 			return pool, nil
+		}
+		if errors.Is(err, ErrInvalidURL) {
+			return nil, err // waiting will not fix it
 		}
 		select {
 		case <-ctx.Done():
