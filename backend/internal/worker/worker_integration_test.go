@@ -1,0 +1,580 @@
+//go:build integration
+
+package worker_test
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"slices"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"smartcampaign/internal/mockprovider"
+	"smartcampaign/internal/queue"
+	"smartcampaign/internal/retry"
+	"smartcampaign/internal/testdb"
+	"smartcampaign/internal/worker"
+)
+
+// A test environment: a migrated database, a mock provider in this process and a queue.
+type env struct {
+	pool     *pgxpool.Pool
+	q        *queue.Queue
+	provider *mockprovider.Server
+	url      string
+}
+
+func newEnv(t *testing.T, cfg mockprovider.Config) *env {
+	t.Helper()
+	provider, err := mockprovider.New(cfg, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(provider.Handler())
+	t.Cleanup(ts.Close)
+	pool := testdb.New(t)
+	return &env{pool: pool, q: queue.New(pool), provider: provider, url: ts.URL}
+}
+
+// campaign adds users 1..n and an approved campaign over the channels, and enqueues it.
+func (e *env) campaign(t *testing.T, users int, channels ...string) int64 {
+	t.Helper()
+	testdb.AddUsers(t, e.pool, users)
+	id := testdb.AddApprovedCampaign(t, e.pool, channels...)
+	if _, err := e.q.Enqueue(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// fastRetry keeps the backoff short so chaos tests finish quickly; the attempt limit is the real one.
+func fastRetry() retry.Policy {
+	return retry.Policy{MaxAttempts: 5, BaseDelay: 20 * time.Millisecond, MaxDelay: 200 * time.Millisecond, MaxRetryAfter: time.Minute}
+}
+
+// start runs a worker until the returned stop function is called, which waits for Run to return.
+func (e *env) start(t *testing.T, cfg worker.Config) (w *worker.Worker, stop func() error) {
+	t.Helper()
+	w, err := worker.New(e.q, worker.NewHTTPSender(e.url), cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	var stopped bool
+	stop = func() error {
+		if stopped {
+			return nil
+		}
+		stopped = true
+		cancel()
+		select {
+		case err := <-done:
+			return err
+		case <-time.After(30 * time.Second):
+			t.Error("worker did not stop within 30s of the cancel")
+			return nil
+		}
+	}
+	t.Cleanup(func() { _ = stop() })
+	return w, stop
+}
+
+// waitFinished waits until the campaign is completed (with or without failures) and returns its status.
+func (e *env) waitFinished(t *testing.T, id int64, within time.Duration) string {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	var status string
+	for time.Now().Before(deadline) {
+		if err := e.pool.QueryRow(context.Background(), `SELECT status FROM campaigns WHERE id = $1`, id).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if strings.HasPrefix(status, "completed") {
+			return status
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Fatalf("campaign %d is still %q after %v; deliveries: %s", id, status, within, e.summary(t))
+	return ""
+}
+
+// summary describes the delivery states for failure messages.
+func (e *env) summary(t *testing.T) string {
+	t.Helper()
+	rows, err := e.pool.Query(context.Background(), `SELECT channel, status, count(*) FROM deliveries GROUP BY 1, 2 ORDER BY 1, 2`)
+	if err != nil {
+		return err.Error()
+	}
+	defer rows.Close()
+	var parts []string
+	for rows.Next() {
+		var ch, st string
+		var n int
+		if err := rows.Scan(&ch, &st, &n); err != nil {
+			return err.Error()
+		}
+		parts = append(parts, fmt.Sprintf("%s/%s=%d", ch, st, n))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (e *env) count(t *testing.T, sql string, args ...any) int {
+	t.Helper()
+	var n int
+	if err := e.pool.QueryRow(context.Background(), sql, args...).Scan(&n); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+	return n
+}
+
+// ids returns the sorted delivery ids of the channel in the status, as the strings used for idempotency keys.
+func (e *env) ids(t *testing.T, channel, status string) []string {
+	t.Helper()
+	rows, err := e.pool.Query(context.Background(), `SELECT id FROM deliveries WHERE channel = $1 AND status = $2`, channel, status)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		out = append(out, strconv.FormatInt(id, 10))
+	}
+	slices.Sort(out)
+	return out
+}
+
+// requireProviderMatchesDatabase is the central claim: what the provider accepted is exactly what the
+// database calls sent, key for key, and no key was accepted twice.
+func (e *env) requireProviderMatchesDatabase(t *testing.T) {
+	t.Helper()
+	stats := e.provider.Stats()
+	for channel, st := range map[string]mockprovider.ChannelStats{"sms": stats.SMS, "email": stats.Email} {
+		sent := e.ids(t, channel, "sent")
+		accepted := e.provider.AcceptedKeys(channel)
+		if st.UniqueAccepted != len(sent) {
+			t.Errorf("%s: provider accepted %d unique keys, the database has %d sent", channel, st.UniqueAccepted, len(sent))
+		}
+		if !slices.Equal(accepted, sent) {
+			t.Errorf("%s: accepted keys differ from sent delivery ids (provider %d, database %d)", channel, len(accepted), len(sent))
+		}
+	}
+}
+
+func TestWorker_exactlyOnceUnderChaos(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{
+		Seed: 11, DelayMin: time.Millisecond, DelayMax: 8 * time.Millisecond,
+		ErrorRate: 0.12, ThrottleRate: 0.10, RetryAfter: time.Second,
+		LateRate: 0.05, LateDelay: 700 * time.Millisecond,
+	})
+	id := e.campaign(t, 400, "sms", "email") // 800 deliveries
+	w, stop := e.start(t, worker.Config{
+		RatePerSecond: 300, RequestTimeout: 300 * time.Millisecond, Lease: 5 * time.Second,
+		MaintenanceInterval: 100 * time.Millisecond, Retry: fastRetry(),
+	})
+
+	status := e.waitFinished(t, id, 90*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	sent := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`)
+	failed := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'failed'`)
+	if sent+failed != 800 {
+		t.Fatalf("sent %d + failed %d != 800; %s", sent, failed, e.summary(t))
+	}
+	if wantFailures := failed > 0; wantFailures != (status == "completed_with_failures") {
+		t.Fatalf("campaign is %q with %d failed deliveries", status, failed)
+	}
+	if failed > 800/50 { // five attempts at about a 22 % rejection rate: well under 1 %
+		t.Fatalf("%d deliveries failed, far more than five bad attempts in a row would explain", failed)
+	}
+	e.requireProviderMatchesDatabase(t)
+
+	stats := e.provider.Stats()
+	for channel, st := range map[string]mockprovider.ChannelStats{"sms": stats.SMS, "email": stats.Email} {
+		if st.Errors500 == 0 || st.Throttled429 == 0 || st.LateResponses == 0 {
+			t.Errorf("%s: the chaos did not happen (%+v); the test proves nothing", channel, st)
+		}
+		// a message accepted behind a client timeout must come back as a duplicate, not as a second message
+		if st.DuplicateKeys < st.LateResponses {
+			t.Errorf("%s: %d late replies but only %d duplicate keys; retries after a timeout are missing", channel, st.LateResponses, st.DuplicateKeys)
+		}
+		if st.RetryAfterViolations != 0 {
+			t.Errorf("%s: %d retries came before their Retry-After", channel, st.RetryAfterViolations)
+		}
+	}
+	if c := w.Counters(); c.Sent != int64(sent) || c.Failed != int64(failed) || c.Retried == 0 {
+		t.Errorf("worker counters = %+v, database says sent %d failed %d", c, sent, failed)
+	}
+}
+
+func TestWorker_perChannelRateStaysUnderTheCap(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{DelayMin: time.Millisecond, DelayMax: 4 * time.Millisecond})
+	id := e.campaign(t, 350, "sms", "email")
+	started := time.Now()
+	_, stop := e.start(t, worker.Config{}) // defaults: 100 per second and channel, burst 1
+
+	e.waitFinished(t, id, 60*time.Second)
+	elapsed := time.Since(started)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	stats := e.provider.Stats()
+	for channel, st := range map[string]mockprovider.ChannelStats{"sms": stats.SMS, "email": stats.Email} {
+		if st.MaxRequestsPerSecond > 100 {
+			t.Errorf("%s: %d requests arrived within one second, the cap is 100", channel, st.MaxRequestsPerSecond)
+		}
+		if st.MaxRequestsPerSecond < 80 {
+			t.Errorf("%s: busiest second had only %d requests; the worker is not using its budget", channel, st.MaxRequestsPerSecond)
+		}
+		if st.UniqueAccepted != 350 {
+			t.Errorf("%s: %d accepted, want 350", channel, st.UniqueAccepted)
+		}
+	}
+	// 350 messages per channel at no more than 100 per second need at least 3.5 s; the two channels run in parallel.
+	if elapsed < 3*time.Second {
+		t.Errorf("350 messages per channel took only %v", elapsed)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+func TestWorker_honoursRetryAfter(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{Seed: 5, ThrottleRate: 0.35, RetryAfter: time.Second})
+	id := e.campaign(t, 60, "sms")
+	// The backoff is tiny, so only the Retry-After can keep a retry from coming early.
+	_, stop := e.start(t, worker.Config{
+		RatePerSecond: 200, Retry: retry.Policy{MaxAttempts: 5, BaseDelay: 5 * time.Millisecond, MaxDelay: 20 * time.Millisecond, MaxRetryAfter: time.Minute},
+		MaintenanceInterval: 100 * time.Millisecond,
+	})
+	e.waitFinished(t, id, 60*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := e.provider.Stats().SMS
+	if st.Throttled429 < 5 {
+		t.Fatalf("only %d throttled requests; the scenario did not happen", st.Throttled429)
+	}
+	if st.RetryAfterViolations != 0 {
+		t.Fatalf("%d of %d 429s were retried before their Retry-After", st.RetryAfterViolations, st.Throttled429)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+// A worker died after claiming deliveries: some had already reached the provider, some had not.
+func TestWorker_recoversExpiredLeases(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 40, "sms")
+
+	// The "crashed worker" claimed 20 deliveries; its leases ran out.
+	ctx := context.Background()
+	var crashed []queue.Delivery
+	for range 20 {
+		d, ok, err := e.q.Claim(ctx, "sms", time.Minute)
+		if err != nil || !ok {
+			t.Fatalf("claim = %v, %v", ok, err)
+		}
+		crashed = append(crashed, d)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE deliveries SET lease_until = now() - interval '1 second' WHERE status = 'sending'`); err != nil {
+		t.Fatal(err)
+	}
+	// Ten of them had reached the provider before the crash (same key the worker uses).
+	sender := worker.NewHTTPSender(e.url)
+	for _, d := range crashed[:10] {
+		res := sender.Send(ctx, worker.SendRequest{Channel: "sms", Key: d.Key(), To: d.Recipient, Body: "sent before the crash"})
+		if res.Kind != retry.Delivered {
+			t.Fatalf("pre-send: %+v", res)
+		}
+	}
+
+	_, stop := e.start(t, worker.Config{MaintenanceInterval: 50 * time.Millisecond, Retry: fastRetry()})
+	if status := e.waitFinished(t, id, 30*time.Second); status != "completed" {
+		t.Fatalf("campaign = %q, want completed; %s", status, e.summary(t))
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); n != 40 {
+		t.Fatalf("%d sent, want all 40; %s", n, e.summary(t))
+	}
+	st := e.provider.Stats().SMS
+	if st.UniqueAccepted != 40 {
+		t.Fatalf("provider accepted %d messages, want 40: nobody may get two", st.UniqueAccepted)
+	}
+	if st.DuplicateKeys != 10 {
+		t.Fatalf("provider saw %d duplicate keys, want the 10 that were re-sent after the crash", st.DuplicateKeys)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+func TestWorker_expiredLeaseOnTheLastAttemptFails(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 6, "sms")
+	ctx := context.Background()
+	d, ok, err := e.q.Claim(ctx, "sms", time.Minute)
+	if err != nil || !ok {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE deliveries SET attempts = 5, lease_until = now() - interval '1 second' WHERE id = $1`, d.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	_, stop := e.start(t, worker.Config{MaintenanceInterval: 50 * time.Millisecond, Retry: fastRetry()})
+	if status := e.waitFinished(t, id, 30*time.Second); status != "completed_with_failures" {
+		t.Fatalf("campaign = %q, want completed_with_failures; %s", status, e.summary(t))
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if got := e.provider.AcceptedKeys("sms"); slices.Contains(got, d.Key()) {
+		t.Fatal("a delivery that used up its attempts must not be sent again")
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE id = $1 AND status = 'failed' AND last_error <> ''`, d.ID); n != 1 {
+		t.Fatal("the failed delivery must say why")
+	}
+}
+
+func TestWorker_noSendAfterConsentIsWithdrawn(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 50, "sms", "email")
+	// Between approval and sending, users 1-10 withdraw SMS consent and 11-15 withdraw e-mail consent.
+	ctx := context.Background()
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET sms_consent = false WHERE id <= 10`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, `UPDATE users SET email_consent = false WHERE id BETWEEN 11 AND 15`); err != nil {
+		t.Fatal(err)
+	}
+	withdrawn := map[string][]string{}
+	for channel, cond := range map[string]string{"sms": "user_id <= 10", "email": "user_id BETWEEN 11 AND 15"} {
+		rows, err := e.pool.Query(ctx, `SELECT id FROM deliveries WHERE channel = $1 AND `+cond, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for rows.Next() {
+			var d int64
+			if err := rows.Scan(&d); err != nil {
+				t.Fatal(err)
+			}
+			withdrawn[channel] = append(withdrawn[channel], strconv.FormatInt(d, 10))
+		}
+		rows.Close()
+	}
+
+	_, stop := e.start(t, worker.Config{RatePerSecond: 200})
+	status := e.waitFinished(t, id, 30*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed" {
+		t.Fatalf("campaign = %q: skipping a withdrawn consent is not a failure", status)
+	}
+	for channel, ids := range withdrawn {
+		accepted := e.provider.AcceptedKeys(channel)
+		for _, id := range ids {
+			if slices.Contains(accepted, id) {
+				t.Errorf("%s delivery %s was sent although the user withdrew consent", channel, id)
+			}
+		}
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE channel = 'sms' AND status = 'skipped'`); n != 10 {
+		t.Errorf("%d sms deliveries skipped, want 10", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE channel = 'email' AND status = 'skipped'`); n != 5 {
+		t.Errorf("%d email deliveries skipped, want 5", n)
+	}
+	if st := e.provider.Stats(); st.SMS.UniqueAccepted != 40 || st.Email.UniqueAccepted != 45 {
+		t.Errorf("accepted sms %d (want 40), email %d (want 45)", st.SMS.UniqueAccepted, st.Email.UniqueAccepted)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+func TestWorker_permanentErrorIsNotRetried(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 5, "sms")
+	// The provider rejects an empty recipient with 400.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE users SET phone = '' WHERE id = 3`); err != nil {
+		t.Fatal(err)
+	}
+	_, stop := e.start(t, worker.Config{Retry: fastRetry()})
+	status := e.waitFinished(t, id, 30*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed_with_failures" {
+		t.Fatalf("campaign = %q, want completed_with_failures", status)
+	}
+	var attempts int
+	var lastError string
+	if err := e.pool.QueryRow(context.Background(),
+		`SELECT attempts, last_error FROM deliveries WHERE user_id = 3`).Scan(&attempts, &lastError); err != nil {
+		t.Fatal(err)
+	}
+	if attempts != 1 || !strings.Contains(lastError, "permanent error: http 400") {
+		t.Fatalf("attempts = %d, last_error = %q; a 400 must fail at the first attempt", attempts, lastError)
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); n != 4 {
+		t.Fatalf("%d sent, want the 4 others", n)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+func TestWorker_retriesGiveUpAfterFiveAttempts(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{ErrorRate: 1}) // the provider never accepts
+	id := e.campaign(t, 4, "email")
+	_, stop := e.start(t, worker.Config{Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
+	status := e.waitFinished(t, id, 30*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed_with_failures" {
+		t.Fatalf("campaign = %q", status)
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'failed' AND attempts = 5 AND last_error LIKE 'gave up after 5 attempts%'`); n != 4 {
+		t.Fatalf("%d deliveries failed after exactly 5 attempts, want 4; %s", n, e.summary(t))
+	}
+	if st := e.provider.Stats().Email; st.Requests != 20 || st.UniqueAccepted != 0 {
+		t.Fatalf("provider saw %d requests and accepted %d, want 20 and 0", st.Requests, st.UniqueAccepted)
+	}
+}
+
+// On shutdown nothing new is claimed, what is in flight is finished and recorded, and nothing stays "sending".
+func TestWorker_gracefulShutdown(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{DelayMin: 150 * time.Millisecond, DelayMax: 150 * time.Millisecond})
+	id := e.campaign(t, 300, "sms")
+	_, stop := e.start(t, worker.Config{RatePerSecond: 100, RequestTimeout: 2 * time.Second, Lease: time.Minute})
+
+	// let it get going: several sends in flight, most deliveries untouched
+	deadline := time.Now().Add(20 * time.Second)
+	for e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`) < 10 {
+		if time.Now().After(deadline) {
+			t.Fatal("the worker never started sending")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	started := time.Now()
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if took := time.Since(started); took > 3*time.Second {
+		t.Fatalf("shutdown took %v; in-flight sends are bounded by the 2s request timeout", took)
+	}
+
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sending'`); n != 0 {
+		t.Fatalf("%d deliveries are still 'sending' after Run returned", n)
+	}
+	sent := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`)
+	queued := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'queued'`)
+	if queued == 0 || sent+queued != 300 {
+		t.Fatalf("sent %d, queued %d: expected the rest to stay queued, none lost", sent, queued)
+	}
+	e.requireProviderMatchesDatabase(t)
+	if got := e.count(t, `SELECT count(*) FROM campaigns WHERE id = $1 AND status = 'sending'`, id); got != 1 {
+		t.Fatal("an unfinished campaign must stay 'sending'")
+	}
+
+	// A second worker picks up exactly where the first stopped.
+	_, stop2 := e.start(t, worker.Config{RatePerSecond: 300})
+	e.waitFinished(t, id, 60*time.Second)
+	if err := stop2(); err != nil {
+		t.Fatal(err)
+	}
+	if st := e.provider.Stats().SMS; st.UniqueAccepted != 300 {
+		t.Fatalf("provider accepted %d, want 300", st.UniqueAccepted)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+// A real HTTP reply that never comes back in time: the message is delivered, the worker times out,
+// and the retry with the same key must not deliver it twice.
+func TestWorker_timeoutOfADeliveredMessageIsNotResent(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{LateRate: 1, LateDelay: 600 * time.Millisecond})
+	id := e.campaign(t, 30, "sms")
+	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 5 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	e.waitFinished(t, id, 60*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := e.provider.Stats().SMS
+	if st.UniqueAccepted != 30 || st.LateResponses != 30 {
+		t.Fatalf("accepted %d, late %d; want 30 and 30", st.UniqueAccepted, st.LateResponses)
+	}
+	if st.DuplicateKeys != 30 {
+		t.Fatalf("%d duplicate keys, want each of the 30 retried exactly once", st.DuplicateKeys)
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent' AND attempts = 2`); n != 30 {
+		t.Fatalf("%d deliveries sent on the second attempt, want 30; %s", n, e.summary(t))
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+// The message the provider received is the frozen template with the user's values filled in.
+func TestWorker_rendersThePersonalisedMessage(t *testing.T) {
+	var bodies []string
+	var ch = make(chan string, 10)
+	provider := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		ch <- r.URL.Path + " " + r.Header.Get("Idempotency-Key") + " " + string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer provider.Close()
+
+	pool := testdb.New(t)
+	testdb.AddUsers(t, pool, 1)
+	if _, err := pool.Exec(context.Background(), `UPDATE users SET first_name = 'Ayşe', city = 'İzmir'`); err != nil {
+		t.Fatal(err)
+	}
+	id := testdb.AddApprovedCampaign(t, pool, "sms", "email")
+	q := queue.New(pool)
+	if _, err := q.Enqueue(context.Background(), id); err != nil {
+		t.Fatal(err)
+	}
+	w, err := worker.New(q, worker.NewHTTPSender(provider.URL), worker.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- w.Run(ctx) }()
+	for range 2 {
+		select {
+		case b := <-ch:
+			bodies = append(bodies, b)
+		case <-time.After(20 * time.Second):
+			t.Fatal("the provider did not receive both messages")
+		}
+	}
+	cancel()
+	<-done
+
+	slices.Sort(bodies)
+	// "/email" sorts before "/sms"
+	wantEmail := `{"body":"Merhaba Ayşe","subject":"Fırsat İzmir","to":"u1@example.com"}`
+	wantSMS := `{"text":"Merhaba Ayşe, İzmir için fırsat","to":"+900000000001"}`
+	if !strings.HasPrefix(bodies[0], "/email ") || !strings.HasSuffix(bodies[0], " "+wantEmail) {
+		t.Errorf("email request = %q, want body %s", bodies[0], wantEmail)
+	}
+	if !strings.HasPrefix(bodies[1], "/sms ") || !strings.HasSuffix(bodies[1], " "+wantSMS) {
+		t.Errorf("sms request = %q, want body %s", bodies[1], wantSMS)
+	}
+}

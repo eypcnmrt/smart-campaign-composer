@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/signal"
 	"strconv"
@@ -17,7 +18,9 @@ import (
 
 	"smartcampaign/internal/db"
 	"smartcampaign/internal/migrate"
+	"smartcampaign/internal/queue"
 	"smartcampaign/internal/seed"
+	"smartcampaign/internal/worker"
 	"smartcampaign/migrations"
 )
 
@@ -25,8 +28,13 @@ const usage = "usage: composer <api|worker|migrate|seed>"
 
 // Environment variables read by the commands.
 const (
-	envDatabaseURL = "DATABASE_URL"
-	envSeedUsers   = "SEED_USERS"
+	envDatabaseURL   = "DATABASE_URL"
+	envSeedUsers     = "SEED_USERS"
+	envProviderURL   = "PROVIDER_URL"
+	envWorkerRate    = "WORKER_RATE"
+	envWorkerTimeout = "WORKER_REQUEST_TIMEOUT"
+
+	defaultProviderURL = "http://mock-provider:8081"
 )
 
 func main() {
@@ -49,7 +57,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "composer %s: not implemented yet\n", args[0])
 		return 0
 	case "worker":
-		err = runWorker(ctx, stdout)
+		err = runWorker(ctx, stderr)
 	case "migrate":
 		err = runMigrate(ctx, stdout)
 	case "seed":
@@ -119,7 +127,41 @@ func runSeed(ctx context.Context, stdout io.Writer) error {
 	return nil
 }
 
-func runWorker(_ context.Context, stdout io.Writer) error {
-	fmt.Fprintln(stdout, "composer worker: not implemented yet")
+// runWorker serves the delivery queue until ctx ends (SIGTERM), then lets the sends in flight finish.
+func runWorker(ctx context.Context, logOut io.Writer) error {
+	cfg := worker.Config{Logger: slog.New(slog.NewTextHandler(logOut, nil))}
+	if v := os.Getenv(envWorkerRate); v != "" {
+		rate, err := strconv.ParseFloat(v, 64)
+		if err != nil || rate < 1 {
+			return fmt.Errorf("%s must be a number of at least 1", envWorkerRate)
+		}
+		cfg.RatePerSecond = rate
+	}
+	if v := os.Getenv(envWorkerTimeout); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("%s must be a positive duration such as 5s", envWorkerTimeout)
+		}
+		cfg.RequestTimeout = d
+	}
+	providerURL := os.Getenv(envProviderURL)
+	if providerURL == "" {
+		providerURL = defaultProviderURL
+	}
+
+	pool, err := openDB(ctx)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	w, err := worker.New(queue.New(pool), worker.NewHTTPSender(providerURL), cfg)
+	if err != nil {
+		return err
+	}
+	cfg.Logger.Info("worker started", "provider", providerURL)
+	if err := w.Run(ctx); err != nil {
+		return err
+	}
+	cfg.Logger.Info("worker stopped", "counters", fmt.Sprintf("%+v", w.Counters()))
 	return nil
 }

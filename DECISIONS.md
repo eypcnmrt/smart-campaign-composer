@@ -296,6 +296,70 @@ here when the README is written.
   interferes with a correct client.
 - **Alternative:** assert on the worker's timestamps only; that proves what the worker thinks it did.
 
+## Queue and worker
+
+### Claim after the token, one row at a time; consent is read by the claim
+- **Decision:** each channel has one dispatcher loop: wait for a rate-limit token, then claim a single due delivery
+  (`FOR UPDATE SKIP LOCKED`, status `sending`, attempt counted, lease set) and hand it to a send goroutine
+  (at most 256 in flight per channel). The claim query joins the user and the frozen campaign content and returns
+  the consent flag for the channel, so consent is read in the same statement that leases the delivery, a moment
+  before the request. No consent means the delivery becomes `skipped` and nothing is sent.
+- **Why:** claiming a batch first would leave rows leased while they wait for their turn (and their consent check
+  would be stale by then). One row per claim costs one cheap indexed statement, which is nowhere near the limit at
+  100 messages per second and channel. Sends run concurrently because a slow provider reply (timeouts are seconds
+  long) must not stall the pacing.
+- **Alternative:** claim batches of 50 and pace inside the worker; faster per row, but stale consent and long leases.
+
+### The idempotency key is the delivery id and results are fenced by the attempt number
+- **Decision:** the provider key is the delivery id, identical on every attempt and after a lease recovery. `attempts`
+  is incremented by the claim and every result is written with `WHERE status = 'sending' AND attempts = <mine>`;
+  a result that no longer matches (the lease expired and the row moved on) is dropped (`ErrLeaseLost`).
+- **Why:** this is what makes "timed out but delivered" safe: the retry carries the same key and the provider
+  answers with the first reply. The fence stops a slow worker from overwriting the result of the attempt that
+  replaced it. The tests prove it key by key: the set of keys the provider accepted equals the set of delivery ids
+  the database calls `sent`, with exact timeouts, 500s, 429s and late replies in play.
+- **Alternative:** a fresh key per attempt (simpler, double sends after any timeout), or locking the row while
+  the HTTP call runs (holds a connection per in-flight send).
+
+### Retry policy is a pure function
+- **Decision:** `retry.Policy.Decide(attempt, result, jitter)` returns done, retry-after-delay or fail. Backoff is
+  `1s * 2^(n-1)` capped at 1 minute with "equal jitter" (half fixed, half random). A 429 waits at least its
+  Retry-After (capped at 5 minutes) or the backoff, whichever is longer. 5xx, 408, timeouts and connection errors are
+  retried; every other 4xx is permanent; at most 5 attempts in total. `Retry-After` is read as seconds or HTTP date.
+- **Why:** with the clock and the jitter passed in, every rule is a table test with exact numbers. 408 is
+  listed with the timeouts on purpose: it is a timeout, and the case says timeouts are retried.
+- **Alternative:** full jitter (can retry almost at once, which defeats the backoff).
+
+### Rate limit: x/time/rate plus a sliding-window guard, about 4 % under the cap
+- **Decision:** each channel has a `rate.Limiter` (100/s, burst 1, so sends are 10 ms apart and there is no
+  burst at the start of a second) and a guard that remembers the last 100 send times and holds the 101st until
+  1.04 s after the oldest. In steady state the guard is the stricter of the two: about 96 messages per second.
+- **Why:** evenly spaced sends do not guarantee "at most 100 in any second" at the provider. The goroutine that
+  makes the call wakes a little late now and then, so two sends that were 10 ms apart can arrive closer together,
+  and with perfect 10 ms spacing a window of 101 arrivals happens whenever a later send is less delayed than an
+  earlier one, which is about half the time. The tests measure the busiest second at the provider and the margin
+  absorbs the jitter.
+- **Alternative:** the token bucket alone at exactly 100/s. It matches the wording of the requirement but fails the
+  measurement. Setting it to 95/s works too, but then nothing states why 95.
+
+### Lease recovery, completion and shutdown
+- **Decision:** a maintenance loop (every second) returns deliveries whose lease expired to `queued`, due at once,
+  without resetting `attempts`; one whose attempts are used up becomes `failed`. The same loop completes campaigns
+  that have no queued or sending delivery: `completed_with_failures` if any delivery failed, else `completed`.
+  The default lease is the request timeout plus 30 s and the worker refuses a lease not longer than the timeout.
+  On SIGTERM the dispatchers stop claiming, sends already started finish within their request timeout and record
+  their result, then the process exits; a claim that is already running is not cancelled, so it cannot strand a row.
+- **Why:** recovery is safe to repeat because the provider de-duplicates by key. Counting attempts across crashes
+  keeps a poisoned delivery from looping forever. Completion by polling needs no per-send campaign query.
+- **Alternative:** heartbeat the lease while sending (not needed while the request timeout is shorter than the lease).
+
+### Enqueue happens in one transaction and counts event windows from approval
+- **Decision:** `Enqueue` locks the campaign row, requires `approved`, runs one `INSERT ... SELECT` per channel over
+  `segment.Compile` output and the consent column, and moves the campaign to `sending` (or straight to `completed`
+  when nobody is eligible). The compile time is `approved_at`, not the clock of the worker.
+- **Why:** the audience is the one the marketer saw when approving; running the worker later or twice cannot change it.
+- **Alternative:** compiling with `now()` at enqueue time (the audience drifts by the hours between approval and enqueue).
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue.)

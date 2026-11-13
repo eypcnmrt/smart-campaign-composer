@@ -117,6 +117,23 @@ func (s *Server) Stats() Stats {
 	return Stats{SMS: s.snapshot(ChannelSMS), Email: s.snapshot(ChannelEmail)}
 }
 
+// AcceptedKeys returns the idempotency keys the channel has accepted, sorted. Tests use it to check
+// that exactly the delivered messages (and no other) reached the provider.
+func (s *Server) AcceptedKeys(channel string) []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ch, ok := s.channels[channel]
+	if !ok {
+		return nil
+	}
+	keys := make([]string, 0, len(ch.accepted))
+	for k := range ch.accepted {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	return keys
+}
+
 func (s *Server) snapshot(channel string) ChannelStats {
 	ch := s.channels[channel]
 	out := ch.stats

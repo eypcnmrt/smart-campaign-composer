@@ -18,6 +18,7 @@ func TestRun(t *testing.T) {
 	}{
 		{"api", []string{"api"}, 0, "composer api: not implemented yet", ""},
 		{"migrate without a database", []string{"migrate"}, 1, "", "DATABASE_URL is not set"},
+		{"worker without a database", []string{"worker"}, 1, "", "DATABASE_URL is not set"},
 		{"seed without a database", []string{"seed"}, 1, "", "DATABASE_URL is not set"},
 		{"no arguments", nil, 2, "", usage},
 		{"too many arguments", []string{"api", "worker"}, 2, "", usage},
@@ -48,5 +49,24 @@ func TestRun_seedRejectsBadUserCount(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), envSeedUsers) {
 		t.Fatalf("stderr = %q, want it to name %s", stderr.String(), envSeedUsers)
+	}
+}
+
+func TestRun_workerRejectsBadSettings(t *testing.T) {
+	for name, env := range map[string]map[string]string{
+		"rate is not a number": {envWorkerRate: "fast"},
+		"rate below one":       {envWorkerRate: "0.5"},
+		"timeout is not valid": {envWorkerTimeout: "soon"},
+		"timeout is negative":  {envWorkerTimeout: "-1s"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			for k, v := range env {
+				t.Setenv(k, v)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(context.Background(), []string{"worker"}, &stdout, &stderr); code != 1 {
+				t.Fatalf("code = %d, want 1; stderr %q", code, stderr.String())
+			}
+		})
 	}
 }
