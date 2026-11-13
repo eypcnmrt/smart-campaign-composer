@@ -6,7 +6,9 @@
 //   - 429: try again, but not before the Retry-After the provider sent.
 //   - 5xx, 408, timeouts and network errors: try again with exponential backoff and jitter.
 //   - any other 4xx: permanent failure, retrying would repeat the same mistake.
-//   - at most MaxAttempts attempts, then the delivery fails.
+//   - at most MaxAttempts attempts, then the delivery fails; except that a last attempt which ended without any
+//     answer (timeout, connection error) is followed by one confirmation attempt with the same key, because
+//     the message may have been delivered after all (see Policy.confirms).
 package retry
 
 import (
@@ -159,7 +161,7 @@ func (p Policy) Decide(attempt int, res Result, jitter float64) Decision {
 		return Decision{Action: Fail, Reason: fmt.Sprintf("permanent error: %s", describe(res))}
 	}
 
-	if attempt >= p.MaxAttempts {
+	if attempt >= p.MaxAttempts && !p.confirms(attempt, res) {
 		return Decision{Action: Fail, Reason: fmt.Sprintf("gave up after %d attempts: %s", attempt, describe(res))}
 	}
 	delay := p.Backoff(attempt, jitter)
@@ -168,6 +170,20 @@ func (p Policy) Decide(attempt int, res Result, jitter float64) Decision {
 		delay = max(delay, min(res.RetryAfter, p.MaxRetryAfter))
 	}
 	return Decision{Action: Retry, Delay: delay, Reason: describe(res)}
+}
+
+// MaxTotalAttempts is the most attempts a delivery can ever use: MaxAttempts, plus the one confirmation
+// attempt described at confirms.
+func (p Policy) MaxTotalAttempts() int { return p.MaxAttempts + 1 }
+
+// confirms reports whether the attempt that just ended is the last regular one and ended without any answer
+// (a timeout or a connection error). Then the outcome is unknown, not failed: the provider may have accepted
+// the message and only its reply was lost. Declaring such a delivery failed would be wrong whenever it was
+// delivered, so exactly one more attempt is allowed. It carries the same idempotency key, so it cannot deliver
+// twice: if the provider has the message it returns the first reply, otherwise it is an ordinary last try.
+// A 5xx or 429 is an answer ("not accepted") and does not qualify.
+func (p Policy) confirms(attempt int, res Result) bool {
+	return attempt == p.MaxAttempts && res.Kind == Transient && res.Err != nil
 }
 
 // describe gives the short, secret-free text stored in last_error.

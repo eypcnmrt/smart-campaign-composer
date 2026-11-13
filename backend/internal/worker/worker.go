@@ -282,7 +282,7 @@ func (w *Worker) maintainOnce(ctx context.Context) {
 	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dbTimeout)
 	defer cancel()
 	log := w.cfg.Logger
-	rec, err := w.q.RecoverLeases(ctx, w.cfg.Retry.MaxAttempts)
+	rec, err := w.q.RecoverLeases(ctx, w.cfg.Retry.MaxTotalAttempts())
 	if err != nil {
 		log.Error("recovering leases failed", "err", err)
 	} else if rec.Requeued+rec.Failed > 0 {

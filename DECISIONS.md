@@ -325,9 +325,23 @@ here when the README is written.
 - **Decision:** `retry.Policy.Decide(attempt, result, jitter)` returns done, retry-after-delay or fail. Backoff is
   `1s * 2^(n-1)` capped at 1 minute with "equal jitter" (half fixed, half random). A 429 waits at least its
   Retry-After (capped at 5 minutes) or the backoff, whichever is longer. 5xx, 408, timeouts and connection errors are
-  retried; every other 4xx is permanent; at most 5 attempts in total. `Retry-After` is read as seconds or HTTP date.
+  retried; every other 4xx is permanent; at most 5 attempts. `Retry-After` is read as seconds or HTTP date.
+  **One exception, found by `make soak`:** if the fifth attempt ends without any answer (timeout or connection
+  error), the delivery gets one more attempt with the same key instead of being failed, so a delivery can use
+  6 attempts, never more (`Policy.MaxTotalAttempts`, `confirms`). A lease that expires on the fifth attempt is
+  treated the same way.
 - **Why:** with the clock and the jitter passed in, every rule is a table test with exact numbers. 408 is
   listed with the timeouts on purpose: it is a timeout, and the case says timeouts are retried.
+  The exception: the first soak run had a delivery whose fifth attempt hit a late reply. The provider had accepted the
+  message, the worker timed out, wrote `failed ("gave up after 5 attempts: timeout")` and the database disagreed with
+  the provider by one message. A timeout is not a "no", it is "unknown", and failing it is wrong whenever the message
+  was delivered. The confirmation attempt cannot deliver twice (same key): if the provider has the message it
+  replies with the first answer, otherwise it is a normal last try. A 5xx or 429 on the fifth attempt is an answer
+  ("not accepted") and still fails the delivery.
+- **Alternative:** keep the hard limit of 5 and accept that a delivery whose last attempt timed out may be recorded as
+  failed although the customer got the message (an invariant "provider accepted = database sent" that cannot hold),
+  or a separate `unknown` status. This deviates from the literal "at most 5 attempts"; it is the one place to review
+  if the stricter reading is wanted (change `confirms` to return false).
 - **Alternative:** full jitter (can retry almost at once, which defeats the backoff).
 
 ### Rate limit: x/time/rate plus a sliding-window guard, about 4 % under the cap

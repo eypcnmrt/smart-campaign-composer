@@ -140,7 +140,10 @@ func TestPolicy_Decide(t *testing.T) {
 		{"500 on the second attempt waits longer", 2, Result{Kind: Transient, Status: 500}, Retry, time.Second, "http 500"},
 		{"timeout is retried", 1, Result{Kind: Transient, Err: timeout}, Retry, 500 * time.Millisecond, "timeout"},
 		{"500 on the last attempt gives up", 5, Result{Kind: Transient, Status: 500}, Fail, 0, "gave up after 5 attempts: http 500"},
-		{"timeout on the last attempt gives up", 5, Result{Kind: Transient, Err: timeout}, Fail, 0, "gave up after 5 attempts: timeout"},
+		{"timeout on the last attempt is confirmed once more", 5, Result{Kind: Transient, Err: timeout}, Retry, 8 * time.Second, "timeout"},
+		{"connection error on the last attempt is confirmed too", 5, Result{Kind: Transient, Err: errors.New("connection reset")}, Retry, 8 * time.Second, "connection reset"},
+		{"timeout on the confirmation gives up", 6, Result{Kind: Transient, Err: timeout}, Fail, 0, "gave up after 6 attempts: timeout"},
+		{"500 on the confirmation gives up", 6, Result{Kind: Transient, Status: 500}, Fail, 0, "gave up after 6 attempts: http 500"},
 		{"permanent 4xx fails at once", 1, Result{Kind: Permanent, Status: 400}, Fail, 0, "permanent error: http 400"},
 		{"429 honours Retry-After longer than the backoff", 1, Result{Kind: RateLimited, Status: 429, RetryAfter: 7 * time.Second}, Retry, 7 * time.Second, "retry after 7s"},
 		{"429 keeps the backoff when it is longer", 4, Result{Kind: RateLimited, Status: 429, RetryAfter: time.Second}, Retry, 4 * time.Second, "retry after 1s"},
@@ -182,18 +185,65 @@ func TestPolicy_Decide_retryAfterIsAFloor(t *testing.T) {
 func TestPolicy_Decide_totalAttempts(t *testing.T) {
 	t.Parallel()
 	p := DefaultPolicy()
-	attempts := 0
-	for {
-		attempts++
-		if p.Decide(attempts, Result{Kind: Transient, Status: 500}, 0.5).Action == Fail {
-			break
-		}
-		if attempts > 100 {
-			t.Fatal("never gave up")
-		}
+	tests := []struct {
+		name string
+		res  Result
+		want int
+	}{
+		{"5xx: five attempts", Result{Kind: Transient, Status: 500}, 5},
+		{"429: five attempts", Result{Kind: RateLimited, Status: 429, RetryAfter: time.Second}, 5},
+		{"timeouts: five attempts and one confirmation", Result{Kind: Transient, Err: context.DeadlineExceeded}, 6},
 	}
-	if attempts != 5 {
-		t.Fatalf("gave up after %d attempts, want 5", attempts)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			attempts := 0
+			for {
+				attempts++
+				if p.Decide(attempts, tt.res, 0.5).Action == Fail {
+					break
+				}
+				if attempts > 100 {
+					t.Fatal("never gave up")
+				}
+			}
+			if attempts != tt.want {
+				t.Fatalf("gave up after %d attempts, want %d", attempts, tt.want)
+			}
+			if attempts > p.MaxTotalAttempts() {
+				t.Fatalf("%d attempts exceed MaxTotalAttempts %d", attempts, p.MaxTotalAttempts())
+			}
+		})
+	}
+}
+
+// Only a missing answer is ambiguous: an answer, even a bad one, says the message was not accepted.
+func TestPolicy_confirms(t *testing.T) {
+	t.Parallel()
+	p := DefaultPolicy()
+	tests := []struct {
+		name    string
+		attempt int
+		res     Result
+		want    bool
+	}{
+		{"timeout on the last attempt", 5, Result{Kind: Transient, Err: context.DeadlineExceeded}, true},
+		{"timeout earlier", 3, Result{Kind: Transient, Err: context.DeadlineExceeded}, false},
+		{"timeout on the confirmation", 6, Result{Kind: Transient, Err: context.DeadlineExceeded}, false},
+		{"500 on the last attempt", 5, Result{Kind: Transient, Status: 500}, false},
+		{"429 on the last attempt", 5, Result{Kind: RateLimited, Status: 429}, false},
+		{"success", 5, Result{Kind: Delivered, Status: 200}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := p.confirms(tt.attempt, tt.res); got != tt.want {
+				t.Fatalf("confirms = %v, want %v", got, tt.want)
+			}
+		})
+	}
+	if got := p.MaxTotalAttempts(); got != 6 {
+		t.Fatalf("MaxTotalAttempts = %d, want 6", got)
 	}
 }
 

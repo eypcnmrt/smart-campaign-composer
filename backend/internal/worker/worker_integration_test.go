@@ -322,7 +322,7 @@ func TestWorker_recoversExpiredLeases(t *testing.T) {
 	e.requireProviderMatchesDatabase(t)
 }
 
-func TestWorker_expiredLeaseOnTheLastAttemptFails(t *testing.T) {
+func TestWorker_expiredLeaseOnTheConfirmationAttemptFails(t *testing.T) {
 	e := newEnv(t, mockprovider.Config{})
 	id := e.campaign(t, 6, "sms")
 	ctx := context.Background()
@@ -330,7 +330,7 @@ func TestWorker_expiredLeaseOnTheLastAttemptFails(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatal(err)
 	}
-	if _, err := e.pool.Exec(ctx, `UPDATE deliveries SET attempts = 5, lease_until = now() - interval '1 second' WHERE id = $1`, d.ID); err != nil {
+	if _, err := e.pool.Exec(ctx, `UPDATE deliveries SET attempts = 6, lease_until = now() - interval '1 second' WHERE id = $1`, d.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -576,5 +576,52 @@ func TestWorker_rendersThePersonalisedMessage(t *testing.T) {
 	}
 	if !strings.HasPrefix(bodies[1], "/sms ") || !strings.HasSuffix(bodies[1], " "+wantSMS) {
 		t.Errorf("sms request = %q, want body %s", bodies[1], wantSMS)
+	}
+}
+
+// The fifth attempt times out although the provider accepted the message (its reply was late): that is not a
+// failure. One confirmation attempt with the same key finds the message and the delivery is sent, not failed.
+func TestWorker_timeoutOnTheLastAttemptIsConfirmed(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{LateRate: 1, LateDelay: 600 * time.Millisecond})
+	id := e.campaign(t, 12, "sms")
+	// pretend four attempts were already used up: the next claim is the fifth
+	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
+		t.Fatal(err)
+	}
+	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 5 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	status := e.waitFinished(t, id, 60*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed" {
+		t.Fatalf("campaign = %q, want completed: nothing failed; %s", status, e.summary(t))
+	}
+	if n := e.count(t, "SELECT count(*) FROM deliveries WHERE status = 'sent' AND attempts = 6"); n != 12 {
+		t.Fatalf("%d deliveries sent by the confirmation attempt, want 12; %s", n, e.summary(t))
+	}
+	if st := e.provider.Stats().SMS; st.UniqueAccepted != 12 || st.DuplicateKeys != 12 {
+		t.Fatalf("provider accepted %d, duplicates %d; want 12 and 12", st.UniqueAccepted, st.DuplicateKeys)
+	}
+	e.requireProviderMatchesDatabase(t)
+}
+
+// An answer is not ambiguous: a 500 on the last attempt fails the delivery, there is no sixth attempt.
+func TestWorker_serverErrorOnTheLastAttemptFailsWithoutConfirmation(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{ErrorRate: 1})
+	id := e.campaign(t, 3, "email")
+	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
+		t.Fatal(err)
+	}
+	_, stop := e.start(t, worker.Config{Retry: fastRetry()})
+	status := e.waitFinished(t, id, 30*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+	if status != "completed_with_failures" {
+		t.Fatalf("campaign = %q", status)
+	}
+	if n := e.count(t, "SELECT count(*) FROM deliveries WHERE status = 'failed' AND attempts = 5"); n != 3 {
+		t.Fatalf("%d deliveries failed at attempt 5, want 3; %s", n, e.summary(t))
 	}
 }
