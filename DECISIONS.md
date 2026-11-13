@@ -80,3 +80,65 @@ here when the README is written.
 - **Alternative:** a streaming JSON library, or regexes on the raw text. A library would still need the
   chunk-boundary handling tested; regexes break on escaped quotes. The fallback from the plan stands: if
   the extractor errors, show the raw stream and let the final validated result replace it.
+
+## LLM client
+
+### Official Go SDK, pinned, called through a small interface
+- **Decision:** `github.com/anthropics/anthropic-sdk-go/v2` at exactly v2.9.0 (go.mod and go.sum), behind
+  `llm.Client` (`Complete`, `Stream`, `Mode`, `Model`). Everything else in the backend sees only the
+  interface. `FromEnv` returns the real client only if `ANTHROPIC_API_KEY` is set; otherwise the demo
+  mock, and `Mode()` says which (the "Mock LLM" badge). No other credential source is consulted, so a
+  machine that happens to be logged in elsewhere cannot spend money without the key being set. The model
+  comes from `ANTHROPIC_MODEL`, default `claude-opus-5-5`.
+- **Why:** the SDK's request and streaming types change between releases and the API surface for this
+  model family moved recently (thinking, effort, fallbacks), so the version is fixed and the bindings
+  were read from the SDK source rather than guessed. The interface is what lets every test run without a
+  key; the real client is tested against a fake API server through the base-URL override instead.
+- **Alternative:** raw HTTP. More code to own and no gain. A floating SDK version was rejected: a `go get -u`
+  could silently change request shapes.
+
+### One structured-output request per task, effort set explicitly, nothing the model rejects
+- **Decision:** segment: one non-streaming request, `output_config.format` = the schema, effort `low`.
+  Content: streaming, same mechanism with the content schema, effort `medium`. Thinking is left unset
+  (always on and adaptive on Claude Opus 5.5), so effort is the only control, and it is always sent
+  because the model's default is `medium`. No assistant prefill, forced tool choice or sampling
+  parameters, which this model rejects with a 400. `max_tokens` is 16000 (segment) and 64000 (content),
+  with whole-call deadlines of 90 s and 4 min.
+- **Why:** thinking tokens count toward `max_tokens`, and a cut-off answer is a failed call that costs more
+  than a large limit ever does. Streaming is used for the large limit so a long answer does not hit an
+  HTTP timeout. The deadline covers the SDK's retries as well, so a hanging provider cannot hold a request.
+- **Alternative:** a tool call with a forced `tool_choice` (rejected by the model) or JSON in plain text
+  (no guarantee the output follows the shape).
+
+### SDK retries and the repair loop are separate and never share a budget
+- **Decision:** the SDK retries 408, 409, 429, 5xx and connection errors up to twice and honors
+  `Retry-After`; the repair loop (package `compose`) re-asks only when the model's own output failed
+  validation. Errors are typed (`ErrRefusal`, `ErrMaxTokens`, `ErrTimeout`, `ErrRateLimited` with the wait,
+  `ErrUnavailable`, `ErrBadRequest`, `ErrUnexpectedStop`) and only a validation failure is repaired.
+  An error event inside a stream carries status 200, so it is classified by its type.
+- **Why:** mixing them would turn a rate limit into "the model keeps producing invalid JSON" and burn
+  repair attempts on a problem the model cannot fix, or retry an invalid answer as if it were a network fault.
+- **Alternative:** one retry loop around everything. Simpler, but it cannot tell the two failures apart.
+
+### Refusals: server-side fallback is on by default
+- **Decision:** requests carry `fallbacks: "default"` with beta `server-side-fallback-2026-07-01`, so a
+  request declined by a safety classifier is re-run on the model Anthropic recommends for that category,
+  inside the same call. `ANTHROPIC_FALLBACK=off` turns it off in case the beta is not enabled for an
+  account. `stop_reason` is checked before any content is read. After a mid-stream fallback the text
+  continues in a new block; all text blocks together are the answer (tested against the fake API with the
+  cut inside a `\u` escape). If the final stop reason is still `refusal` the call fails with `RefusalError`
+  (category and explanation kept) and any partial text is discarded; it is not retried or repaired.
+- **Why:** classifiers can fire on harmless marketing text, and the fallback is one round trip with no
+  client logic. The fallback model does not receive the first model's thinking blocks; that is fine here
+  because every request is a single turn.
+- **Alternative:** the SDK's client-side middleware (needed only on Bedrock, Vertex AI or Foundry, which
+  this project does not use) or a manual retry on another model.
+
+### No key means a demo mock, tests use a scripted client
+- **Decision:** the demo mock is deterministic and keyword-based (cities, "son N gün", sepet, satın
+  alma, a TL amount, a discount percentage); it always returns valid output and flags what it cannot
+  express as `unsupported_criteria`. Tests of the repair loop use `Scripted`, which plays exact steps (a
+  broken answer, a refusal, a cut-off) and records every request.
+- **Why:** the demo has to look sensible for someone running `docker compose up` without a key, while the
+  scenario tests need exact control over what "the model" says.
+- **Alternative:** one mock that does both, which would make the demo less convincing or the tests vague.
