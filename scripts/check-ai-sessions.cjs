@@ -13,6 +13,16 @@ const path = require('path');
 const ROOT = path.resolve(__dirname, '..');
 const dir = path.resolve(process.argv[2] || path.join(ROOT, 'ai-sessions'));
 
+// Deliberately allowed. Both values appear in every commit of this public repo (the
+// commit author address is the GitHub noreply address; the home directory shows up in
+// tool output) and history will not be rewritten, so reporting them only adds noise.
+// Anything else that looks like an e-mail address or a home path is still reported.
+// Matching is case-insensitive and applies to the captured user segment, so every
+// spelling the home-path rule recognises is covered: C:\Users\X, C:\\Users\\X (JSON
+// escaped), C:/Users/X, /c/Users/X and /mnt/c/Users/X.
+const ALLOWED_EMAILS = new Set(['79401693+eypcnmrt@users.noreply.github.com']);
+const ALLOWED_HOME_USERS = new Set(['eyup']);
+
 const SAFE_USERS = new Set(['public', 'default', 'all users', 'user', 'username', 'you', 'name', 'yourname', 'x']);
 
 const maskSecret = (v) => `${v.slice(0, 4)}…[${v.length} chars]`;
@@ -39,7 +49,12 @@ const RULES = [
     pick: (m) => m[1],
     mask: maskSecret,
   },
-  { type: 'email', re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g, mask: maskEmail },
+  {
+    type: 'email',
+    re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
+    ok: (v) => !ALLOWED_EMAILS.has(v.toLowerCase()),
+    mask: maskEmail,
+  },
   // international (+CC ...) and Turkish national formats, separators required to avoid bare digit runs
   {
     type: 'phone',
@@ -54,7 +69,7 @@ const RULES = [
     // C:\Users\name, C:/Users/name, /c/Users/name, /Users/name, /home/name
     re: /(?:[A-Za-z]:[\\/]+|\/[a-z]\/|\/mnt\/[a-z]\/|\/)(?:Users|home)[\\/]+([^\\/\s"'`<>*:|]+)/g,
     pick: (m) => m[1],
-    ok: (v) => !SAFE_USERS.has(v.toLowerCase()),
+    ok: (v) => !SAFE_USERS.has(v.toLowerCase()) && !ALLOWED_HOME_USERS.has(v.toLowerCase()),
     mask: (v) => `…/Users/${v[0]}***`,
   },
 ];
