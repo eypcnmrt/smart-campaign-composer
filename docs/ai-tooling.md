@@ -10,6 +10,7 @@ Sources, pinned commits and licenses of everything installed are in `.claude/THI
    commit SHA (`git fetch --depth 1 origin <sha>`).
 2. Scan: `npx ecc-agentshield@1.6.0 scan` (local, sends nothing out), then my own checks.
 3. Copy only the clean, needed files into `.claude/`; delete `.quarantine/`.
+4. Skill discovery check: layout (`.claude/skills/<name>/SKILL.md`) and frontmatter of all 7 skills match the Claude Code docs and pass `claude plugin validate .claude/skills`, so no skill file was changed; a session opened before the folders existed will not list them until it is restarted (or `/reload-skills`).
 
 ## What is installed and why
 
