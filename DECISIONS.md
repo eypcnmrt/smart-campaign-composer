@@ -203,3 +203,71 @@ here when the README is written.
 - **Why:** this is the contract the SSE endpoint needs, and it keeps the preview a convenience and not a
   source of truth (see "A small partial-JSON extractor").
 - **Alternative:** hold all text back until it validates, which gives up the live view the assignment asks for.
+
+## Database and seed
+
+### A small embedded migration runner instead of a migration tool
+- **Decision:** `backend/migrations/NNNN_name.sql` is embedded with `go:embed`; `internal/migrate` applies
+  the files in numeric order, each in its own transaction together with its `schema_migrations` row.
+  It holds a Postgres advisory lock (two containers can start together), refuses gaps in the numbering,
+  and stores a SHA-256 of every applied file so editing an applied migration fails loudly (`ErrChecksum`).
+  The only dependency added is pgx.
+- **Why:** the assignment wants `docker compose up` to need nothing but Docker, and the runner is ~150 lines
+  that are covered by tests (failed file rolls back, concurrent runners apply once, modified file detected).
+- **Alternative:** golang-migrate or Atlas. Better tooling (down migrations, dirty-state handling), but another
+  dependency and another binary in the image for a forward-only schema of two files.
+
+### The state machine is a CHECK on status plus data invariants, not a trigger
+- **Decision:** `campaigns.status` is limited to the seven states of docs/PLAN.md section 1, and the data a state
+  implies is enforced by CHECKs (a state past `draft` has a rule, from `content_ready` on content, from `approved`
+  on `approved_at`, a finished campaign `completed_at`). Which transition is legal is enforced by the code that
+  moves the state (`UPDATE ... WHERE status = <expected previous state>`), not by the schema.
+- **Why:** a CHECK sees one row, so it cannot know the previous state; a trigger could, but hides logic outside the
+  Go code and the tests. The invariants above are the ones a wrong transition would break.
+- **Alternative:** a trigger that rejects skipping states. Rejected as hidden behaviour.
+
+### Deliveries hold no message text; it is rendered when it is sent
+- **Decision:** enqueueing is one `INSERT ... SELECT` over the compiled segment predicate and the channel consent,
+  so `deliveries` has no subject or body columns. The worker joins the user and renders the approved, frozen
+  campaign content with `content.Render` just before sending.
+- **Why:** `content.Render` is Go code, so text cannot be produced inside the `INSERT ... SELECT`; rendering rows
+  in Go first would turn the set-based insert into a read-modify-write of every recipient. The content itself is
+  frozen at approval, so only `first_name` and `city` can differ, and consent is re-read at send time anyway.
+- **Alternative:** read the segment into Go, render, and insert with `unnest` (one more round trip and memory
+  proportional to the audience; a text snapshot per recipient).
+
+### Delivery statuses: queued, sending, sent, failed, skipped
+- **Decision:** a retry is `queued` with `attempts > 0` and a later `next_attempt_at`; the dashboard's "retrying" is
+  derived from that. `skipped` means the user withdrew consent for the channel before the send. A campaign becomes
+  `completed_with_failures` only when a delivery is `failed`; `skipped` does not count as a failure.
+- **Why:** fewer states means fewer transitions to get wrong. Withdrawn consent is the system working as intended.
+- **Alternative:** a separate `retrying` status; it duplicates information already in the row.
+- Constraints tie the lease to the state: `lease_until` is set exactly while `sending`, `sent_at` exactly when `sent`.
+
+### Fake seed contact data that cannot reach a real person
+- **Decision:** e-mails are `userNNNNN@example.com` (example.com is reserved by RFC 2606). Phones are `+90000` followed by
+  seven digits. A Turkish national number never begins with 0 after the country code, so none of these numbers
+  is dialable. Generation uses a fixed PCG seed, and every random draw happens whether or not the row is inserted.
+- **Why:** the repo is public and the data ends up in logs and screenshots; a realistic-looking +90 5xx number could
+  belong to someone. Unique e-mail and phone make `ON CONFLICT DO NOTHING` the idempotency mechanism: events
+  are written only for users that were inserted, so a second run adds nothing.
+- **Alternative:** "reserved for fiction" ranges such as +1 555 01xx; there are only 100 of them, and the case needs ~5,000.
+- Consent rates are independent per channel (about 70 % SMS, 85 % e-mail); 15 % of users have language `en`; the
+  first cities of `segment.Cities()` are weighted heavier; `total_orders` counts the purchases in the window plus
+  older orders, and `total_spent_kurus` is the sum of their amounts.
+
+### Integration tests: build tag, a database per test, never skipped
+- **Decision:** tests that need PostgreSQL carry `//go:build integration` and use `internal/testdb`, which creates
+  a database `scc_test_<random>` from `TEST_DATABASE_URL`, migrates it and drops it afterwards. An unset or
+  unreachable URL fails the test.
+- **Why:** `make test-unit` stays fast and database-free on the developer's machine, while `make test` runs
+  everything and cannot turn green by skipping.
+- **Alternative:** skip when the variable is unset (the usual convention); it hides a broken CI setup.
+
+### PostgreSQL image pinned to `postgres:17.6-alpine`
+- **Decision:** a full version tag, not `latest` or a major tag.
+- **Why:** the seed, the queue queries and the tests behave the same on every machine and on the evaluator's.
+
+## Open issues
+
+(Things that were not finished or need a human decision; one entry per issue.)
