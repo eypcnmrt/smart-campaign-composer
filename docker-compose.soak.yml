@@ -1,0 +1,35 @@
+# Override for `make soak`: a provider that misbehaves on purpose, and the driver that checks the outcome.
+# Used together with docker-compose.yml under its own project name, so it never touches the normal stack's data:
+#   docker compose -p scc-soak -f docker-compose.yml -f docker-compose.soak.yml ...
+
+services:
+  mock-provider:
+    environment:
+      MOCK_SEED: 2025
+      MOCK_DELAY_MIN: 5ms
+      MOCK_DELAY_MAX: 40ms
+      MOCK_ERROR_RATE: "0.10"
+      MOCK_THROTTLE_RATE: "0.08"
+      MOCK_RETRY_AFTER: 1s
+      MOCK_LATE_RATE: "0.03"
+      MOCK_LATE_DELAY: 7s # longer than the worker's 5s request timeout: delivered, but the reply comes too late
+
+  soak:
+    build:
+      context: ./backend
+      target: composer
+    image: smart-campaign-composer/composer:dev
+    entrypoint: ["soak"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-scc}:${POSTGRES_PASSWORD:-scc-dev-password}@db:5432/${POSTGRES_DB:-scc}?sslmode=disable
+      PROVIDER_URL: http://mock-provider:8081
+      SOAK_USERS: ${SOAK_USERS:-2500} # two channels each: 5,000 messages
+      SOAK_RATE_CAP: "100"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
+      worker:
+        condition: service_started
+    restart: "no"

@@ -138,8 +138,13 @@ const ALLOWED = [
   ['PowerShell', { command: 'Get-Content docs\\PLAN.md' }],
 ];
 
+// A drive-letter path (C:\x) is only an absolute path on Windows. On Linux (the test container) it is
+// an ordinary relative name, so those cases cannot be blocked there and are only run on Windows.
+const windowsDrivePath = (input) => /(^|[\s:=])[A-Za-z]:\\/.test(String(input.command ?? ''));
+const skipHere = (input) => process.platform !== 'win32' && windowsDrivePath(input) && 'Windows drive paths are only resolved on Windows';
+
 BLOCKED.forEach(([tool, input]) => {
-  test(`blocks ${tool}: ${JSON.stringify(input)}`, () => {
+  test(`blocks ${tool}: ${JSON.stringify(input)}`, { skip: skipHere(input) }, () => {
     const r = run(tool, input);
     assert.strictEqual(r.code, 2, `expected block, got ${r.code}`);
     assert.match(r.err, /^Blocked by guard: [^\n]+\n$/, 'message must be a single line');

@@ -1,0 +1,90 @@
+# The delivery side of the stack: database, migrations, seed data, mock provider and worker.
+# The api and the web app are added with their components.
+#
+# Every setting has a default, so `docker compose up` works without a .env file. The values below
+# are for local development only (the database is not published outside the compose network).
+
+name: smart-campaign-composer
+
+x-composer: &composer
+  build:
+    context: ./backend
+    target: composer
+  image: smart-campaign-composer/composer:dev
+  environment: &composer-env
+    DATABASE_URL: postgres://${POSTGRES_USER:-scc}:${POSTGRES_PASSWORD:-scc-dev-password}@db:5432/${POSTGRES_DB:-scc}?sslmode=disable
+    PROVIDER_URL: http://mock-provider:8081
+
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-scc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-scc-dev-password}
+      POSTGRES_DB: ${POSTGRES_DB:-scc}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # One-off jobs: they run to completion and the services behind them wait for that.
+  migrate:
+    <<: *composer
+    command: ["migrate"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  seed:
+    <<: *composer
+    command: ["seed"]
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: "no"
+
+  mock-provider:
+    build:
+      context: ./backend
+      target: mock-provider
+    image: smart-campaign-composer/mock-provider:dev
+    environment:
+      MOCK_SEED: ${MOCK_SEED:-1}
+      MOCK_DELAY_MIN: ${MOCK_DELAY_MIN:-5ms}
+      MOCK_DELAY_MAX: ${MOCK_DELAY_MAX:-25ms}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0}
+      MOCK_THROTTLE_RATE: ${MOCK_THROTTLE_RATE:-0}
+      MOCK_RETRY_AFTER: ${MOCK_RETRY_AFTER:-1s}
+      MOCK_RATE_LIMIT: ${MOCK_RATE_LIMIT:-0}
+      MOCK_LATE_RATE: ${MOCK_LATE_RATE:-0}
+      MOCK_LATE_DELAY: ${MOCK_LATE_DELAY:-3s}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8081/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  worker:
+    <<: *composer
+    command: ["worker"]
+    environment:
+      <<: *composer-env
+      WORKER_RATE: ${WORKER_RATE:-100}
+      WORKER_REQUEST_TIMEOUT: ${WORKER_REQUEST_TIMEOUT:-5s}
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+      mock-provider:
+        condition: service_healthy
+    # Time to finish the sends in flight after SIGTERM (the request timeout is 5s).
+    stop_grace_period: 20s
+    restart: unless-stopped
+
+volumes:
+  db-data:

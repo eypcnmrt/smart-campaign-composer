@@ -1,0 +1,50 @@
+# Everything `make test` needs, with nothing installed on the host but Docker: a throwaway PostgreSQL
+# and containers that run the Go checks and the hook/script tests. No API key is involved.
+#
+#   docker compose -f docker-compose.test.yml run --rm backend
+#   docker compose -f docker-compose.test.yml run --rm hooks
+
+name: scc-test
+
+services:
+  db:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_PASSWORD: test
+    # Test data only: durability is not needed, speed is.
+    command: ["postgres", "-c", "fsync=off", "-c", "synchronous_commit=off", "-c", "max_connections=200"]
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 1s
+      timeout: 3s
+      retries: 60
+
+  # gofmt, go vet, and go test -race for every package, including the integration tests that need the database.
+  backend:
+    image: golang:1.27
+    working_dir: /src
+    command: ["sh", "scripts/test-backend.sh"]
+    environment:
+      GOFLAGS: -buildvcs=false
+      TEST_DATABASE_URL: postgres://postgres:test@db:5432/postgres?sslmode=disable
+    volumes:
+      - .:/src:ro
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Tests of the protection hooks and of the session scanner.
+  hooks:
+    image: node:22-alpine
+    working_dir: /src
+    command: ["node", "--test", ".claude/hooks/*.test.cjs", "scripts/*.test.cjs"]
+    volumes:
+      - .:/src:ro
+
+volumes:
+  gomod:
+  gocache:

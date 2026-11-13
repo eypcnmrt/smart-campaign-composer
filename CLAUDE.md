@@ -8,8 +8,11 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - Runtime: Docker Compose. LLM access goes through the `LLMClient` interface (Anthropic or mock).
 
 ## Commands
-- `docker compose up` - run the whole stack (planned)
-- `make test` - Go unit/integration + frontend tests in Docker, needs no API key (planned)
+- `docker compose up` - db, migrate, seed, mock-provider, worker (api and web come later); every setting has a default, no dotenv file needed
+- `make test` - gofmt, `go vet`, `go test -race` incl. PostgreSQL integration tests (`-tags=integration`, fail instead of skip without a database) and the hook/scanner tests, all in Docker, no API key (frontend tests come later)
+- `make soak` - 5,000 messages through the real containers with a chaos provider; checks no double send, 100/s cap, Retry-After
+- Do not run `docker compose config` (the guard blocks it); verify with `docker compose up -d` and `docker compose ps -a`
+- Packages added in `backend/internal/`: `migrate`, `db`, `testdb`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `worker`, `soak`; SQL in `backend/migrations/`
 - `make fmt` / `make vet` / `make test-unit` - Go formatting, `go vet`, `go test ./...` (local, no Docker, no API key)
 - `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per target; `-race` runs later in Docker (needs a C compiler on Windows)
 - Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`

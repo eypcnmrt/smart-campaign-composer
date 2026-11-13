@@ -360,6 +360,45 @@ here when the README is written.
 - **Why:** the audience is the one the marketer saw when approving; running the worker later or twice cannot change it.
 - **Alternative:** compiling with `now()` at enqueue time (the audience drifts by the hours between approval and enqueue).
 
+## Docker and the test commands
+
+### `make test` is a compose file of its own, and the hook tests skip Windows drive paths on Linux
+- **Decision:** `docker-compose.test.yml` has a throwaway PostgreSQL (tmpfs, `fsync=off`), a `golang:1.27` container
+  that runs `gofmt -l`, `go vet -tags=integration` and `go test -race -tags=integration ./...` with the source mounted
+  read-only, and a `node:22-alpine` container for the hook and scanner tests. `scripts/test.sh` runs them and always
+  removes the containers and volumes afterwards. About 75 s on a warm cache.
+  In the guard hook tests, the cases whose paths are drive letters (`C:\x`) run only on Windows: on Linux such a path
+  is an ordinary relative name, so the guard cannot see it is outside the project. The guard itself is unchanged.
+- **Why:** the evaluator has Docker and make only (docs/PLAN.md section 2, assumption 15). A separate file keeps the
+  test database away from the application stack, and the read-only mount makes sure a test cannot dirty the checkout.
+- **Alternative:** one compose file with profiles (the application and test settings share a file and a namespace).
+  Making the guard understand Windows paths on Linux was rejected: it would change a security hook overnight for no
+  gain, because the PowerShell tool only exists on Windows.
+
+### The stack: one image per binary, jobs as services, every setting has a default
+- **Decision:** `backend/Dockerfile` builds all binaries once (static, `CGO_ENABLED=0`) and has two small runtime
+  images on `alpine:3.22`, both running as UID 10001: `composer` (api, worker, migrate, seed, soak) and
+  `mock-provider`. In `docker-compose.yml`, `migrate` and `seed` are one-off services (`restart: "no"`) and the worker
+  waits for `service_completed_successfully` of the seed and `service_healthy` of the provider. Every variable is
+  written `${NAME:-default}` and there is no `env_file`, so `docker compose up` works without a dotenv file. The
+  database is not published on the host.
+- **Why:** a missing dotenv file must not stop the evaluator, and the development database password is not a secret
+  (the database is reachable only inside the compose network). Migrations run before anything else, once, so the worker
+  and the api never race on the schema.
+- **Alternative:** run migrations inside the worker and api on start. Fewer services, but two processes would migrate at
+  the same time (the advisory lock makes that safe, not pleasant) and a failed migration would look like a crashing api.
+
+### `make soak` runs the real containers under their own project name
+- **Decision:** `scripts/soak.sh` starts a second compose project (`scc-soak`) with `docker-compose.soak.yml`: a provider
+  with 10 % 500s, 8 % 429s with Retry-After, 3 % replies that arrive after the worker's timeout, and the `soak` driver.
+  The driver inserts 2,500 users (2 channels = 5,000 messages) that only its own campaign selects, waits for completion
+  and compares the provider's `/stats` with the database. It exits non-zero if the provider accepted a different number
+  of messages than the database calls sent, a second passed with more than 100 requests, a retry came before its
+  Retry-After, a delivery is not final, or the provider injected no failure at all (a run that proves nothing).
+- **Why:** the integration tests use an in-process provider; the soak exercises the images, the network and the compose
+  start-up order. A separate project means `make soak` never touches the normal database.
+- **Alternative:** a Go test with a build tag. Easier, but it would not test the shipped binaries.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue.)
