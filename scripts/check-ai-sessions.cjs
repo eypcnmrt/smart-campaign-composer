@@ -33,7 +33,8 @@ const maskEmail = (v) => {
 };
 const maskPhone = (v) => `[${v.replace(/\D/g, '').length} digits, ends ${v.replace(/\D/g, '').slice(-2)}]`;
 
-// Each rule: type, regex (global), value picker, masker, optional filter.
+// Each rule: type, regex (global), value picker, masker, optional filters (skip: drop a match
+// in context, ok: drop a picked value).
 const RULES = [
   { type: 'api-key', re: /sk-ant-[A-Za-z0-9_-]{20,}/g, mask: maskSecret },
   { type: 'api-key', re: /\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}/g, mask: maskSecret },
@@ -52,7 +53,8 @@ const RULES = [
   {
     type: 'email',
     re: /[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}/g,
-    ok: (v) => !ALLOWED_EMAILS.has(v.toLowerCase()),
+    // A cut-off copy of an allowed address (a diff or terminal line that was truncated) is not a new leak.
+    ok: (v) => ![...ALLOWED_EMAILS].some((a) => a === v.toLowerCase() || (v.includes('@') && a.startsWith(v.toLowerCase()))),
     mask: maskEmail,
   },
   // international (+CC ...) and Turkish national formats, separators required to avoid bare digit runs
@@ -68,8 +70,11 @@ const RULES = [
     type: 'home-path',
     // C:\Users\name, C:/Users/name, /c/Users/name, /Users/name, /home/name
     re: /(?:[A-Za-z]:[\\/]+|\/[a-z]\/|\/mnt\/[a-z]\/|\/)(?:Users|home)[\\/]+([^\\/\s"'`<>*:|]+)/g,
-    pick: (m) => m[1],
-    ok: (v) => !SAFE_USERS.has(v.toLowerCase()) && !ALLOWED_HOME_USERS.has(v.toLowerCase()),
+    // trailing sentence punctuation is not part of a user name ("C:\Users\X, ...")
+    pick: (m) => m[1].replace(/[.,;)\]}]+$/, ''),
+    // the user segment is already masked in the text (…/Users/E***): this is the scanner's own output
+    skip: (m, line) => line[m.index + m[0].length] === '*',
+    ok: (v) => v !== '' && !SAFE_USERS.has(v.toLowerCase()) && !ALLOWED_HOME_USERS.has(v.toLowerCase()),
     mask: (v) => `…/Users/${v[0]}***`,
   },
 ];
@@ -98,6 +103,7 @@ for (const file of walk(dir)) {
     for (const rule of RULES) {
       for (const m of line.matchAll(rule.re)) {
         const value = rule.pick ? rule.pick(m) : m[0];
+        if (rule.skip && rule.skip(m, line)) continue;
         if (rule.ok && !rule.ok(value)) continue;
         const start = m.index;
         const end = m.index + m[0].length;
