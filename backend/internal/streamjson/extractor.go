@@ -18,7 +18,7 @@ import (
 )
 
 // Delta is a piece of a field's decoded text: escapes are resolved, so "\n"
-// arrives as a newline and "ç" as "ç".
+// arrives as a newline and "\u00e7" as "ç".
 type Delta struct {
 	Field string
 	Text  string

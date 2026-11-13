@@ -91,7 +91,7 @@ func TestParse(t *testing.T) {
 		},
 		{
 			name: "escapes are decoded",
-			in:   `{"sms":"çay \"x\"\n","email_subject":"b","email_body":"😀"}`,
+			in:   `{"sms":"\u00e7ay \"x\"\n","email_subject":"b","email_body":"\ud83d\ude00"}`,
 			want: Content{SMS: "çay \"x\"\n", EmailSubject: "b", EmailBody: "😀"},
 		},
 		{name: "empty input", in: ``, malformed: true},

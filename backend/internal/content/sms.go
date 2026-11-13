@@ -30,8 +30,8 @@ type SMSInfo struct {
 }
 
 // gsm7Basic is the GSM 03.38 default alphabet (one septet per character) and
-// gsm7Extension the escape table (two septets). Greek letters are written as
-// escapes so a look-alike Latin letter cannot slip in.
+// gsm7Extension the escape table (two septets). TestGSM7Alphabet checks the
+// sizes, so a typo or a look-alike letter in either table is caught.
 const (
 	gsm7Basic = "@£$¥èéùìòÇ\nØø\rÅå" +
 		"Δ_ΦΓΛΩΠΨΣΘΞ" +

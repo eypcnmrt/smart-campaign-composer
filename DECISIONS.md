@@ -67,7 +67,7 @@ here when the README is written.
 
 ### A small partial-JSON extractor, with the final decode as the source of truth
 - **Decision:** `streamjson.Extractor` is a byte-level state machine for one shape only: a flat object
-  with string values. It resolves escapes (`\"`, `\n`, `ç`, surrogate pairs) and holds back anything
+  with string values. It resolves escapes (`\"`, `\n`, `\u00e7`, surrogate pairs) and holds back anything
   unfinished across chunk boundaries (half an escape, half a multi-byte character, the first half of a
   surrogate pair). Invalid UTF-8 and unpaired surrogates become U+FFFD exactly as `encoding/json` does.
   On anything else (nested value, duplicate field, bad escape) it stops with `ErrUnexpected` and the
