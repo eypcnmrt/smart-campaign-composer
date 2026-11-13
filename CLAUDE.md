@@ -10,7 +10,13 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 ## Commands
 - `docker compose up` - run the whole stack (planned)
 - `make test` - Go unit/integration + frontend tests in Docker, needs no API key (planned)
-- `node --test .claude/hooks/guard.test.cjs` - tests for the protection hook
+- `make fmt` / `make vet` / `make test-unit` - Go formatting, `go vet`, `go test ./...` (local, no Docker, no API key)
+- `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per target; `-race` runs later in Docker (needs a C compiler on Windows)
+- Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`
+  and run vet in a container: `docker run --rm -v "$PWD/backend:/src:ro" -w /src -e GOCACHE=/tmp/gocache golang:1.27 go vet ./...`
+- `node --test ".claude/hooks/*.test.cjs"` - tests for the protection hook and the gofmt hook
+- Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue app will live in `web/`
+- `.claude/hooks/gofmt.cjs` runs `gofmt -w` after every edit of a `.go` file (silent if gofmt is missing)
 - `node scripts/check-ai-sessions.cjs` - scan `ai-sessions/` for keys, e-mails, phones, home paths (masked report)
 - `gitleaks git --staged --redact` - what the pre-commit hook runs
 
