@@ -14,8 +14,17 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per target; `-race` runs later in Docker (needs a C compiler on Windows)
 - Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`
   and run vet in a container: `docker run --rm -v "$PWD/backend:/src:ro" -w /src -e GOCACHE=/tmp/gocache golang:1.27 go vet ./...`
+- Go commands run in a container, not on Windows (Application Control blocks new binaries). From PowerShell, with module and
+  build caches in named volumes (replace the last words, e.g. `gofmt -l .`, `go vet ./...`, `go test -race ./...`,
+  `go test -run '^$' -fuzz '^FuzzExtractor$' -fuzztime 20s ./internal/streamjson/`; this also gives `-race` a C compiler):
+  `docker run --rm -v "${PWD}:/src" -w /src/backend -v scc-gomod:/go/pkg/mod -v scc-gocache:/root/.cache/go-build -e GOFLAGS=-buildvcs=false golang:1.27 go test ./...`
 - `node --test ".claude/hooks/*.test.cjs"` - tests for the protection hook and the gofmt hook
 - Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue app will live in `web/`
+- Packages in `backend/internal/`: `segment` (rule DSL, validation, SQL, JSON schema), `content` (limits, variables, render, SMS info),
+  `streamjson` (partial JSON for streamed text), `llm` (`Client`, Anthropic + mocks, `FromEnv`), `compose` (prompts and repair loop).
+  Tests never need an API key: the Anthropic client is tested against a fake API server, the repair loop with `llm.Scripted`.
+- Tool quirk: `Write`/`Edit` turn a typed backslash-u-0-0-e-7 into the character "ç" itself (lone surrogates and a doubled backslash are left alone).
+  To put a literal JSON escape in a file, type a placeholder such as `¦u00e7` and replace the `¦` with a backslash with `node` afterwards.
 - `.claude/hooks/gofmt.cjs` runs `gofmt -w` after every edit of a `.go` file (silent if gofmt is missing)
 - `node scripts/check-ai-sessions.cjs` - scan `ai-sessions/` for keys, e-mails, phones, home paths (masked report)
 - `gitleaks git --staged --redact` - what the pre-commit hook runs
