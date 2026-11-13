@@ -9,6 +9,8 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
+	"net/url"
 	"os"
 	"testing"
 	"time"
@@ -25,6 +27,14 @@ const EnvURL = "TEST_DATABASE_URL"
 // New creates a database named scc_test_<random>, applies all migrations and returns a pool for
 // it. The database is dropped when the test ends.
 func New(t testing.TB) *pgxpool.Pool {
+	t.Helper()
+	pool, _ := NewWithURL(t)
+	return pool
+}
+
+// NewWithURL is New that also returns the connection URL of the new database, for code under test
+// that opens its own connection (the composer commands read DATABASE_URL).
+func NewWithURL(t testing.TB) (*pgxpool.Pool, string) {
 	t.Helper()
 	url := os.Getenv(EnvURL)
 	if url == "" {
@@ -60,6 +70,11 @@ func New(t testing.TB) *pgxpool.Pool {
 		t.Fatalf("parsing %s: invalid format", EnvURL)
 	}
 	cfg.ConnConfig.Database = name
+	dbURL, err := withDatabase(url, name)
+	if err != nil {
+		admin.Close()
+		t.Fatalf("building the test database url: %v", err)
+	}
 	cfg.MaxConns = 30
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
@@ -75,7 +90,7 @@ func New(t testing.TB) *pgxpool.Pool {
 	if _, err := migrate.Up(ctx, pool, migrations.FS); err != nil {
 		t.Fatalf("migrating the test database: %v", err)
 	}
-	return pool
+	return pool, dbURL
 }
 
 func dropDatabase(t testing.TB, admin *pgxpool.Pool, name string) {
@@ -86,4 +101,14 @@ func dropDatabase(t testing.TB, admin *pgxpool.Pool, name string) {
 	if _, err := admin.Exec(ctx, `DROP DATABASE IF EXISTS `+name+` WITH (FORCE)`); err != nil {
 		t.Errorf("dropping test database %s: %v", name, err)
 	}
+}
+
+// withDatabase returns the URL with its database name replaced.
+func withDatabase(raw, name string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", fmt.Errorf("invalid format")
+	}
+	u.Path = "/" + name
+	return u.String(), nil
 }

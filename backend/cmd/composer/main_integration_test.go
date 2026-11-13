@@ -13,8 +13,7 @@ import (
 
 // The migrate and seed commands against a real database, twice: the second run adds nothing.
 func TestRun_migrateAndSeed(t *testing.T) {
-	pool := testdb.New(t) // creates an empty-but-migrated database; use its URL for the commands
-	url := pool.Config().ConnString()
+	_, url := testdb.NewWithURL(t) // a migrated, empty database of its own
 	t.Setenv(envDatabaseURL, url)
 	t.Setenv(envSeedUsers, "50")
 
