@@ -62,3 +62,21 @@ here when the README is written.
   messages. A unit test checks the alphabet size so a typo cannot flip texts between encodings.
 - **Alternative:** "any non-ASCII means UCS-2". Simpler, but wrong for ü, ö and Ç, which are extremely
   common in Turkish text. Turkish national shift tables are not assumed, because carriers rarely use them.
+
+## Streaming
+
+### A small partial-JSON extractor, with the final decode as the source of truth
+- **Decision:** `streamjson.Extractor` is a byte-level state machine for one shape only: a flat object
+  with string values. It resolves escapes (`\"`, `\n`, `ç`, surrogate pairs) and holds back anything
+  unfinished across chunk boundaries (half an escape, half a multi-byte character, the first half of a
+  surrogate pair). Invalid UTF-8 and unpaired surrogates become U+FFFD exactly as `encoding/json` does.
+  On anything else (nested value, duplicate field, bad escape) it stops with `ErrUnexpected` and the
+  caller shows what it has. What it emitted is only a preview: when the stream ends, the whole text is
+  decoded with `encoding/json` (`content.Parse`) and validated, and that result replaces the preview.
+- **Why:** the model produces the JSON in small pieces and the UI should show the text as it is written
+  (docs/PLAN.md section 4.2). Tests cut every sample at every byte and compare with `encoding/json`; a
+  fuzz target checks that chunking never changes the result and that any flat string object accepted by
+  `encoding/json` yields the same text.
+- **Alternative:** a streaming JSON library, or regexes on the raw text. A library would still need the
+  chunk-boundary handling tested; regexes break on escaped quotes. The fallback from the plan stands: if
+  the extractor errors, show the raw stream and let the final validated result replace it.

@@ -3,7 +3,7 @@
 #   make fmt        format Go code
 #   make vet        go vet
 #   make test-unit  go test ./...   (extra flags: make test-unit GOTESTFLAGS=-vet=off)
-#   make fuzz       fuzz the segment compiler (FUZZTIME=30s each by default)
+#   make fuzz       fuzz the segment compiler and the stream extractor (FUZZTIME=30s each by default)
 #
 # -race needs a C compiler on Windows, so it runs in the Docker-based test target.
 
@@ -25,3 +25,4 @@ test-unit:
 fuzz:
 	$(GO) -C backend test $(GOTESTFLAGS) ./internal/segment -fuzz=^FuzzCompile$$ -fuzztime=$(FUZZTIME)
 	$(GO) -C backend test $(GOTESTFLAGS) ./internal/segment -fuzz=^FuzzCompileValues$$ -fuzztime=$(FUZZTIME)
+	$(GO) -C backend test $(GOTESTFLAGS) ./internal/streamjson -fuzz=^FuzzExtractor$$ -fuzztime=$(FUZZTIME)
