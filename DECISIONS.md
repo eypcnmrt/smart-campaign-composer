@@ -272,7 +272,7 @@ here when the README is written.
 
 ### Random behaviour is derived from the request, not drawn from a shared stream
 - **Decision:** whether a request is throttled, fails, is answered late and how long it takes is computed from
-  , the channel, the idempotency key and how many times that key has been seen (a PCG seeded from them).
+  `MOCK_SEED`, the channel, the idempotency key and how many times that key has been seen (a PCG seeded from them).
 - **Why:** concurrent workers deliver requests in an order no seed can fix, so a shared generator gives different
   failures on every run. This way key K always has the same fate on its first, second and third attempt, and a
   failing run can be repeated. Successive attempts of one key differ, so a retry can succeed.
@@ -280,7 +280,7 @@ here when the README is written.
 
 ### Only an accepted message is remembered; late replies still deliver
 - **Decision:** a 429 or 500 does not store the key, because nothing was accepted. A "late" request is accepted first and
-  answered after , which models a timeout on the client's side of a message the provider delivered.
+  answered after `MOCK_LATE_DELAY`, which models a timeout on the client's side of a message the provider delivered.
   A repeated key returns the first reply and counts as a duplicate, not as a second message. Accepting is
   check-and-insert under one lock, so a retry that overtakes a slow first attempt cannot create two messages.
 - **Why:** this is the one failure that makes at-least-once delivery visible to the customer, and the case the
@@ -288,10 +288,11 @@ here when the README is written.
 - **Alternative:** remember every key, including failed ones; that would hide whether the worker really retried.
 
 ### The provider measures the worker for us
-- **Decision:**  reports per channel the unique accepted keys, duplicate keys, 429s, 500s, late replies,
-  the largest number of requests that arrived in any half-open one-second window, and   (a key that came back before the Retry-After of its last 429). Windows are [t, t+1s).
+- **Decision:** `GET /stats` reports per channel the unique accepted keys, duplicate keys, 429s, 500s, late replies,
+  the largest number of requests that arrived in any half-open one-second window [t, t+1s), and
+  `retry_after_violations` (a key that came back before the Retry-After of its last 429).
 - **Why:** the rate limit and Retry-After claims are then checked by an independent observer instead of by the
-  worker's own bookkeeping. The provider's own limit () is off by default so it never
+  worker's own bookkeeping. The provider's own limit (`MOCK_RATE_LIMIT`) is off by default so it never
   interferes with a correct client.
 - **Alternative:** assert on the worker's timestamps only; that proves what the worker thinks it did.
 
