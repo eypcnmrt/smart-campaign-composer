@@ -31,6 +31,12 @@ const (
 	maxOrders     = 1<<31 - 1 // total_orders is a 32-bit column
 )
 
+// Limits that the prompt sent to the LLM states; Validate enforces them.
+const (
+	MaxConditions = maxConditions
+	MaxWithinDays = maxWithinDays
+)
+
 var (
 	// cities and languages are the canonical value lists. Seed data, the
 	// validator and (later) the LLM prompt all read them through Cities and
