@@ -180,6 +180,18 @@ Kural: her oturum sonunda `/export` → `ai-sessions/`'a koy → key ve kişisel
 
 ---
 
+## Revize takvim
+
+Yukarıdaki §5 takvimi (15 Kasım teslim) olduğu gibi duruyor; teslim **17 Kasım Salı gün sonuna** kaydı, bu yüzden aşağıdaki takvim geçerli.
+
+| Gün | İş |
+|---|---|
+| **Cuma (13 Kasım)** | Go iskeleti ve segment DSL (bitti), LLM katmanı. Gece: DB, seed, mock provider, kuyruk ve worker, Docker içinde `make test` |
+| **Cumartesi (7–8 sa)** | Kampanya API'si (brief → segment ve sayılar, içerik SSE, düzenleme, onay ve snapshot), `/healthz` `/readyz` `/metrics`, compose'a api; ardından frontend'e başlangıç. Gece: frontend ilk sürüm |
+| **Pazar (5–6 sa)** | Frontend, temiz klondan uçtan uca prova, gerçek API smoke testi. Gece: README ve DECISIONS taslakları, CI, eksik testler |
+| **Pazartesi (3 sa)** | Son kontroller, temiz klonda `docker compose up` ve `make test`, son tarama, push |
+| **Salı (17 Kasım)** | Yalnızca teslim maili |
+
 ## 6. Doğrulama
 - `make test` (Docker içinde, key yok): segment validator/derleyici, içerik validator, onarım döngüsü (mock LLM), retry/backoff politikası, dispatcher integration (Postgres + kaos ayarlı mock provider): çift gönderim yok, rate ≤100/s/kanal, izinsiz kullanıcıya gönderim yok
 - Temiz klonda `docker compose up` → UI'da örnek brief ile akışı baştan sona çalıştır; dashboard'da retry ve 429'ların göründüğünü ve sonunda tüm teslimatların sonuçlandığını gör
