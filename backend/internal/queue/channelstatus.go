@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"time"
+
+	"github.com/jackc/pgx/v5"
 )
 
 // Circuit states as stored in worker_channel_status.circuit.
@@ -51,7 +53,18 @@ func (q *Queue) SetChannelStatus(ctx context.Context, channel, circuit, lastErro
 // ChannelStatuses returns the last report of every channel that has one, by channel. A channel the worker never
 // reported is missing from the map.
 func (q *Queue) ChannelStatuses(ctx context.Context) (map[string]ChannelStatus, error) {
-	rows, err := q.pool.Query(ctx, `
+	return q.ChannelStatusesFrom(ctx, q.pool)
+}
+
+// Querier is what a read needs: a pool, a connection or a transaction.
+type Querier interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+}
+
+// ChannelStatusesFrom is ChannelStatuses over the given pool or transaction, so a caller that reads other things as well can
+// read them all from one snapshot.
+func (q *Queue) ChannelStatusesFrom(ctx context.Context, db Querier) (map[string]ChannelStatus, error) {
+	rows, err := db.Query(ctx, `
 		SELECT channel, circuit, last_error, updated_at, EXTRACT(EPOCH FROM now() - updated_at)::float8, rate_per_second
 		FROM worker_channel_status`)
 	if err != nil {

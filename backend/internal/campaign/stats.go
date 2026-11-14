@@ -89,13 +89,32 @@ func ProviderStatus(s queue.ChannelStatus, reported bool, staleAfter time.Durati
 	return info
 }
 
+// reader is what the stats reads need: the queries of a pool or of a transaction.
+type reader interface {
+	Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
 // Stats returns the delivery counts of a campaign per channel and the worker's report for each, or ErrNotFound.
 // staleAfter is how old a worker report may be before the worker is considered not running.
+//
+// Every read of the request (the campaign row, the counts, the send times, the timeline and the worker's report) runs in one
+// REPEATABLE READ, read-only transaction, so they all see the same moment: a message the worker records meanwhile is in the
+// counts and in the chart, or in neither. A read-only snapshot takes no locks and blocks nobody (a poll of one second).
 func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter time.Duration) (Stats, error) {
+	tx, err := s.pool.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly})
+	if err != nil {
+		return Stats{}, fmt.Errorf("opening the snapshot for the stats of campaign %d: %w", id, err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }() // nothing was written; the rollback only ends the snapshot
+	return s.stats(ctx, tx, q, id, staleAfter)
+}
+
+func (s *Store) stats(ctx context.Context, db reader, q *queue.Queue, id int64, staleAfter time.Duration) (Stats, error) {
 	var status string
 	var channels, approved []string
 	var approvedAt, completedAt *time.Time
-	err := s.pool.QueryRow(ctx, `SELECT status, channels, approved_channels, approved_at, completed_at FROM campaigns WHERE id = $1`, id).
+	err := db.QueryRow(ctx, `SELECT status, channels, approved_channels, approved_at, completed_at FROM campaigns WHERE id = $1`, id).
 		Scan(&status, &channels, &approved, &approvedAt, &completedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Stats{}, ErrNotFound
@@ -112,7 +131,7 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 		out.Channels[ch] = ChannelCounts{}
 	}
 
-	rows, err := s.pool.Query(ctx, StatsSQL, id)
+	rows, err := db.Query(ctx, StatsSQL, id)
 	if err != nil {
 		return Stats{}, fmt.Errorf("counting the deliveries of campaign %d: %w", id, err)
 	}
@@ -154,7 +173,7 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 	}
 
 	if approvedAt != nil {
-		timelines, peak, average, err := s.timelines(ctx, id, *approvedAt, completedAt, slices.Collect(maps.Keys(out.Channels)))
+		timelines, peak, average, err := s.timelines(ctx, db, id, *approvedAt, completedAt, slices.Collect(maps.Keys(out.Channels)))
 		if err != nil {
 			return Stats{}, err
 		}
@@ -171,7 +190,7 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 		out.Summary = &sum
 	}
 
-	reports, err := q.ChannelStatuses(ctx)
+	reports, err := q.ChannelStatusesFrom(ctx, db)
 	if err != nil {
 		return Stats{}, err
 	}

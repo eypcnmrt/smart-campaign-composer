@@ -62,10 +62,10 @@ const TimelineSQL = `SELECT channel, GREATEST(floor(extract(epoch FROM sent_at -
 
 // timelines reads the per-channel timelines of an approved campaign. approvedAt is the start; completedAt is nil while the send
 // goes on. It returns the timelines by channel, the busiest bucket per second and the average per second over all channels.
-func (s *Store) timelines(ctx context.Context, id int64, approvedAt time.Time, completedAt *time.Time, channels []string) (map[string]*Timeline, float64, float64, error) {
+func (s *Store) timelines(ctx context.Context, db reader, id int64, approvedAt time.Time, completedAt *time.Time, channels []string) (map[string]*Timeline, float64, float64, error) {
 	var now time.Time
 	var first, last *time.Time
-	if err := s.pool.QueryRow(ctx, TimelineBoundsSQL, id).Scan(&now, &first, &last); err != nil {
+	if err := db.QueryRow(ctx, TimelineBoundsSQL, id).Scan(&now, &first, &last); err != nil {
 		return nil, 0, 0, fmt.Errorf("reading the send times of campaign %d: %w", id, err)
 	}
 	start := approvedAt.Truncate(time.Second)
@@ -86,7 +86,7 @@ func (s *Store) timelines(ctx context.Context, id int64, approvedAt time.Time, c
 	for _, ch := range channels {
 		out[ch] = &Timeline{Start: start, BucketSeconds: width, Accepted: make([]int, n)}
 	}
-	rows, err := s.pool.Query(ctx, TimelineSQL, id, start, width)
+	rows, err := db.Query(ctx, TimelineSQL, id, start, width)
 	if err != nil {
 		return nil, 0, 0, fmt.Errorf("counting the messages of campaign %d per second: %w", id, err)
 	}

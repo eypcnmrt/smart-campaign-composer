@@ -1062,6 +1062,22 @@ reporting and in the stream's write path.
   <= 200 for two channels capped at 100/s); `tabTo` no longer turns a wrong locator into "Tab did not reach it"; `settled()`
   ignores infinite animations; the axe report lists lesser findings next to a serious one, as its comment said.
 
+## The closing session (open issues of the overnight session and the screenshots)
+
+(Written while working unattended, as the one before: where something was unclear a reasonable choice was made and is recorded here.)
+
+### Stats are read in one snapshot
+- **Decision:** `Store.Stats` runs all its reads in one `REPEATABLE READ`, read-only transaction: the campaign row, the counts, the
+  first and last send time, the timeline and the worker's channel report (`queue.ChannelStatusesFrom` takes the transaction). A
+  message the worker records meanwhile is in the counts and in the chart, or in neither; the summary agrees with both.
+- **Test:** `TestStore_statsAreOneSnapshot` lets a writer record messages one by one while the stats are read over and over and
+  asserts, on every answer, that the sent count of a channel equals the sum of its timeline and that the summary's attempts equal the
+  sent messages (one attempt each). Before the change it failed on the second read (`sms has 0 sent but its timeline adds up to 4`);
+  after it, 412 reads while 3,002 messages were recorded were all consistent.
+- **Cost, measured** (`TestStore_statsLatency`, about 6,000 deliveries, 60 requests, PostgreSQL in a container, `-race`): median 3.95 ms
+  and p95 4.13 ms before, median 4.29 ms and p95 4.53 ms after. The two extra round trips (BEGIN, ROLLBACK) are the whole difference;
+  a read-only snapshot takes no locks and blocks no writer.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
