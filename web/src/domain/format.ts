@@ -30,3 +30,20 @@ export function truncate(text: string, max: number): string {
   const chars = Array.from(flat)
   return chars.length <= max ? flat : `${chars.slice(0, max - 1).join('').trimEnd()}…`
 }
+
+const oneDecimal = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 1 })
+
+/** A rate in messages per second: 98.4 → "98,4", 100 → "100"; one decimal below 100, whole above. */
+export function formatRate(perSecond: number): string {
+  return perSecond >= 100 ? formatNumber(Math.round(perSecond)) : oneDecimal.format(Math.round(perSecond * 10) / 10)
+}
+
+/** A duration given in seconds: 4.8 → "4,8 sn", 65 → "1 dk 05 sn", 3700 → "1 sa 01 dk". */
+export function formatDuration(seconds: number): string {
+  if (seconds < 10) return `${oneDecimal.format(Math.round(seconds * 10) / 10)} sn`
+  const whole = Math.round(seconds)
+  if (whole < 60) return `${whole} sn`
+  const two = (n: number) => String(n).padStart(2, '0')
+  if (whole < 3600) return `${Math.floor(whole / 60)} dk ${two(whole % 60)} sn`
+  return `${Math.floor(whole / 3600)} sa ${two(Math.floor((whole % 3600) / 60))} dk`
+}

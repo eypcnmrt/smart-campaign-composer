@@ -1,15 +1,9 @@
-import type { CampaignStatus, ChannelCounts } from '@/api/types'
+import type { CampaignStatus, ChannelCounts, Timeline } from '@/api/types'
+import { formatNumber, formatRate } from './format'
 import type { Tone } from '@/components/ui/StatusIcon.vue'
 
 // Figures of the delivery dashboard that are not about drawing: how far a channel is, what its rate is, and how a campaign
 // status is called. Pure, so every rule is a table test.
-
-/**
- * The rate limit of one channel, in messages per second. The worker applies it per channel (each channel has its own limiter,
- * backend/internal/worker/worker.go), so the dashboard draws one line on each channel, not one on the total. It is the worker's
- * default: the API does not report the configured value, so a deployment with another RATE_PER_SECOND would show a wrong line.
- */
-export const RATE_LIMIT_PER_CHANNEL = 100
 
 export interface Progress {
   /** Deliveries that are settled: sent, failed for good, or skipped. */
@@ -88,4 +82,51 @@ export const STATUS_LABELS: Record<CampaignStatus, { label: string; tone: Tone }
 /** Whether deliveries of a campaign in this status are still moving, so the numbers are worth asking for again. */
 export function isInFlight(status: CampaignStatus): boolean {
   return status === 'approved' || status === 'sending'
+}
+
+export interface Bar {
+  /** Position in bucket slots from the left, 0-based. */
+  slot: number
+  /** Messages per second in this bucket. */
+  rate: number
+}
+
+export interface ChartModel {
+  /** Number of bucket slots the width holds: at least `MIN_SLOTS`, so a send of three seconds is not three huge slabs. */
+  slots: number
+  /** The top of the scale in messages per second: above the limit and above the highest bar. */
+  max: number
+  bars: Bar[]
+  /** The limit in messages per second, or null when the worker never reported one. */
+  limit: number | null
+  peak: number
+  total: number
+  /** Seconds the chart spans. */
+  seconds: number
+}
+
+export const MIN_SLOTS = 12
+
+/** The bars of a channel's timeline against its limit: pure numbers, so the drawing does no arithmetic. */
+export function chartOf(timeline: Pick<Timeline, 'bucket_seconds' | 'accepted'>, limit: number | null): ChartModel {
+  const width = timeline.bucket_seconds
+  const bars = timeline.accepted.map((n, slot) => ({ slot, rate: n / width }))
+  const peak = bars.reduce((m, b) => Math.max(m, b.rate), 0)
+  const total = timeline.accepted.reduce((a, n) => a + n, 0)
+  return {
+    slots: Math.max(MIN_SLOTS, bars.length),
+    max: Math.max(peak, limit ?? 0, 1) * 1.15,
+    bars,
+    limit,
+    peak,
+    total,
+    seconds: bars.length * width,
+  }
+}
+
+/** The chart in words, for a screen reader (the drawing itself is not read). */
+export function chartText(label: string, chart: ChartModel): string {
+  const limit = chart.limit === null ? '' : ` Sınır: saniyede ${formatRate(chart.limit)} mesaj.`
+  if (chart.total === 0) return `${label}: henüz kabul edilen mesaj yok.${limit}`
+  return `${label}: ${formatNumber(chart.seconds)} saniyede ${formatNumber(chart.total)} mesaj kabul edildi; en yoğun saniyede ${formatRate(chart.peak)} mesaj.${limit}`
 }

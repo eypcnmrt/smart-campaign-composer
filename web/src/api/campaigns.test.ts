@@ -105,6 +105,18 @@ describe('the campaign endpoints', () => {
     expect(fetchFn.mock.calls[0]?.[0]).toBe('/api/campaigns/7/preview?limit=2')
   })
 
+  it('stats: accepts the rate limit, the timeline and the summary, and works without them', async () => {
+    const timeline = { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 5] }
+    const summary = { duration_seconds: null, average_per_second: 5, peak_per_second: 5, retried_messages: 0, total_attempts: 5 }
+    stubFetch({ ...stats, channels: { sms: { ...counts, provider, rate_limit: 100, timeline } }, summary })
+    const got = await getStats(7)
+    expect(got.channels.sms?.timeline?.accepted).toEqual([0, 5])
+    expect(got.channels.sms?.rate_limit).toBe(100)
+    expect(got.summary?.total_attempts).toBe(5)
+    stubFetch({ ...stats, channels: { sms: { ...counts, provider, rate_limit: null, timeline: null } }, summary: null })
+    expect((await getStats(7)).summary).toBeNull()
+  })
+
   it('stats: returns the counts per channel', async () => {
     stubFetch(stats)
     expect((await getStats(7)).channels.sms?.sent).toBe(5)
@@ -139,6 +151,23 @@ describe('a response that does not match the contract is a bad_response', () => 
 
   it('statistics with an unknown provider state', async () => {
     stubFetch({ ...stats, channels: { sms: { ...counts, provider: { ...provider, state: 'on_fire' } } } })
+    expect((await rejection(getStats(7))).code).toBe('bad_response')
+  })
+
+  it.each([
+    ['a rate limit of zero', { rate_limit: 0 }],
+    ['a rate limit that is not a number', { rate_limit: '100' }],
+    ['a timeline without buckets', { timeline: { start: 'x', bucket_seconds: 1 } }],
+    ['a timeline with a bucket width of zero', { timeline: { start: 'x', bucket_seconds: 0, accepted: [1] } }],
+    ['a timeline with a negative count', { timeline: { start: 'x', bucket_seconds: 1, accepted: [-1] } }],
+    ['a timeline far longer than the server sends', { timeline: { start: 'x', bucket_seconds: 1, accepted: new Array(5000).fill(1) } }],
+  ])('statistics with %s', async (_name, extra) => {
+    stubFetch({ ...stats, channels: { sms: { ...counts, provider, ...extra } } })
+    expect((await rejection(getStats(7))).code).toBe('bad_response')
+  })
+
+  it('statistics with a summary that lacks a figure', async () => {
+    stubFetch({ ...stats, summary: { duration_seconds: null, average_per_second: 1, peak_per_second: 1, retried_messages: 0 } })
     expect((await rejection(getStats(7))).code).toBe('bad_response')
   })
 

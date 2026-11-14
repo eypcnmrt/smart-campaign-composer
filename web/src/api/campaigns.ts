@@ -30,6 +30,11 @@ function isNullOr(value: unknown, check: (v: unknown) => boolean): boolean {
   return value === null || check(value)
 }
 
+/** An optional field of the delivery statistics: missing and null both mean "nothing to show"; a value must be valid. */
+function optional(value: unknown, check: (v: unknown) => boolean): boolean {
+  return value === undefined || isNullOr(value, check)
+}
+
 function isContent(value: unknown): value is Content {
   return (
     isRecord(value) &&
@@ -86,13 +91,38 @@ function parseSummary(data: unknown): CampaignSummary {
 
 const COUNT_KEYS = ['queued', 'sending', 'retrying', 'sent', 'failed', 'skipped', 'total'] as const
 
+/** The largest timeline the server may send (it caps its answer at 600 buckets); a longer one is not this API. */
+const MAX_BUCKETS = 1000
+
+function isTimeline(t: unknown): boolean {
+  return (
+    isRecord(t) &&
+    typeof t.start === 'string' &&
+    typeof t.bucket_seconds === 'number' &&
+    t.bucket_seconds > 0 &&
+    Array.isArray(t.accepted) &&
+    t.accepted.length <= MAX_BUCKETS &&
+    t.accepted.every((n) => typeof n === 'number' && n >= 0)
+  )
+}
+
+function isSummary(s: unknown): boolean {
+  return (
+    isRecord(s) &&
+    isNullOr(s.duration_seconds, (d) => typeof d === 'number') &&
+    ['average_per_second', 'peak_per_second', 'retried_messages', 'total_attempts'].every((k) => typeof s[k] === 'number')
+  )
+}
+
 function parseChannelCounts(data: unknown): ChannelCounts {
   if (
     !isRecord(data) ||
     !COUNT_KEYS.every((k) => typeof data[k] === 'number') ||
     !isRecord(data.provider) ||
     typeof data.provider.state !== 'string' ||
-    !PROVIDER_STATES.includes(data.provider.state)
+    !PROVIDER_STATES.includes(data.provider.state) ||
+    !optional(data.rate_limit, (r) => typeof r === 'number' && r > 0) ||
+    !optional(data.timeline, isTimeline)
   ) {
     throw badResponse('delivery statistics')
   }
@@ -105,7 +135,8 @@ export function parseStats(data: unknown): Stats {
     typeof data.campaign_id !== 'number' ||
     typeof data.status !== 'string' ||
     !STATUSES.includes(data.status) ||
-    !isRecord(data.channels)
+    !isRecord(data.channels) ||
+    !optional(data.summary, isSummary)
   ) {
     throw badResponse('delivery statistics')
   }

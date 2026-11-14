@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { createRateWindow, isInFlight, pendingOf, progressOf, STATUS_LABELS } from './delivery'
+import { chartOf, chartText, createRateWindow, isInFlight, pendingOf, progressOf, STATUS_LABELS } from './delivery'
 
 const counts = (c: Partial<Record<'queued' | 'sending' | 'retrying' | 'sent' | 'failed' | 'skipped' | 'total', number>>) => ({
   queued: 0,
@@ -115,5 +115,30 @@ describe('statuses', () => {
     expect(['draft', 'audience_ready', 'content_ready', 'completed', 'completed_with_failures'].map((s) => isInFlight(s as never))).toEqual([false, false, false, false, false])
     expect(isInFlight('approved')).toBe(true)
     expect(isInFlight('sending')).toBe(true)
+  })
+})
+
+describe('chartOf', () => {
+  it('turns buckets into rates per second and scales above the limit and the highest bar', () => {
+    const chart = chartOf({ bucket_seconds: 2, accepted: [200, 100, 0] }, 100)
+    expect(chart.bars.map((b) => b.rate)).toEqual([100, 50, 0])
+    expect(chart.peak).toBe(100)
+    expect(chart.total).toBe(300)
+    expect(chart.seconds).toBe(6)
+    expect(chart.max).toBeCloseTo(115)
+    expect(chartOf({ bucket_seconds: 1, accepted: [300] }, 100).max).toBeCloseTo(345) // a bar over the limit still fits
+  })
+
+  it('keeps at least twelve slots, and never a zero scale', () => {
+    expect(chartOf({ bucket_seconds: 1, accepted: [1, 2] }, null).slots).toBe(12)
+    expect(chartOf({ bucket_seconds: 1, accepted: new Array(30).fill(1) }, null).slots).toBe(30)
+    expect(chartOf({ bucket_seconds: 1, accepted: [0] }, null).max).toBeGreaterThan(0)
+  })
+
+  it('describes itself in words, with and without a limit', () => {
+    expect(chartText('SMS', chartOf({ bucket_seconds: 1, accepted: [50, 100] }, 100))).toBe(
+      'SMS: 2 saniyede 150 mesaj kabul edildi; en yoğun saniyede 100 mesaj. Sınır: saniyede 100 mesaj.',
+    )
+    expect(chartText('SMS', chartOf({ bucket_seconds: 1, accepted: [0] }, null))).toBe('SMS: henüz kabul edilen mesaj yok.')
   })
 })

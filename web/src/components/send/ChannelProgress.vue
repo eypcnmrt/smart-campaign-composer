@@ -3,10 +3,12 @@ import { computed } from 'vue'
 import type { ChannelCounts } from '@/api/types'
 import { progressOf } from '@/domain/delivery'
 import { formatNumber } from '@/domain/format'
+import RateChart from './RateChart.vue'
 import ProviderBadge from './ProviderBadge.vue'
 import RateMeter from './RateMeter.vue'
 
-// One channel of the delivery: how far it is, the six counts, the rate against the channel's limit and the provider's health.
+// One channel of the delivery: how far it is, the six counts, the rate against the channel's limit, the per-second history of
+// what the provider accepted, and the provider's health.
 // `live` is false once the delivery is over: a rate of a finished delivery is not a figure to show.
 const props = withDefaults(defineProps<{ channel: string; label: string; counts: ChannelCounts; rate: number | null; live?: boolean }>(), { live: true })
 
@@ -60,7 +62,9 @@ const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed
       </div>
     </dl>
 
-    <RateMeter v-if="live" :rate="rate" :label="label" />
+    <RateMeter v-if="live" :rate="rate" :label="label" :limit="counts.rate_limit ?? null" />
+    <!-- While sending the chart grows with every answer; afterwards it stays as the record of how fast it went. -->
+    <RateChart v-if="counts.timeline" :timeline="counts.timeline" :limit="counts.rate_limit ?? null" :label="label" />
   </section>
 </template>
 

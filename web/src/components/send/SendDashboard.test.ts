@@ -16,7 +16,7 @@ afterEach(() => {
 
 const KEY = 'GET /api/campaigns/7/stats'
 const provider = { state: 'ok' as const, circuit: 'closed', last_error: '', updated_at: null, age_seconds: null }
-const ch = (c: Partial<ChannelCounts>): ChannelCounts => ({ queued: 0, sending: 0, retrying: 0, sent: 0, failed: 0, skipped: 0, total: 0, provider, ...c })
+const ch = (c: Partial<ChannelCounts>): ChannelCounts => ({ queued: 0, sending: 0, retrying: 0, sent: 0, failed: 0, skipped: 0, total: 0, provider, rate_limit: 100, ...c })
 const stats = (status: Stats['status'], sms: Partial<ChannelCounts>, email: Partial<ChannelCounts> = {}): Stats => ({
   campaign_id: 7,
   status,
@@ -69,6 +69,37 @@ describe('SendDashboard', () => {
     expect(wrapper.get('[data-channel="sms"] .meter__value').text()).toBe('100')
     expect(wrapper.get('[data-channel="email"] .meter__value').text()).toBe('20')
     expect(wrapper.findAll('.meter__limit')).toHaveLength(2) // one line per channel, none on a total
+    wrapper.unmount()
+  })
+
+  it('draws the limit each channel reported, not a number of its own', async () => {
+    const { wrapper } = render({ [KEY]: { body: stats('sending', { sent: 10, total: 100, rate_limit: 50 }, { sent: 10, total: 100, rate_limit: null }) } })
+    await settle()
+    expect(wrapper.get('[data-channel="sms"] .meter__caption').text()).toBe('50/s: kanal başına sınır')
+    expect(wrapper.find('[data-channel="email"] .meter__limit').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('draws the per-second chart while sending, keeps it after the end and adds the summary line under the result', async () => {
+    const timeline = { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 60, 100] }
+    const live = { ...stats('sending', { sent: 160, queued: 40, total: 200, timeline }), summary: null }
+    const api = installFakeApi({ [KEY]: { body: live } })
+    const wrapper = mount(SendDashboard, { props: { campaign: sending }, attachTo: document.body })
+    await settle()
+    expect(wrapper.findAll('.chart')).toHaveLength(1) // the e-mail channel has no timeline
+    expect(wrapper.find('[data-testid="send-summary"]').exists()).toBe(false)
+
+    const done = {
+      ...stats('completed', { sent: 200, total: 200, timeline: { ...timeline, accepted: [0, 60, 100, 40] } }),
+      summary: { duration_seconds: 3.2, average_per_second: 66.7, peak_per_second: 100, retried_messages: 3, total_attempts: 203 },
+    }
+    api.set(KEY, { body: done })
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.findAll('.chart__bar')).toHaveLength(4)
+    expect(wrapper.find('.meter').exists()).toBe(false) // the live figure goes, the chart stays
+    const text = wrapper.get('[data-testid="send-summary"]').text()
+    expect(text).toContain('Süre 3,2 sn')
+    expect(text).toContain('3 mesaj en az bir kez yeniden denendi (toplam 203 deneme)')
     wrapper.unmount()
   })
 

@@ -11,6 +11,7 @@ import { STATUS_LABELS } from '@/domain/delivery'
 import { formatDateTime } from '@/domain/format'
 import ChannelProgress from './ChannelProgress.vue'
 import ResultBanner from './ResultBanner.vue'
+import SummaryLine from './SummaryLine.vue'
 
 // The fifth step: the delivery, live. The numbers are asked for every second while the campaign is being sent and no longer
 // after it is done. A failed request is said in a line and the asking goes on: the numbers on screen are the last ones that
@@ -59,6 +60,7 @@ const updated = computed(() => (updatedAt.value === null ? '' : formatDateTime(n
 
     <template v-else>
       <ResultBanner v-if="finished" :stats="stats" />
+      <SummaryLine v-if="finished && stats.summary" :summary="stats.summary" />
 
       <StatusNote v-if="failure" tone="warning" title="Güncel durum alınamıyor" announce>
         <p>{{ failure.title }}. Sayılar son alınan değerleri gösteriyor; denemeye devam ediliyor.</p>

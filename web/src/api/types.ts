@@ -165,6 +165,28 @@ export interface ChannelCounts {
   skipped: number
   total: number
   provider: ProviderInfo
+  /** The cap the worker reported for this channel, messages per second; null when it never did (no limit line is drawn). */
+  rate_limit?: number | null
+  /** Messages the provider accepted per bucket since the approval; null before it. */
+  timeline?: Timeline | null
+}
+
+/** How many messages of a channel the provider accepted in each bucket of `bucket_seconds` seconds, from `start` on. */
+export interface Timeline {
+  start: string
+  bucket_seconds: number
+  accepted: number[]
+}
+
+/** The send as a whole (null before the approval). */
+export interface SendSummary {
+  /** Approval to completion, in seconds; null until the campaign is completed. */
+  duration_seconds: number | null
+  average_per_second: number
+  peak_per_second: number
+  /** Messages that needed more than one attempt. */
+  retried_messages: number
+  total_attempts: number
 }
 
 /** GET /api/campaigns/{id}/stats. */
@@ -172,6 +194,7 @@ export interface Stats {
   campaign_id: number
   status: CampaignStatus
   channels: Record<string, ChannelCounts>
+  summary?: SendSummary | null
 }
 
 /** details of validation_failed: one entry per invalid field. `message` is English; the UI translates `code` and `params`. */

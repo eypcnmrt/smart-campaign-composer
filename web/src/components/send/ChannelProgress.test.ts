@@ -79,7 +79,7 @@ describe('ChannelProgress', () => {
 })
 
 describe('RateMeter', () => {
-  const render = (rate: number | null) => mount(RateMeter, { props: { rate, label: 'SMS' } })
+  const render = (rate: number | null, limit: number | null = 100) => mount(RateMeter, { props: { rate, label: 'SMS', limit } })
 
   it('labels the figure as the messages the provider accepted per second', () => {
     expect(render(87.4).get('.meter__figure').text()).toBe('87 kabul edilen mesaj/s')
@@ -90,6 +90,20 @@ describe('RateMeter', () => {
     expect(wrapper.get('.meter__value').text()).toBe('…')
     expect(wrapper.text()).toContain('ölçülüyor')
     expect(wrapper.get('.meter__fill').attributes('width')).toBe('0')
+  })
+
+  it('draws the limit the worker reported, whatever it is, and no line when the worker never said', () => {
+    // the scale is the limit plus a fifth, so the line is always at 100 of 120 and a rate of 30 against a limit of 50 fills 60
+    const wrapper = render(30, 50)
+    expect(wrapper.get('.meter__limit').attributes('x1')).toBe('100')
+    expect(wrapper.get('.meter__fill').attributes('width')).toBe('60')
+    expect(wrapper.get('.meter__caption').text()).toBe('50/s: kanal başına sınır')
+    expect(wrapper.get('svg').attributes('aria-label')).toBe('SMS hızı: 30 mesaj/s; sınır 50 mesaj/s')
+    const unknown = render(30, null)
+    expect(unknown.find('.meter__limit').exists()).toBe(false)
+    expect(unknown.find('.meter__caption').exists()).toBe(false)
+    expect(unknown.get('svg').attributes('aria-label')).toBe('SMS hızı: 30 mesaj/s')
+    expect(unknown.get('.meter__fill').classes()).not.toContain('meter__fill--over')
   })
 
   it('draws the limit of the channel at 100 on a scale that runs a little past it', () => {
