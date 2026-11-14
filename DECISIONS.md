@@ -1048,11 +1048,43 @@ reporting and in the stream's write path.
 - **Not done:** no test for the "Yeniden deneniyor" line in the browser (the polling is covered by vitest with fake timers; stopping
   the API container would need a second switch); no Firefox/WebKit project (one engine keeps `make e2e` at about a minute and a half).
 
+### Fixed after the silent-failure review of the overnight session
+- **A finished campaign could say "worker not running".** The provider health is the worker's, per channel, not the campaign's; a
+  completed campaign opened while the worker was stopped (or after a later campaign opened the circuit) showed a danger alert about
+  messages waiting when nothing waited. `ChannelProgress` now draws the badge only while the delivery is live or something still waits.
+- **"Sayılar her saniye yenilenir" was a fixed sentence.** It stayed while the polling backed off and after it stopped for a missing
+  campaign. It is now said only while polling at the normal pace, "Güncelleme durdu." when it stopped.
+- **A stale "Yeniden deneniyor (N sn)"** stayed after the polling stopped for `not_found`; it is cleared there.
+- **A generation saved after its client left** left no trace (the comment promised one); it is logged at info level now.
+- **e2e:** a failed `make e2e` printed the stack's last log lines before removing it (they were discarded); `forbidOnly` stops a
+  leftover `test.only` from shrinking the run; the layout test waits for a row of the list and fails when it measured nothing (and
+  makes its own campaign, so it passes alone); the summary assertion reads the average and the peak and checks them (> 0, peak
+  <= 200 for two channels capped at 100/s); `tabTo` no longer turns a wrong locator into "Tab did not reach it"; `settled()`
+  ignores infinite animations; the axe report lists lesser findings next to a serious one, as its comment said.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
 silent-failure review of the overnight session; defects that were clear-cut were fixed and are listed under
 "Fixed after the review" above.)
+
+### Overnight session (judgement calls from the silent-failure review)
+- **A malformed optional `timeline` or `summary` rejects the whole stats response** (`bad_response`), so valid counts are replaced by
+  "Güncel durum alınamıyor" while the server is fine. Dropping just the decoration (and logging it) would keep the counts; strict
+  contract checking was kept because a shape the client does not understand is a version mismatch worth seeing.
+- **The stats reads are not one snapshot** (counts, bounds, timeline, heartbeat are separate queries). A message recorded between the
+  bounds query and the bucket query is not in the chart for one poll (it heals on the next). A `REPEATABLE READ` read-only
+  transaction would make it exact; not done, the cost is a longer-held snapshot on every poll.
+- **The chart says "kabul edilen" but buckets by `sent_at`**, the time the worker recorded the answer, not the provider's clock. A bar
+  can be over the cap while the provider's own rate was not. The label and the DECISIONS entry say what is measured; renaming the
+  label to "kaydedilen" is the alternative.
+- **"Yeniden deneniyor (N sn)" is the wait that was scheduled, not a countdown**, so it keeps its number while the next request is in
+  flight (up to the 10 s timeout). A live countdown would re-render every second against a struggling server.
+- **`KEEP=1` and an outage left on by a killed run** carry into the next run (the `afterEach` reset needs the process). A
+  `globalSetup` that switches the outage off would close it.
+- **A HEAD on a GET route runs the whole handler** (queries included), as the status and headers must match. Accepted.
+- **`DECISIONS.md` line about the content stream** in the earlier "Streaming" section still says GET; the entry "The content stream
+  is a POST" supersedes it.
 
 ### LLM layer (internal/llm, internal/compose)
 - Duplicate JSON keys resolve to last-wins in `segment.Decode` and `content.Parse` (the preview extractor rejects them). The
