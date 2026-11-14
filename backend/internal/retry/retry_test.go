@@ -209,6 +209,24 @@ func TestPolicy_Decide_retryAfterIsAFloor(t *testing.T) {
 	}
 }
 
+// The retries alone must ride out an outage of a few minutes: the waits of the default policy add up to between two
+// and four minutes (equal jitter: each wait is between half of its full length and the full length).
+func TestDefaultPolicy_retryWindowIsAFewMinutes(t *testing.T) {
+	t.Parallel()
+	p := DefaultPolicy()
+	var shortest, longest time.Duration
+	for attempt := 1; attempt < p.MaxAttempts; attempt++ { // the waits after attempts 1..4
+		shortest += p.Backoff(attempt, 0)
+		longest += p.Backoff(attempt, 0.999999)
+	}
+	if shortest < 110*time.Second || longest > 226*time.Second {
+		t.Fatalf("the four waits add up to %v..%v, want about 112s..225s", shortest, longest)
+	}
+	if got := p.Backoff(p.MaxAttempts-1, 0.999999); got > p.MaxDelay {
+		t.Fatalf("a wait of %v exceeds the cap %v", got, p.MaxDelay)
+	}
+}
+
 func TestPolicy_Decide_totalAttempts(t *testing.T) {
 	t.Parallel()
 	p := DefaultPolicy()

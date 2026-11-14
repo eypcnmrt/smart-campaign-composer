@@ -52,20 +52,66 @@ func TestRun_seedRejectsBadUserCount(t *testing.T) {
 	}
 }
 
+func TestValidateProviderURL(t *testing.T) {
+	tests := []struct {
+		url     string
+		wantErr bool
+	}{
+		{"http://mock-provider:8081", false},
+		{"https://provider.example.com/api", false},
+		{"http://127.0.0.1:8081", false},
+		{"mock-provider:8081", true}, // parsed as scheme "mock-provider"
+		{"//mock-provider:8081", true},
+		{"mock-provider", true},
+		{"ftp://mock-provider", true},
+		{"http://", true},
+		{"http://:8081", true},
+		{"http://bad host", true},
+		{"://", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			err := validateProviderURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateProviderURL(%q) = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// A rejected address must not be echoed: it can carry credentials.
+func TestValidateProviderURL_doesNotEchoTheValue(t *testing.T) {
+	err := validateProviderURL("ftp://user:secret-pw@provider")
+	if err == nil || strings.Contains(err.Error(), "secret-pw") {
+		t.Fatalf("err = %v, want a rejection that does not contain the credentials", err)
+	}
+}
+
 func TestRun_workerRejectsBadSettings(t *testing.T) {
-	for name, env := range map[string]map[string]string{
-		"rate is not a number": {envWorkerRate: "fast"},
-		"rate below one":       {envWorkerRate: "0.5"},
-		"timeout is not valid": {envWorkerTimeout: "soon"},
-		"timeout is negative":  {envWorkerTimeout: "-1s"},
+	// Each case must fail on its own setting, not on the missing database, which would also exit with 1.
+	for name, tt := range map[string]struct {
+		env     map[string]string
+		wantErr string
+	}{
+		"rate is not a number":       {map[string]string{envWorkerRate: "fast"}, envWorkerRate},
+		"rate below one":             {map[string]string{envWorkerRate: "0.5"}, envWorkerRate},
+		"timeout is not valid":       {map[string]string{envWorkerTimeout: "soon"}, envWorkerTimeout},
+		"timeout is negative":        {map[string]string{envWorkerTimeout: "-1s"}, envWorkerTimeout},
+		"heartbeat is not valid":     {map[string]string{envWorkerBeat: "often"}, envWorkerBeat},
+		"heartbeat is zero":          {map[string]string{envWorkerBeat: "0s"}, envWorkerBeat},
+		"provider url has no scheme": {map[string]string{envProviderURL: "mock-provider:8081"}, envProviderURL},
 	} {
 		t.Run(name, func(t *testing.T) {
-			for k, v := range env {
+			t.Setenv(envDatabaseURL, "")
+			for k, v := range tt.env {
 				t.Setenv(k, v)
 			}
 			var stdout, stderr bytes.Buffer
 			if code := run(context.Background(), []string{"worker"}, &stdout, &stderr); code != 1 {
 				t.Fatalf("code = %d, want 1; stderr %q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Fatalf("stderr = %q, want it to name %s", stderr.String(), tt.wantErr)
 			}
 		})
 	}

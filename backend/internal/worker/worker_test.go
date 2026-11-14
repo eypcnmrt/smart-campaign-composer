@@ -29,6 +29,11 @@ func TestNew_validatesTheConfig(t *testing.T) {
 		{"unknown channel", Config{Channels: []string{"sms", "SMS"}}, true},
 		{"retry policy without a Retry-After cap", Config{Retry: retry.Policy{MaxAttempts: 5, BaseDelay: time.Second, MaxDelay: time.Minute}}, true},
 		{"negative in-flight limit", Config{MaxInFlight: -1}, true},
+		{"negative lock retry interval", Config{LockRetryInterval: -time.Second}, true},
+		{"negative heartbeat interval", Config{HeartbeatInterval: -time.Second}, true},
+		{"negative breaker threshold", Config{Breaker: BreakerConfig{Threshold: -1}}, true},
+		{"negative breaker cooldown", Config{Breaker: BreakerConfig{Cooldown: -time.Second}}, true},
+		{"breaker disabled", Config{Breaker: BreakerConfig{Disabled: true}}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

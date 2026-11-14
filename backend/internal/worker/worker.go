@@ -4,9 +4,12 @@
 // Shape (per channel, one dispatcher goroutine):
 //
 //	take the channel's advisory lock (another worker holding it: wait and retry)
-//	  -> wait for a rate-limit token -> claim one due delivery -> hand it to a send goroutine
+//	  -> circuit breaker allows? -> wait for a rate-limit token -> claim one due delivery -> hand it to a send goroutine
 //
-// The lock keeps the per-channel cap when more than one worker runs: only the lock holder sends on a channel.
+// The lock keeps the per-channel cap when more than one worker runs: only the lock holder sends on a channel. The
+// circuit breaker (breaker.go) stops the claiming while the provider looks unreachable and gives the attempts of the
+// requests that run into the outage back, so an outage does not turn deliveries into failures. The lock holder also
+// reports the circuit state and a heartbeat to worker_channel_status.
 //
 // Claiming after the token, one row at a time, means nothing sits claimed while it waits for its
 // turn, and the consent flag read by the claim is the one in force a moment before the request is made.
@@ -56,7 +59,12 @@ type Config struct {
 	// LockRetryInterval is how often a worker that does not hold a channel's lock (another worker serves the
 	// channel) tries to take it (default 5s).
 	LockRetryInterval time.Duration
+	// HeartbeatInterval is how often the worker that serves a channel writes its circuit state to
+	// worker_channel_status (default 2s); it also writes at once whenever the state changes.
+	HeartbeatInterval time.Duration
 	Retry             retry.Policy
+	// Breaker tunes the circuit breaker each channel has (see breaker).
+	Breaker BreakerConfig
 	// Jitter returns a number in [0, 1) for the backoff; default math/rand/v2.
 	Jitter func() float64
 	Logger *slog.Logger
@@ -93,6 +101,10 @@ func (c Config) withDefaults() Config {
 	if c.LockRetryInterval == 0 {
 		c.LockRetryInterval = 5 * time.Second
 	}
+	if c.HeartbeatInterval == 0 {
+		c.HeartbeatInterval = 2 * time.Second
+	}
+	c.Breaker = c.Breaker.withDefaults()
 	if c.Retry.MaxAttempts == 0 {
 		c.Retry = retry.DefaultPolicy()
 	}
@@ -125,15 +137,27 @@ func (c Config) validate() error {
 	if c.LockRetryInterval < 0 {
 		return errors.New("lock retry interval must not be negative")
 	}
+	if c.HeartbeatInterval < 0 {
+		return errors.New("heartbeat interval must not be negative")
+	}
+	if err := c.Breaker.validate(); err != nil {
+		return fmt.Errorf("circuit breaker: %w", err)
+	}
 	return nil
 }
 
 // Counters are totals since the worker was created.
 type Counters struct {
 	Sent, Retried, Failed, Skipped, LeaseLost int64
+	// Refunded counts attempts that ran into a known outage (the circuit was not closed) and were given back to their
+	// delivery; they are not in Retried.
+	Refunded int64
 	// RecordErrors counts outcomes that could not be written to the database even after retrying; the
 	// deliveries concerned are picked up again when their lease expires.
 	RecordErrors int64
+	// HeartbeatErrors counts failed writes of worker_channel_status; while they last, the dashboard sees the worker as
+	// not running.
+	HeartbeatErrors int64
 }
 
 // Worker is the dispatcher. Create it with New and run it with Run.
@@ -141,8 +165,9 @@ type Worker struct {
 	cfg    Config
 	q      *queue.Queue
 	sender Sender
+	now    func() time.Time // the breakers' clock; tests of the worker leave it alone
 
-	sent, retried, failed, skipped, leaseLost, recordErrors atomic.Int64
+	sent, retried, failed, skipped, leaseLost, refunded, recordErrors, heartbeatErrors atomic.Int64
 }
 
 // New returns a worker.
@@ -151,15 +176,26 @@ func New(q *queue.Queue, sender Sender, cfg Config) (*Worker, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
-	return &Worker{cfg: cfg, q: q, sender: sender}, nil
+	return &Worker{cfg: cfg, q: q, sender: sender, now: time.Now}, nil
 }
 
 // Counters returns a snapshot of the totals.
 func (w *Worker) Counters() Counters {
 	return Counters{
 		Sent: w.sent.Load(), Retried: w.retried.Load(), Failed: w.failed.Load(),
-		Skipped: w.skipped.Load(), LeaseLost: w.leaseLost.Load(), RecordErrors: w.recordErrors.Load(),
+		Skipped: w.skipped.Load(), LeaseLost: w.leaseLost.Load(), Refunded: w.refunded.Load(),
+		RecordErrors: w.recordErrors.Load(), HeartbeatErrors: w.heartbeatErrors.Load(),
 	}
+}
+
+// channelState is what one channel keeps for as long as the worker runs, across tenures of its lock: the pacing, the
+// send slots and the circuit breaker. Sends still in flight when the lock is lost keep counting, and the pacing does
+// not restart when it is taken again.
+type channelState struct {
+	name  string
+	lim   *ratelimit.Limiter
+	br    *breaker
+	slots chan struct{}
 }
 
 // dbTimeout bounds every queue call; they are short statements.
@@ -171,20 +207,22 @@ const recordTries = 4
 // Run serves until ctx ends and every started send has been recorded. It returns an error only for a
 // setup problem; failures while running are logged and retried.
 func (w *Worker) Run(ctx context.Context) error {
-	limiters := make(map[string]*ratelimit.Limiter, len(w.cfg.Channels))
-	for _, ch := range w.cfg.Channels {
+	channels := make([]*channelState, 0, len(w.cfg.Channels))
+	for _, name := range w.cfg.Channels {
 		l, err := ratelimit.New(w.cfg.RatePerSecond, w.cfg.Burst, w.cfg.RateMargin)
 		if err != nil {
-			return fmt.Errorf("rate limiter for %s: %w", ch, err)
+			return fmt.Errorf("rate limiter for %s: %w", name, err)
 		}
-		limiters[ch] = l
+		channels = append(channels, &channelState{
+			name: name, lim: l, br: newBreaker(w.cfg.Breaker, w.now), slots: make(chan struct{}, w.cfg.MaxInFlight),
+		})
 	}
 
 	var sends sync.WaitGroup // started sends: waited for before Run returns
 	var loops sync.WaitGroup // dispatchers and the maintenance loop
 	loops.Go(func() { w.maintain(ctx) })
-	for _, ch := range w.cfg.Channels {
-		loops.Go(func() { w.dispatch(ctx, ch, limiters[ch], &sends) })
+	for _, ch := range channels {
+		loops.Go(func() { w.dispatch(ctx, ch, &sends) })
 	}
 	loops.Wait() // no new sends can start after this
 	sends.Wait() // let the ones in flight finish and record their outcome
@@ -196,15 +234,12 @@ func (w *Worker) Run(ctx context.Context) error {
 
 // dispatch is the loop of one channel. Only the worker that holds the channel's advisory lock sends on it, so the
 // per-channel cap holds with several workers; the others wait and try again every LockRetryInterval.
-func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Limiter, sends *sync.WaitGroup) {
-	log := w.cfg.Logger.With("channel", channel)
-	// The send slots and the limiter belong to the channel, not to one tenure of the lock: sends still in flight
-	// when the lock is lost keep counting, and the pacing does not restart.
-	slots := make(chan struct{}, w.cfg.MaxInFlight)
+func (w *Worker) dispatch(ctx context.Context, ch *channelState, sends *sync.WaitGroup) {
+	log := w.cfg.Logger.With("channel", ch.name)
 	waiting := false
 	for ctx.Err() == nil {
 		lockCtx, cancel := context.WithTimeout(ctx, dbTimeout)
-		lock, err := w.q.LockChannel(lockCtx, channel)
+		lock, err := w.q.LockChannel(lockCtx, ch.name)
 		cancel()
 		switch {
 		case errors.Is(err, queue.ErrChannelLocked):
@@ -224,7 +259,13 @@ func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Li
 		waiting = false
 
 		log.Info("serving the channel")
-		serveErr := w.serve(ctx, channel, lock, lim, slots, sends)
+		// The heartbeat belongs to the tenure of the lock: only the worker that serves the channel reports on it.
+		hbCtx, stopHeartbeat := context.WithCancel(ctx)
+		var heartbeat sync.WaitGroup
+		heartbeat.Go(func() { w.heartbeat(hbCtx, ch) })
+		serveErr := w.serve(ctx, ch, lock, sends)
+		stopHeartbeat()
+		heartbeat.Wait()
 		if err := lock.Release(ctx); err != nil {
 			log.Error("releasing the channel lock failed", "err", err)
 		}
@@ -238,17 +279,27 @@ func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Li
 
 // serve claims and sends on one channel while the lock is held and ctx lives. It returns nil when ctx ended, and the
 // error of the first failed claim otherwise.
-func (w *Worker) serve(ctx context.Context, channel string, lock *queue.ChannelLock, lim *ratelimit.Limiter, slots chan struct{}, sends *sync.WaitGroup) error {
-	log := w.cfg.Logger.With("channel", channel)
+func (w *Worker) serve(ctx context.Context, ch *channelState, lock *queue.ChannelLock, sends *sync.WaitGroup) error {
+	log := w.cfg.Logger.With("channel", ch.name)
 	for ctx.Err() == nil {
 		select {
-		case slots <- struct{}{}: // a free send slot
+		case ch.slots <- struct{}{}: // a free send slot
 		case <-ctx.Done():
 			return nil
 		}
-		release := func() { <-slots }
+		release := func() { <-ch.slots }
 
-		if err := lim.Wait(ctx); err != nil {
+		// An open circuit means the provider looks unreachable: claim nothing, so no delivery spends an attempt on it.
+		// After the cooldown exactly one request (the probe) is let through.
+		permit, allowed := ch.br.Allow()
+		if !allowed {
+			release()
+			w.pause(ctx, w.cfg.PollInterval)
+			continue
+		}
+
+		if err := ch.lim.Wait(ctx); err != nil {
+			ch.br.Cancel(permit)
 			release()
 			return nil // only the context ends a wait
 		}
@@ -260,11 +311,13 @@ func (w *Worker) serve(ctx context.Context, channel string, lock *queue.ChannelL
 		cancel()
 		switch {
 		case err != nil && !ok:
+			ch.br.Cancel(permit)
 			release()
 			return err
 		case err != nil:
 			// Claimed but unusable (corrupt campaign content). Waiting for the lease to expire would repeat this
 			// for every attempt and leave a misleading "lease expired" in the row, so fail it now with the cause.
+			ch.br.Cancel(permit) // no request is made
 			log.Error("claimed delivery is unusable", "delivery", d.ID, "err", err)
 			sends.Go(func() {
 				defer release()
@@ -273,6 +326,7 @@ func (w *Worker) serve(ctx context.Context, channel string, lock *queue.ChannelL
 			})
 			continue
 		case !ok:
+			ch.br.Cancel(permit)
 			release()
 			w.pause(ctx, w.cfg.PollInterval)
 			continue
@@ -280,17 +334,52 @@ func (w *Worker) serve(ctx context.Context, channel string, lock *queue.ChannelL
 
 		sends.Go(func() {
 			defer release()
-			w.process(context.WithoutCancel(ctx), d)
+			w.process(context.WithoutCancel(ctx), ch.br, permit, d)
 		})
 	}
 	return nil
 }
 
-// process sends one claimed delivery and records the outcome.
-func (w *Worker) process(ctx context.Context, d queue.Delivery) {
+// heartbeat reports the channel's circuit to worker_channel_status every HeartbeatInterval and whenever it changes,
+// until ctx ends. A failed write is logged and counted and does not stop the sending: if the writes keep failing the row
+// gets old, which the dashboard shows as a worker that is not running.
+func (w *Worker) heartbeat(ctx context.Context, ch *channelState) {
+	log := w.cfg.Logger.With("channel", ch.name)
+	t := time.NewTicker(w.cfg.HeartbeatInterval)
+	defer t.Stop()
+	failing := false
+	for {
+		state, lastError := ch.br.Snapshot()
+		writeCtx, cancel := context.WithTimeout(ctx, dbTimeout)
+		err := w.q.SetChannelStatus(writeCtx, ch.name, state.String(), lastError)
+		cancel()
+		switch {
+		case err != nil && ctx.Err() == nil:
+			w.heartbeatErrors.Add(1)
+			if !failing { // once per streak, not every tick
+				log.Error("writing the heartbeat failed", "err", err)
+				failing = true
+			}
+		case err == nil:
+			failing = false
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		case <-ch.br.Changes():
+		}
+	}
+}
+
+// process sends one claimed delivery and records the outcome. The circuit breaker sees the raw result first: a
+// failure that comes back while the circuit is not closed is the outage it already knows about, so the attempt is
+// given back and the delivery returns to the queue as if it had never been tried.
+func (w *Worker) process(ctx context.Context, br *breaker, p permit, d queue.Delivery) {
 	log := w.cfg.Logger.With("delivery", d.ID, "campaign", d.CampaignID, "channel", d.Channel, "attempt", d.Attempt)
 
 	if !d.Consent {
+		br.Cancel(p) // no request is made, so there is nothing to tell the breaker
 		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusSkipped, Reason: "consent withdrawn before sending"}, &w.skipped)
 		return
 	}
@@ -299,6 +388,13 @@ func (w *Worker) process(ctx context.Context, d queue.Delivery) {
 	sendCtx, cancel := context.WithTimeout(ctx, w.cfg.RequestTimeout)
 	res := w.sender.Send(sendCtx, req)
 	cancel()
+
+	if br.Record(p, classify(res), retry.Describe(res)) {
+		reason := retry.Describe(res)
+		log.Info("the provider is unreachable, the attempt is not counted", "reason", reason, "probe", p.probe)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusQueued, Reason: reason, Refund: true}, &w.refunded)
+		return
+	}
 
 	decision := w.cfg.Retry.Decide(d.Attempt, res, w.cfg.Jitter())
 	switch decision.Action {

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/signal"
 	"strconv"
@@ -33,6 +34,7 @@ const (
 	envProviderURL   = "PROVIDER_URL"
 	envWorkerRate    = "WORKER_RATE"
 	envWorkerTimeout = "WORKER_REQUEST_TIMEOUT"
+	envWorkerBeat    = "WORKER_HEARTBEAT_INTERVAL"
 
 	defaultProviderURL = "http://mock-provider:8081"
 )
@@ -127,6 +129,17 @@ func runSeed(ctx context.Context, stdout io.Writer) error {
 	return nil
 }
 
+// validateProviderURL rejects a provider address that cannot work (no scheme, no host, another scheme). Without this a
+// typo such as "mock-provider:8081" is taken for an unknown scheme at the first request, which is classed as a
+// transient error, and every delivery would be retried for nothing. The value is not echoed: it can carry credentials.
+func validateProviderURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" {
+		return fmt.Errorf("%s must be an http or https URL with a host, for example http://mock-provider:8081", envProviderURL)
+	}
+	return nil
+}
+
 // runWorker serves the delivery queue until ctx ends (SIGTERM), then lets the sends in flight finish.
 func runWorker(ctx context.Context, logOut io.Writer) error {
 	cfg := worker.Config{Logger: slog.New(slog.NewTextHandler(logOut, nil))}
@@ -144,9 +157,19 @@ func runWorker(ctx context.Context, logOut io.Writer) error {
 		}
 		cfg.RequestTimeout = d
 	}
+	if v := os.Getenv(envWorkerBeat); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil || d <= 0 {
+			return fmt.Errorf("%s must be a positive duration such as 2s", envWorkerBeat)
+		}
+		cfg.HeartbeatInterval = d
+	}
 	providerURL := os.Getenv(envProviderURL)
 	if providerURL == "" {
 		providerURL = defaultProviderURL
+	}
+	if err := validateProviderURL(providerURL); err != nil {
+		return err
 	}
 
 	pool, err := openDB(ctx)

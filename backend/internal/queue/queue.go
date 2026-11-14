@@ -243,6 +243,9 @@ type Outcome struct {
 	Status string        // StatusSent, StatusQueued (retry), StatusFailed or StatusSkipped
 	Delay  time.Duration // for StatusQueued: wait before the next attempt
 	Reason string        // stored in last_error (empty for sent)
+	// Refund, for StatusQueued, gives the attempt back (attempts goes down by one): the request ran into an outage
+	// that the circuit breaker already knew about, so it must not use up one of the delivery's attempts.
+	Refund bool
 }
 
 // ErrLeaseLost means the delivery is no longer the caller's: its lease expired and it was taken back
@@ -262,10 +265,16 @@ func (q *Queue) Finish(ctx context.Context, d Delivery, o Outcome) error {
 		query = `UPDATE deliveries SET status = 'sent', sent_at = now(), lease_until = NULL, last_error = '', updated_at = now()
 			WHERE id = $1 AND status = 'sending' AND attempts = $2`
 	case StatusQueued:
+		// The fence compares the attempts the row has now ($2), so giving the attempt back in the same statement
+		// does not weaken it.
 		query = `UPDATE deliveries SET status = 'queued', lease_until = NULL, last_error = $3,
-				next_attempt_at = now() + make_interval(secs => $4), updated_at = now()
+				next_attempt_at = now() + make_interval(secs => $4), attempts = attempts - $5::int, updated_at = now()
 			WHERE id = $1 AND status = 'sending' AND attempts = $2`
-		args = append(args, reason, o.Delay.Seconds())
+		refund := 0
+		if o.Refund {
+			refund = 1
+		}
+		args = append(args, reason, o.Delay.Seconds(), refund)
 	case StatusFailed, StatusSkipped:
 		query = `UPDATE deliveries SET status = $4, lease_until = NULL, last_error = $3, updated_at = now()
 			WHERE id = $1 AND status = 'sending' AND attempts = $2`

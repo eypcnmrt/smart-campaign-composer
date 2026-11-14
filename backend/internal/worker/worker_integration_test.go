@@ -55,6 +55,10 @@ func (e *env) campaign(t *testing.T, users int, channels ...string) int64 {
 	return id
 }
 
+// noBreaker turns the circuit breaker off for the tests about giving up: a provider that fails every request would
+// otherwise open the circuit and, by design, nothing would ever be given up on.
+var noBreaker = worker.BreakerConfig{Disabled: true}
+
 // fastRetry keeps the backoff short so chaos tests finish quickly; the attempt limit is the real one.
 func fastRetry() retry.Policy {
 	return retry.Policy{MaxAttempts: 5, BaseDelay: 20 * time.Millisecond, MaxDelay: 200 * time.Millisecond, MaxRetryAfter: time.Minute}
@@ -417,7 +421,7 @@ func TestWorker_noAnswerToTheConfirmationFailsWithUnknownOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	started := time.Now()
-	_, stop := e.start(t, worker.Config{RatePerSecond: 100, Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
+	_, stop := e.start(t, worker.Config{Breaker: noBreaker, RatePerSecond: 100, Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
 	status := e.waitFinished(t, id, 60*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -572,7 +576,7 @@ func TestWorker_permanentErrorIsNotRetried(t *testing.T) {
 func TestWorker_retriesGiveUpAfterFiveAttempts(t *testing.T) {
 	e := newEnv(t, mockprovider.Config{ErrorRate: 1}) // the provider never accepts
 	id := e.campaign(t, 4, "email")
-	_, stop := e.start(t, worker.Config{Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
+	_, stop := e.start(t, worker.Config{Breaker: noBreaker, Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
 	status := e.waitFinished(t, id, 30*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -642,7 +646,7 @@ func TestWorker_gracefulShutdown(t *testing.T) {
 func TestWorker_timeoutOfADeliveredMessageIsNotResent(t *testing.T) {
 	e := newEnv(t, mockprovider.Config{LateRate: 1, LateDelay: 600 * time.Millisecond})
 	id := e.campaign(t, 30, "sms")
-	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	_, stop := e.start(t, worker.Config{Breaker: noBreaker, RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
 	e.waitFinished(t, id, 60*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -721,7 +725,7 @@ func TestWorker_timeoutOnTheLastAttemptIsConfirmed(t *testing.T) {
 	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
 		t.Fatal(err)
 	}
-	_, stop := e.start(t, worker.Config{RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
+	_, stop := e.start(t, worker.Config{Breaker: noBreaker, RequestTimeout: 150 * time.Millisecond, Lease: 15 * time.Second, Retry: fastRetry(), RatePerSecond: 200})
 	status := e.waitFinished(t, id, 60*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)
@@ -746,7 +750,7 @@ func TestWorker_serverErrorOnTheLastAttemptFailsWithoutConfirmation(t *testing.T
 	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
 		t.Fatal(err)
 	}
-	_, stop := e.start(t, worker.Config{Retry: fastRetry()})
+	_, stop := e.start(t, worker.Config{Breaker: noBreaker, Retry: fastRetry()})
 	status := e.waitFinished(t, id, 30*time.Second)
 	if err := stop(); err != nil {
 		t.Fatal(err)

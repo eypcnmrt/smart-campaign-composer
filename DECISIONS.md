@@ -330,7 +330,8 @@ here when the README is written.
 
 ### Retry policy is a pure function
 - **Decision:** `retry.Policy.Decide(attempt, result, jitter)` returns done, retry-after-delay or fail. Backoff is
-  `1s * 2^(n-1)` capped at 1 minute with "equal jitter" (half fixed, half random). A 429 waits at least its
+  `15s * 2^(n-1)` capped at 2 minutes with "equal jitter" (half fixed, half random): the four waits between five
+  attempts add up to 112-225 s, a retry window of two to four minutes. A 429 waits at least its
   Retry-After (capped at 5 minutes) or the backoff, whichever is longer. 5xx, 408, timeouts and connection errors are
   retried; every other 4xx is permanent; at most 5 send attempts, plus the confirmation request described in the next
   entry. `Retry-After` is read as seconds or HTTP date.
@@ -370,6 +371,44 @@ here when the README is written.
   absorbs the jitter.
 - **Alternative:** the token bucket alone at exactly 100/s. It matches the wording of the requirement but fails the
   measurement. Setting it to 95/s works too, but then nothing states why 95.
+
+### A circuit breaker per channel parks the queue during an outage and gives the attempts back
+- **Decision:** each channel has a breaker (`worker/breaker.go`, a pure state machine with an injected clock). Ten requests in
+  a row that end without an answer or with a 5xx (`Threshold`) open it. While it is open the dispatcher claims nothing.
+  After the cooldown (10 s) exactly one request, the probe, is let through (half-open): an answer, even a 429 or a 4xx, closes
+  the circuit; a failure opens it again and the cooldown starts over. A 429 is neutral while closed (it neither adds to nor
+  resets the run). **Attempts are given back:** a failure that comes back while the circuit is not closed (a request that
+  was in flight when it opened, or the probe) does not count: `Finish` queues the delivery again with `attempts - 1`
+  (`Outcome.Refund`; the fence on the attempt number still applies). The failure that itself opens the circuit counts, so an
+  outage burns at most `Threshold` attempts per channel. A probe permit that is not used (nothing due, consent withdrawn,
+  claim error) is handed back (`Cancel`), or the half-open state would wait forever. Because the claiming stops and the rest
+  is refunded, an outage of any length fails no delivery; the campaign stays `sending` until the provider answers again.
+  `Breaker.Disabled` exists for the tests about giving up, where a provider that fails everything must exhaust attempts.
+- **Retry window:** the default backoff is now 15 s doubling to 2 min (see "Retry policy"), so the retries alone cover an
+  outage of two to four minutes and the breaker covers anything longer. Start-up now rejects a `PROVIDER_URL` without an
+  http(s) scheme and host (it used to be classed as a transient error and retried for nothing); the value is not echoed.
+- **Why:** with the old 7-15 s of retries, a provider restart sent every delivery to `failed` for good. Counting only the
+  failures seen while the circuit was still closed keeps the attempt limit meaningful (a genuinely bad message still fails
+  after five attempts) without letting an outage use it up. A 20-second outage test (10 s of dropped connections, then 10 s
+  of 503) runs with a fast backoff and a 300 ms cooldown: nothing may fail and the provider must see only a few probes; the
+  same test with the breaker off fails, which is how it was checked.
+- **Alternative:** a longer backoff alone (every delivery still fails after the window, and 5,000 deliveries would hammer a
+  recovering provider at once), or counting the refunded failures (the pre-change behaviour).
+- **Known limits:** the circuit is per worker process; with two workers the standby starts with a closed circuit when it takes a
+  channel over. A provider that is up but answers every request with a 5xx for a different reason (bad credentials would be a
+  4xx) keeps the circuit open and the campaign `sending`, which the dashboard shows as "provider unreachable".
+
+### The worker reports its channels in `worker_channel_status`
+- **Decision:** the worker that serves a channel (the holder of the lock) writes `(channel, circuit, last_error, updated_at)`
+  every 2 s (`WORKER_HEARTBEAT_INTERVAL`) and at once when the circuit changes, from a goroutine of its own so a busy send loop
+  cannot stall it. `updated_at` and the age come from the database clock. `last_error` is the short text of the last failure
+  while the circuit is not closed, empty otherwise. A standby worker writes nothing. A failed write is logged once per streak
+  and counted; it never stops the sending.
+- **Why:** the dashboard has to tell "the provider is unreachable, waiting" (a fresh row with an open circuit) from "the worker
+  is not running" (an old or missing row). A shared table needs no extra port between the API and the worker, and the age is
+  measured in one place. The API turns this into `provider.state` in the stats (see the API entries).
+- **Alternative:** the API asks the worker over HTTP (a second service dependency, and no answer when the worker is down is
+  ambiguous), or Prometheus gauges only (not available to the UI without a scrape).
 
 ### Each channel is served by the worker that holds its advisory lock
 - **Decision:** before it claims anything, a worker takes `pg_try_advisory_lock(0x5343, channel)` for each channel (sms = 1,
@@ -499,9 +538,6 @@ silent-failure review of the overnight session; defects that were clear-cut were
   `ErrUnavailable` and would be retried; a blank city renders as "Türkiye" inside prose.
 
 ### Worker, queue and operations
-- **The retry window is short** (five attempts span about 7-15 s plus request time). A provider outage longer than that, or
-  a wrong `PROVIDER_URL` (not validated at start-up; a URL without a scheme is classed transient), sends every delivery to
-  `failed` for good. A circuit breaker that parks `queued` rows while the provider is down would be the real fix.
 - `composer api` is still a stub that exits 0, which a restart policy or healthcheck would read as a finished healthy
   service. It should exit non-zero until implemented (nothing in compose runs it yet).
 - Low: `Finish` reports every "no row updated" as a lost lease (it may also be a deleted campaign); `seed` treats a

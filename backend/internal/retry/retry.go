@@ -133,9 +133,12 @@ type Policy struct {
 	MaxRetryAfter time.Duration
 }
 
-// DefaultPolicy is the production policy: 5 attempts, 1s base doubling to at most 1 minute.
+// DefaultPolicy is the production policy: 5 attempts, a 15s base doubling to at most 2 minutes (15s, 30s, 1m, 2m, each
+// with equal jitter). The four waits add up to about 2 to 4 minutes, so a provider outage of a couple of minutes is
+// ridden out by the retries alone; a longer one is handled by the circuit breaker in the worker, which stops claiming
+// and gives the attempts back (see package worker).
 func DefaultPolicy() Policy {
-	return Policy{MaxAttempts: 5, BaseDelay: time.Second, MaxDelay: time.Minute, MaxRetryAfter: 5 * time.Minute}
+	return Policy{MaxAttempts: 5, BaseDelay: 15 * time.Second, MaxDelay: 2 * time.Minute, MaxRetryAfter: 5 * time.Minute}
 }
 
 // Backoff is the wait before the next attempt after attempt number `attempt` (1 is the first) failed:
@@ -205,6 +208,10 @@ func UnknownOutcomeReason(maxAttempts, confirmAttempt int, detail string) string
 	return fmt.Sprintf("%s: attempt %d and the confirmation request with the same idempotency key (attempt %d) both ended without an answer (%s); the provider may have delivered the message",
 		UnknownReasonPrefix, maxAttempts, confirmAttempt, detail)
 }
+
+// Describe gives the short, secret-free text for an attempt that did not deliver (stored in last_error, shown next to an
+// open circuit).
+func Describe(r Result) string { return describe(r) }
 
 // describe gives the short, secret-free text stored in last_error.
 func describe(r Result) string {
