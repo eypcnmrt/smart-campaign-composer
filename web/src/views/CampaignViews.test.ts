@@ -143,6 +143,17 @@ describe('the campaign page', () => {
     wrapper.unmount()
   })
 
+  it('shows the brief above the audience, content and approval steps, but not twice on the brief step', async () => {
+    for (const [stepName, body] of [['audience', audienceReady], ['content', contentReady], ['approve', contentReady]] as const) {
+      const { wrapper } = await open(`/campaigns/7?step=${stepName}`, { 'GET /api/campaigns/7': { body } })
+      expect(wrapper.get('.brief-summary__text').text()).toBe(body.brief)
+      wrapper.unmount()
+    }
+    const { wrapper } = await open('/campaigns/7?step=brief', { 'GET /api/campaigns/7': { body: audienceReady } })
+    expect(wrapper.find('.brief-summary').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('follows a link of the rail to another step without reading the campaign again', async () => {
     const { wrapper, router, api } = await open('/campaigns/7', { 'GET /api/campaigns/7': { body: contentReady } })
     await wrapper.get('a[href="/campaigns/7?step=brief"]').trigger('click')

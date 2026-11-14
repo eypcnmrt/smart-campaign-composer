@@ -5,6 +5,7 @@ import { generateSegment } from '@/api/campaigns'
 import ApproveStep from '@/components/approve/ApproveStep.vue'
 import AudienceCard from '@/components/audience/AudienceCard.vue'
 import BriefForm from '@/components/brief/BriefForm.vue'
+import BriefSummary from '@/components/brief/BriefSummary.vue'
 import ContentStep from '@/components/content/ContentStep.vue'
 import SendDashboard from '@/components/send/SendDashboard.vue'
 import StepNav from '@/components/StepNav.vue'
@@ -29,6 +30,8 @@ const step = computed(() => (campaign.value ? resolveStep(route.query.step, camp
 const items = computed(() => (campaign.value && step.value ? stepItems(step.value, campaign.value.status) : []))
 // The delivery dashboard has a table and two channels side by side; the other steps are forms and reading.
 const wide = computed(() => step.value === 'send')
+// The brief stays in view above the steps that are judged against it.
+const showBrief = computed(() => step.value === 'audience' || step.value === 'content' || step.value === 'approve')
 
 // Keep the URL honest: a step that is not open (an old link, a typed address) is replaced by the one that is shown.
 watch(
@@ -103,6 +106,7 @@ async function retrySegment(): Promise<void> {
         <h1 class="visually-hidden">Kampanya {{ campaign.id }}</h1>
         <!-- A reload that failed: what is shown is the last campaign that arrived, and the page says so. -->
         <ErrorPanel v-if="status === 'error'" :error="error" retry-label="Kampanyayı yeniden yükle" @retry="load" />
+        <BriefSummary v-if="campaign && showBrief" :brief="campaign.brief" />
         <BriefForm
           v-if="step === 'brief' && configState.status === 'ready'"
           :mode="campaign.status === 'draft' ? 'draft' : 'view'"
