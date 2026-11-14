@@ -154,9 +154,52 @@ describe('useStatsPolling', () => {
     await vi.advanceTimersByTimeAsync(1000)
     expect(api.callsTo(KEY)).toHaveLength(3)
     api.set(KEY, { body: stats('sending', 200) })
-    await vi.advanceTimersByTimeAsync(1000)
+    await vi.advanceTimersByTimeAsync(2000) // the second failure in a row doubled the wait
     expect(p.error.value).toBeNull()
     expect(p.stats.value?.channels.sms?.sent).toBe(200)
+  })
+
+  it('backs off after each failure in a row (1, 2, 4, 8, then 10 seconds) and returns to one second after an answer', async () => {
+    const api = installFakeApi({ [KEY]: error(503, 'not_ready') })
+    const p = polling()
+    const waits: (number | null)[] = []
+    await settle()
+    waits.push(p.retryInSeconds.value)
+    let calls = api.callsTo(KEY).length
+    for (const wait of [1, 2, 4, 8, 10, 10]) {
+      // one millisecond short of the wait: no request yet; at the wait: exactly one more
+      await vi.advanceTimersByTimeAsync(wait * 1000 - 1)
+      expect(api.callsTo(KEY)).toHaveLength(calls)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(api.callsTo(KEY)).toHaveLength(++calls)
+      waits.push(p.retryInSeconds.value)
+    }
+    expect(waits).toEqual([1, 2, 4, 8, 10, 10, 10])
+
+    api.set(KEY, { body: stats('sending', 5) })
+    await vi.advanceTimersByTimeAsync(10_000)
+    expect(p.error.value).toBeNull()
+    expect(p.retryInSeconds.value).toBeNull()
+    calls = api.callsTo(KEY).length
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(api.callsTo(KEY)).toHaveLength(calls + 1) // back to every second
+    // and the next failure starts from one second again
+    api.set(KEY, error(503, 'not_ready'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(p.retryInSeconds.value).toBe(1)
+  })
+
+  it('asks at once, with the first wait again, when the marketer presses retry', async () => {
+    const api = installFakeApi({ [KEY]: error(503, 'not_ready') })
+    const p = polling()
+    await settle()
+    await vi.advanceTimersByTimeAsync(3000) // failures at 0, 1 and 3 s: the wait is 4 s now
+    expect(p.retryInSeconds.value).toBe(4)
+    const calls = api.callsTo(KEY).length
+    p.refresh()
+    await settle()
+    expect(api.callsTo(KEY)).toHaveLength(calls + 1)
+    expect(p.retryInSeconds.value).toBe(1)
   })
 
   it('stops for a campaign that does not exist: asking again every second cannot help', async () => {
@@ -174,7 +217,7 @@ describe('useStatsPolling', () => {
     polling()
     await settle()
     await vi.advanceTimersByTimeAsync(3000)
-    expect(api.callsTo(KEY)).toHaveLength(1)
+    expect(api.callsTo(KEY)).toHaveLength(1) // longer than the backoff of one second
     await vi.advanceTimersByTimeAsync(1100)
     expect(api.callsTo(KEY)).toHaveLength(2)
   })

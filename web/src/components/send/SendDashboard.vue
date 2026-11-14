@@ -14,15 +14,16 @@ import ResultBanner from './ResultBanner.vue'
 import SummaryLine from './SummaryLine.vue'
 
 // The fifth step: the delivery, live. The numbers are asked for every second while the campaign is being sent and no longer
-// after it is done. A failed request is said in a line and the asking goes on: the numbers on screen are the last ones that
-// came, and they are labelled with when that was.
+// after it is done. A failed request is said in a line and the asking goes on, a little slower each time (1, 2, 4, 8, at most 10
+// seconds; the line says how long it waits): the numbers on screen are the last ones that came, and they are labelled with when
+// that was.
 const props = defineProps<{ campaign: Campaign }>()
 const emit = defineEmits<{
   /** The campaign's status moved on (it finished): read the campaign again. */
   reload: []
 }>()
 
-const { stats, error, rates, updatedAt, refresh } = useStatsPolling(() => props.campaign.id)
+const { stats, error, rates, updatedAt, retryInSeconds, refresh } = useStatsPolling(() => props.campaign.id)
 
 const LABELS: Record<string, string> = { sms: 'SMS', email: 'E-posta' }
 const ORDER = ['sms', 'email']
@@ -56,14 +57,17 @@ const updated = computed(() => (updatedAt.value === null ? '' : formatDateTime(n
     </div>
 
     <LoadingState v-if="stats === null && error === null" label="Gönderim durumu okunuyor…" />
-    <ErrorPanel v-else-if="stats === null" :error="error" @retry="refresh" />
+    <ErrorPanel v-else-if="stats === null" :error="error" @retry="refresh">
+      <p v-if="retryInSeconds !== null" class="retrying" role="status">Yeniden deneniyor ({{ retryInSeconds }} sn)</p>
+    </ErrorPanel>
 
     <template v-else>
       <ResultBanner v-if="finished" :stats="stats" />
       <SummaryLine v-if="finished && stats.summary" :summary="stats.summary" />
 
       <StatusNote v-if="failure" tone="warning" title="Güncel durum alınamıyor" announce>
-        <p>{{ failure.title }}. Sayılar son alınan değerleri gösteriyor; denemeye devam ediliyor.</p>
+        <p>{{ failure.title }}. Sayılar son alınan değerleri gösteriyor.</p>
+        <p v-if="retryInSeconds !== null" class="retrying"><strong>Yeniden deneniyor ({{ retryInSeconds }} sn)</strong></p>
       </StatusNote>
 
       <div class="channels">
