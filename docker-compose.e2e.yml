@@ -1,0 +1,66 @@
+# The browser tests (make e2e): the real stack with a mock model, started as a compose project of its own (scc-e2e), plus
+# the Playwright container. It is an overlay on docker-compose.yml:
+#
+#   docker compose -p scc-e2e -f docker-compose.yml -f docker-compose.e2e.yml up -d --build --wait web worker
+#   docker compose -p scc-e2e -f docker-compose.yml -f docker-compose.e2e.yml run --rm e2e
+#
+# scripts/e2e.sh does both and removes the project (containers, network, database volume) afterwards, whatever the result.
+#
+#  * Nothing is published on the host: the stack and the tests meet on the project's own network, so the dev stack on 3000 and
+#    8080 can run at the same time. The network is `internal`: nothing in it, the test container included, can reach the
+#    internet or the host.
+#  * The model is the demo mock (LLM_MODE=mock) and no key is passed in, whatever the host has set.
+#  * The mock provider has its outage switch on (MOCK_CONTROL); the tests flip it over the project's network. In the dev stack the
+#    switch does not exist.
+#  * The test container is the official Playwright image of the same version as @playwright/test (e2e/package.json), browsers
+#    included, so nothing is downloaded while the tests run. The packages come from the volume scc-e2e-node-modules, which
+#    scripts/e2e-npm.sh fills from the lock file.
+
+services:
+  mock-provider:
+    environment:
+      MOCK_CONTROL: "1"
+
+  api:
+    ports: !reset []
+    environment:
+      LLM_MODE: mock
+      ANTHROPIC_API_KEY: ""
+
+  web:
+    ports: !reset []
+
+  e2e:
+    image: mcr.microsoft.com/playwright:v1.64.1-noble
+    working_dir: /e2e
+    command: ["npx", "playwright", "test"]
+    init: true
+    # Chromium needs more shared memory than the container default.
+    shm_size: 1gb
+    security_opt:
+      - no-new-privileges:true
+    environment:
+      E2E_BASE_URL: http://web:8080
+      E2E_PROVIDER_URL: http://mock-provider:8081
+      # make e2e SCREENSHOTS=1 writes the pictures of docs/screenshots; a normal run leaves them alone.
+      E2E_SCREENSHOTS: ${E2E_SCREENSHOTS:-0}
+    volumes:
+      - ./e2e:/e2e:ro
+      - e2e-node-modules:/e2e/node_modules:ro
+      - ./docs/screenshots:/screenshots
+    depends_on:
+      web:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+      mock-provider:
+        condition: service_healthy
+
+networks:
+  default:
+    internal: true
+
+volumes:
+  e2e-node-modules:
+    external: true
+    name: scc-e2e-node-modules
