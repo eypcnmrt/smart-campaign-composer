@@ -101,6 +101,8 @@ async function retrySegment(): Promise<void> {
       <StepNav :items="items" :campaign-id="campaign.id" />
       <div ref="body" class="body">
         <h1 class="visually-hidden">Kampanya {{ campaign.id }}</h1>
+        <!-- A reload that failed: what is shown is the last campaign that arrived, and the page says so. -->
+        <ErrorPanel v-if="status === 'error'" :error="error" retry-label="Kampanyayı yeniden yükle" @retry="load" />
         <BriefForm
           v-if="step === 'brief' && configState.status === 'ready'"
           :mode="campaign.status === 'draft' ? 'draft' : 'view'"
@@ -114,6 +116,7 @@ async function retrySegment(): Promise<void> {
           v-else-if="step === 'audience'"
           :campaign="campaign"
           @updated="replace"
+          @reload="load"
           @content="askForContent"
         />
         <ContentStep
@@ -126,6 +129,7 @@ async function retrySegment(): Promise<void> {
         />
         <ApproveStep v-else-if="step === 'approve'" :campaign="campaign" @updated="replace" @reload="load" />
         <SendDashboard v-else-if="step === 'send'" :campaign="campaign" @reload="load" />
+        <ErrorPanel v-else-if="configState.status === 'error'" :error="configState.error" @retry="loadConfig" />
         <LoadingState v-else label="Ayarlar yükleniyor…" />
       </div>
     </template>

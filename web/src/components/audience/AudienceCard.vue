@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, shallowRef, useTemplateRef } from 'vue'
 import { generateSegment, setChannels } from '@/api/campaigns'
+import { mayBeOutOfDate } from '@/api/errors'
 import type { Campaign } from '@/api/types'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
 import StatusNote from '@/components/ui/StatusNote.vue'
@@ -19,6 +20,8 @@ const emit = defineEmits<{
   updated: [campaign: Campaign]
   /** The marketer wants the content step. */
   content: []
+  /** An action failed in a way that may have left this screen out of date: read the campaign again. */
+  reload: []
 }>()
 
 const { state: configState } = useConfig()
@@ -54,6 +57,7 @@ async function run(kind: 'channels' | 'segment', action: (signal: AbortSignal) =
   } catch (err) {
     if (mine.signal.aborted) return
     error.value = err
+    if (mayBeOutOfDate(err)) emit('reload')
   } finally {
     if (request === mine) {
       request = null

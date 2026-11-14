@@ -16,7 +16,10 @@ const LABELS: Record<string, string> = { sms: 'SMS', email: 'E-posta' }
 
 const onlyOne = computed(() => props.selected.length <= 1)
 
-function toggle(channel: string, on: boolean): void {
+function toggle(channel: string, on: boolean, box: HTMLInputElement): void {
+  // The box shows what the server has until the server has answered: Vue does not write `checked` again when the answer is a
+  // failure and the prop did not change, so a ticked-then-failed box would otherwise stay in a state nobody saved.
+  box.checked = props.selected.includes(channel)
   if (props.busy) return
   const next = props.available.filter((c) => (c === channel ? on : props.selected.includes(c)))
   if (next.length === 0) return
@@ -34,7 +37,7 @@ function toggle(channel: string, on: boolean): void {
         :checked="selected.includes(c)"
         :disabled="busy || (onlyOne && selected.includes(c))"
         :aria-describedby="onlyOne && selected.includes(c) ? 'channels-last' : undefined"
-        @change="toggle(c, ($event.target as HTMLInputElement).checked)"
+        @change="toggle(c, ($event.target as HTMLInputElement).checked, $event.target as HTMLInputElement)"
       />
       <span>{{ LABELS[c] ?? c }}</span>
     </label>

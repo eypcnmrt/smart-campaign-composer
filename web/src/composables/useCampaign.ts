@@ -47,6 +47,9 @@ export function useCampaign(id: MaybeRefOrGetter<number>): CampaignStore {
 
   function replace(next: Campaign): void {
     if (next.id !== toValue(id)) return
+    // An answer to a read that started before this action would be older than `next`: it must not land on top of it.
+    current?.abort()
+    current = null
     campaign.value = next
     error.value = null
     status.value = 'ready'

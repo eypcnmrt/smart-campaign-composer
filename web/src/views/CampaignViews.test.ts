@@ -171,7 +171,51 @@ describe('the campaign page', () => {
     wrapper.unmount()
   })
 
+  it('says so when a reload failed while a campaign is on screen, and reads again on request', async () => {
+    let up = true
+    const { wrapper, api } = await open('/campaigns/7', {
+      'GET /api/campaigns/7': () => {
+        if (!up) throw new TypeError('Failed to fetch')
+        return { body: audienceReady }
+      },
+      'PUT /api/campaigns/7/channels': () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    up = false
+    // The channel change is lost on the way; the page reads the campaign again, and that fails too: the page must say so.
+    await wrapper.findAll('input[type="checkbox"]')[0]?.setValue(false)
+    await flushPromises()
+    expect(step(wrapper)).toBe('Kitle') // the last campaign that arrived stays
+    const banners = wrapper.findAll('[role="alert"]')
+    expect(banners.length).toBeGreaterThan(0)
+    up = true
+    const retry = wrapper.findAll('button').find((b) => b.text().includes('Kampanyayı yeniden yükle'))
+    expect(retry).toBeDefined()
+    await retry?.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('button').some((b) => b.text().includes('Kampanyayı yeniden yükle'))).toBe(false)
+    expect(api.callsTo('GET /api/campaigns/7').length).toBeGreaterThanOrEqual(3)
+    wrapper.unmount()
+  })
+
   describe('the audience step', () => {
+    it('puts a channel box back when the change failed, and reads the campaign again', async () => {
+      const { wrapper, api } = await open('/campaigns/7', {
+        'GET /api/campaigns/7': { body: audienceReady },
+        'PUT /api/campaigns/7/channels': () => {
+          throw new TypeError('Failed to fetch')
+        },
+      })
+      const boxes = () => wrapper.findAll('input[type="checkbox"]').map((b) => (b.element as HTMLInputElement).checked)
+      expect(boxes()).toEqual([true, true])
+      await wrapper.findAll('input[type="checkbox"]')[0]?.setValue(false)
+      await flushPromises()
+      expect(boxes()).toEqual([true, true])
+      expect(api.callsTo('GET /api/campaigns/7')).toHaveLength(2)
+      wrapper.unmount()
+    })
+
     it('shows the new state of the campaign after a channel was closed', async () => {
       const { wrapper } = await open('/campaigns/7', {
         'GET /api/campaigns/7': { body: audienceReady },

@@ -281,6 +281,17 @@ function detailNumber(details: unknown, key: string): number | null {
  * Describes any thrown value. An ApiError is translated by its code; anything else (a bug, not an API answer) gets a generic
  * text and its message as technical detail, so it is never swallowed.
  */
+const OUT_OF_DATE = new Set(['network_error', 'timeout', 'http_error', 'bad_response', 'stream_incomplete', 'invalid_state', 'state_changed'])
+
+/**
+ * Whether a failed action may have left the screen different from the server: the answer never came (the action may have
+ * been applied anyway) or the server says the campaign is in another state. The screen then reads the campaign again instead
+ * of showing what it believed before.
+ */
+export function mayBeOutOfDate(err: unknown): boolean {
+  return err instanceof ApiError && OUT_OF_DATE.has(err.code)
+}
+
 export function describeError(err: unknown, ctx: ProblemContext = DEFAULT_CONTEXT): ErrorDescription {
   if (!(err instanceof ApiError)) {
     return {

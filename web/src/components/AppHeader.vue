@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { describeError } from '@/api/errors'
 import type { ConfigState } from '@/composables/useConfig'
 import LlmBadge from './LlmBadge.vue'
 import StatusIcon from './ui/StatusIcon.vue'
@@ -30,7 +31,7 @@ defineEmits<{ retry: [] }>()
         <LlmBadge v-if="configState.status === 'ready'" :mode="configState.config.llm_mode" :model="configState.config.model" />
         <span v-else-if="configState.status === 'error'" class="model__error">
           <StatusIcon tone="danger" />
-          <span>Sunucuya ulaşılamıyor.</span>
+          <span>{{ describeError(configState.error).title }}.</span>
           <button type="button" class="link-button" @click="$emit('retry')">Yeniden dene</button>
         </span>
         <span v-else class="model__status">Model bilgisi yükleniyor…</span>

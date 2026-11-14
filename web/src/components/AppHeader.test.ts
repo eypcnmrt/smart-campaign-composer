@@ -2,6 +2,7 @@ import { mount } from '@vue/test-utils'
 import { createMemoryHistory } from 'vue-router'
 import { describe, expect, it } from 'vitest'
 import type { Config } from '@/api/types'
+import { ApiError } from '@/api/client'
 import type { ConfigState } from '@/composables/useConfig'
 import { createAppRouter } from '@/router'
 import AppHeader from './AppHeader.vue'
@@ -40,7 +41,7 @@ describe('AppHeader', () => {
   })
 
   it('offers a retry when the configuration could not be loaded', async () => {
-    const wrapper = await render({ status: 'error', error: new Error('down') })
+    const wrapper = await render({ status: 'error', error: new ApiError({ status: 0, code: 'network_error', message: 'down' }) })
     expect(wrapper.text()).toContain('Sunucuya ulaşılamıyor')
     await wrapper.get('button').trigger('click')
     expect(wrapper.emitted('retry')).toHaveLength(1)

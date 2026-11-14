@@ -1,9 +1,9 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, shallowRef, watch } from 'vue'
-import { onBeforeRouteUpdate } from 'vue-router'
+import { onBeforeRouteLeave, onBeforeRouteUpdate } from 'vue-router'
 import { saveContent } from '@/api/campaigns'
 import { ApiError } from '@/api/client'
-import { describeError } from '@/api/errors'
+import { describeError, mayBeOutOfDate } from '@/api/errors'
 import type { Campaign, Content, ContentField } from '@/api/types'
 import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
@@ -28,7 +28,7 @@ const emit = defineEmits<{
   approve: []
 }>()
 
-const { state: configState } = useConfig()
+const { state: configState, load: loadConfig } = useConfig()
 
 const FIELDS: readonly { field: ContentField; label: string; channel: 'sms' | 'email'; multiline: boolean }[] = [
   { field: 'sms', label: 'SMS metni', channel: 'sms', multiline: true },
@@ -77,6 +77,8 @@ async function run(regenerate: boolean): Promise<void> {
   saved.value = false
   const next = await stream.start(props.campaign.id, { regenerate })
   if (next) emit('updated', next)
+  // The text may have been saved before the connection broke: show what the server has, not an empty step.
+  else if (mayBeOutOfDate(stream.error.value)) emit('reload')
 }
 
 /** Replacing text the marketer wrote or changed asks first; replacing the model's own untouched text does not. */
@@ -98,7 +100,10 @@ onMounted(() => {
 })
 
 const hasContent = computed(() => props.campaign.content !== null)
-const contentExists = computed(() => stream.error.value instanceof ApiError && stream.error.value.code === 'content_exists')
+// The note is about a page that is out of date; once the campaign has been read again (and has its content) it no longer applies.
+const contentExists = computed(
+  () => !hasContent.value && stream.error.value instanceof ApiError && stream.error.value.code === 'content_exists',
+)
 
 // ---- Save ----
 
@@ -141,6 +146,7 @@ async function save(): Promise<void> {
   } catch (err) {
     if (mine.signal.aborted) return
     saveError.value = err
+    if (mayBeOutOfDate(err)) emit('reload')
     const byField: Partial<Record<ContentField, string[]>> = {}
     for (const f of describeError(err, { variables: variables.value }).fields) {
       const field = FIELDS.find((x) => x.field === f.path)?.field
@@ -158,10 +164,14 @@ async function save(): Promise<void> {
 // ---- Leaving with unsaved edits ----
 
 // Following a link of the step rail while the edits are unsaved would lose them without a word: ask first.
+const CONFIRM_LEAVE = 'Kaydedilmemiş değişiklikleriniz var. Bu adımdan ayrılırsanız kaybolacak. Ayrılmak istiyor musunuz?'
 onBeforeRouteUpdate((to) => {
-  if (dirty.value && to.query.step !== 'content') {
-    return window.confirm('Kaydedilmemiş değişiklikleriniz var. Bu adımdan ayrılırsanız kaybolacak. Ayrılmak istiyor musunuz?')
-  }
+  if (dirty.value && to.query.step !== 'content') return window.confirm(CONFIRM_LEAVE)
+  return true
+})
+// Leaving the campaign (the header's links, the browser's back button) loses the edits just the same.
+onBeforeRouteLeave(() => {
+  if (dirty.value) return window.confirm(CONFIRM_LEAVE)
   return true
 })
 
@@ -185,7 +195,8 @@ defineExpose({ dirty })
   <section class="content" aria-labelledby="content-title">
     <h2 id="content-title" tabindex="-1">İçerik</h2>
 
-    <LoadingState v-if="configState.status !== 'ready'" label="Ayarlar yükleniyor…" />
+    <ErrorPanel v-if="configState.status === 'error'" :error="configState.error" @retry="loadConfig" />
+    <LoadingState v-else-if="configState.status !== 'ready'" label="Ayarlar yükleniyor…" />
 
     <template v-else>
       <StatusNote v-if="campaign.segment_changed_after_content && !streaming" tone="info" title="Segment değişti">

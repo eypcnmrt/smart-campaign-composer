@@ -69,6 +69,23 @@ describe('useCampaign', () => {
     expect(store.campaign.value?.version).toBe(3)
   })
 
+  it('drops the answer of a read that started before an action replaced the campaign', async () => {
+    let releaseOld: () => void = () => undefined
+    installFakeApi({
+      'GET /api/campaigns/7': async () => {
+        await new Promise<void>((resolve) => (releaseOld = resolve))
+        return { body: audienceReady }
+      },
+    })
+    const { store } = setup(7)
+    await settle()
+    store.replace(contentReady) // an action answered while the first read was still out
+    releaseOld()
+    await settle()
+    expect(store.campaign.value?.status).toBe('content_ready')
+    expect(store.status.value).toBe('ready')
+  })
+
   it('ignores a campaign with another id', async () => {
     installFakeApi({ 'GET /api/campaigns/7': { body: audienceReady } })
     const { store } = setup(7)
