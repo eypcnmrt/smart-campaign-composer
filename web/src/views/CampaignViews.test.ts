@@ -84,6 +84,20 @@ describe('the new campaign page', () => {
     wrapper.unmount()
   })
 
+  it('warns that a draft may exist when the answer to the creation never came', async () => {
+    const { wrapper } = await open('/campaigns/new', {
+      'POST /api/campaigns': () => {
+        throw new TypeError('Failed to fetch')
+      },
+    })
+    await wrapper.get('textarea').setValue('brief')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Taslak oluşmuş olabilir')
+    expect(wrapper.find('a[href="/"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
   it('does not take a campaign that was not made for a failure to reach the server', async () => {
     const { wrapper, router } = await open('/campaigns/new', {
       'POST /api/campaigns': () => {

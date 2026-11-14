@@ -276,6 +276,31 @@ describe('streamContent', () => {
     expect(events).toHaveLength(1)
   })
 
+  it('does not mind the data of an event it does not know', async () => {
+    stubStream([enc.encode('event: heartbeat\ndata: not json at all\n\n' + SUCCESS)])
+    const { events, onEvent } = collect()
+    await streamContent(9, { onEvent })
+    expect(events).toHaveLength(2)
+  })
+
+  it('does not report a failure of its own consumer as a broken connection', async () => {
+    stubStream([enc.encode(SUCCESS)])
+    const err = await streamContent(9, {
+      onEvent: () => {
+        throw new TypeError('bug in the handler')
+      },
+    }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    expect(err).toBeInstanceOf(TypeError)
+  })
+
+  it('reports a line that is far too long as bad_response, not as a broken connection', async () => {
+    stubStream([enc.encode('data: ' + 'x'.repeat(1 << 20))])
+    expect((await rejection(streamContent(9, { onEvent: () => undefined }))).code).toBe('bad_response')
+  })
+
   it('reports a result that does not match the contract as bad_response', async () => {
     stubStream([enc.encode('event: done\ndata: {"id":1}\n\n')])
     expect((await rejection(streamContent(9, { onEvent: () => undefined }))).code).toBe('bad_response')

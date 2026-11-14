@@ -123,6 +123,8 @@ describe('a response that does not match the contract is a bad_response', () => 
     ['a campaign in an unknown status', { ...campaign, status: 'paused' }],
     ['a campaign whose channels are not strings', { ...campaign, channels: [1] }],
     ['a campaign with content that is not three strings', { ...campaign, content: { sms: 'a' } }],
+    ['a campaign whose audience lacks the SMS count', { ...campaign, audience: { matched: 1, email: 1, total_users: 2, counted_at: 'x' } }],
+    ['a campaign whose audience has no count time', { ...campaign, audience: { matched: 1, sms: 1, email: 1, total_users: 2 } }],
     ['a campaign without the segment hint', { ...campaign, segment_changed_after_content: undefined }],
     ['a list item that is not a campaign', 5],
   ])('%s', async (_name, body) => {

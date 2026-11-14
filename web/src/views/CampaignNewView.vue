@@ -3,9 +3,11 @@ import { computed, onBeforeUnmount, onMounted, shallowRef } from 'vue'
 import { useRouter } from 'vue-router'
 import { createCampaign } from '@/api/campaigns'
 import { describeError } from '@/api/errors'
+import { ApiError } from '@/api/client'
 import BriefForm from '@/components/brief/BriefForm.vue'
 import StepNav from '@/components/StepNav.vue'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
+import StatusNote from '@/components/ui/StatusNote.vue'
 import LoadingState from '@/components/ui/LoadingState.vue'
 import { useConfig } from '@/composables/useConfig'
 import { newCampaignItems } from '@/domain/steps'
@@ -21,6 +23,11 @@ let request: AbortController | null = null
 
 // The draft a failed creation left behind (the brief is not lost), if the server says there is one.
 const draftId = computed(() => (error.value === null ? null : describeError(error.value).campaignId))
+
+// No answer does not mean no draft: the server may have made it and the answer got lost.
+const maybeSaved = computed(
+  () => error.value instanceof ApiError && (error.value.code === 'network_error' || error.value.code === 'timeout'),
+)
 
 onMounted(() => {
   void load()
@@ -63,6 +70,12 @@ async function submit(brief: string): Promise<void> {
       />
       <ErrorPanel v-else-if="state.status === 'error'" :error="state.error" @retry="load" />
       <LoadingState v-else label="Ayarlar yükleniyor…" />
+      <StatusNote v-if="maybeSaved && draftId === null" tone="info" title="Taslak oluşmuş olabilir">
+        <p>
+          Yanıt gelmedi ama istek sunucuya ulaşmış olabilir. Tekrar göndermeden önce
+          <RouterLink :to="{ name: 'campaigns' }">kampanya listesine</RouterLink> bakın; aynı brief ile ikinci bir taslak açmamış olursunuz.
+        </p>
+      </StatusNote>
     </div>
   </div>
 </template>

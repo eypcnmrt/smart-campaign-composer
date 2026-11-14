@@ -39,6 +39,14 @@ function isContent(value: unknown): value is Content {
   )
 }
 
+function isAudience(value: unknown): boolean {
+  return (
+    isRecord(value) &&
+    ['matched', 'sms', 'email', 'total_users'].every((k) => typeof value[k] === 'number') &&
+    typeof value.counted_at === 'string'
+  )
+}
+
 /** Checks the parts of a campaign the UI depends on. The rest is passed through as the server sent it. */
 export function parseCampaign(data: unknown): Campaign {
   if (
@@ -51,7 +59,7 @@ export function parseCampaign(data: unknown): Campaign {
     !isStringList(data.channels) ||
     !Array.isArray(data.warnings) ||
     !isNullOr(data.segment, (s) => isRecord(s) && typeof s.explanation === 'string' && isStringList(s.unsupported_criteria)) ||
-    !isNullOr(data.audience, (a) => isRecord(a) && typeof a.matched === 'number' && typeof a.total_users === 'number') ||
+    !isNullOr(data.audience, isAudience) ||
     !isNullOr(data.content, isContent) ||
     !isNullOr(data.sms_info, (s) => isRecord(s) && typeof s.segments === 'number') ||
     typeof data.segment_changed_after_content !== 'boolean'

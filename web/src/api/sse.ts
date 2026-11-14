@@ -101,7 +101,11 @@ function badEvent(name: string): ApiError {
  * Understands one event. Returns null for an event this client does not know (a newer server may send more), and throws
  * `bad_response` for a known event with the wrong shape.
  */
+const KNOWN_EVENTS: readonly string[] = ['attempt', 'delta', 'raw', 'done', 'error']
+
 export function parseStreamEvent(raw: RawSseEvent): StreamEvent | null {
+  // Looked at first: the data of an event this client does not know may be anything, and is not read.
+  if (!KNOWN_EVENTS.includes(raw.event)) return null
   let payload: unknown
   try {
     payload = JSON.parse(raw.data)
@@ -146,6 +150,10 @@ export interface StreamOptions {
 function streamError(error: { code: string; message: string; details: unknown }): ApiError {
   const wait = isRecord(error.details) && typeof error.details.retry_after_seconds === 'number' ? error.details.retry_after_seconds : null
   return new ApiError({ status: 200, code: error.code, message: error.message, details: error.details, retryAfterSeconds: wait })
+}
+
+function badStream(why: string): ApiError {
+  return new ApiError({ status: 200, code: 'bad_response', message: why })
 }
 
 function incomplete(): ApiError {
@@ -199,20 +207,29 @@ export async function streamContent(id: number, options: StreamOptions): Promise
     else onEvent(event)
   })
 
+  // Only the reading is guarded as I/O: a broken connection is `stream_incomplete`. What goes wrong while an event is understood or
+  // handed to `onEvent` is not a broken connection and must not be reported as one (the user would retry a paid generation for a
+  // bug): a bad event is `bad_response`, anything else is passed on as it is.
   try {
     while (end.result === null) {
-      const { done, value } = await reader.read()
-      if (done) {
-        parser.feed(decoder.decode())
-        break
+      let chunk: ReadableStreamReadResult<Uint8Array>
+      try {
+        chunk = await reader.read()
+      } catch (err) {
+        if (signal?.aborted) throw err
+        throw incomplete() // the connection broke
       }
-      parser.feed(decoder.decode(value, { stream: true }))
+      try {
+        if (chunk.done) {
+          parser.feed(decoder.decode())
+          break
+        }
+        parser.feed(decoder.decode(chunk.value, { stream: true }))
+      } catch (err) {
+        if (err instanceof RangeError) throw badStream(err.message)
+        throw err
+      }
     }
-  } catch (err) {
-    if (signal?.aborted) throw err
-    if (err instanceof ApiError) throw err
-    // The connection broke, or the stream was malformed beyond reading.
-    throw incomplete()
   } finally {
     parser.flush()
     // The result is in; the server has nothing more to say. Cancel so the connection is released.

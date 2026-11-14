@@ -1,17 +1,39 @@
 <script setup lang="ts">
-import { nextTick, onMounted, useTemplateRef, watch } from 'vue'
-import { useRoute } from 'vue-router'
+import { nextTick, onErrorCaptured, onMounted, shallowRef, useTemplateRef, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AppHeader from '@/components/AppHeader.vue'
+import StatusNote from '@/components/ui/StatusNote.vue'
 import { useConfig } from '@/composables/useConfig'
 
 const { state, load } = useConfig()
 const route = useRoute()
+const router = useRouter()
 const main = useTemplateRef<HTMLElement>('main')
 
 // The configuration (limits, variables, the model) is read once when the app opens.
 onMounted(() => {
   void load()
 })
+
+// Two failures that would otherwise leave the page blank or a link doing nothing, with the cause only in the console:
+//  * a page that could not be loaded (the app was updated while this tab was open, so the file it asks for is gone, or the
+//    connection dropped): the navigation fails and the link seems dead;
+//  * an error while a component renders or reacts, which stops that part of the page.
+// Both say so and offer a reload. The error is still passed on, so it is also logged.
+const fault = shallowRef<'load' | 'render' | null>(null)
+router.onError(() => {
+  fault.value = 'load'
+})
+router.afterEach((_to, _from, failure) => {
+  if (!failure && fault.value === 'load') fault.value = null
+})
+onErrorCaptured(() => {
+  fault.value = 'render'
+})
+
+function reload(): void {
+  window.location.reload()
+}
 
 function focusMain() {
   main.value?.focus({ preventScroll: true })
@@ -32,6 +54,16 @@ watch(
     <a class="skip-link" href="#main" @click.prevent="focusMain">Ana içeriğe geç</a>
     <AppHeader :config-state="state" @retry="load" />
     <main id="main" ref="main" class="page" tabindex="-1">
+      <StatusNote v-if="fault" tone="danger" :title="fault === 'load' ? 'Sayfa yüklenemedi' : 'Sayfada bir sorun oluştu'" announce>
+        <p>
+          {{
+            fault === 'load'
+              ? 'Uygulama güncellenmiş ya da bağlantı kopmuş olabilir.'
+              : 'Bu bölüm beklenmedik bir hata verdi. Sunucuya kaydedilenler yerinde; sayfayı yenileyince kampanya kaldığı adımdan açılır.'
+          }}
+        </p>
+        <p><button type="button" class="btn btn--sm" @click="reload">Sayfayı yenile</button></p>
+      </StatusNote>
       <RouterView />
     </main>
   </div>
