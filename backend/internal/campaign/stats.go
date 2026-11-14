@@ -13,11 +13,12 @@ import (
 	"smartcampaign/internal/queue"
 )
 
-// StatsSQL counts the deliveries of one campaign per channel, status and "was it tried yet". It is the whole cost of a
-// stats request: an index-only scan on deliveries_campaign_status_channel_idx (campaign_id, status, channel, attempts), a
-// test checks the plan. "retrying" is not a stored status: it is a queued delivery with attempts > 0.
-const StatsSQL = `SELECT channel, status, attempts > 0 AS tried, count(*)
-	FROM deliveries WHERE campaign_id = $1 GROUP BY channel, status, attempts > 0`
+// StatsSQL counts the deliveries of one campaign per channel, status, "was it tried yet" and "was it tried again", and adds up
+// the attempts. It is the whole cost of the counts of a stats request: an index-only scan on
+// deliveries_campaign_status_channel_idx (campaign_id, status, channel, attempts), a test checks the plan. "retrying" is not a
+// stored status: it is a queued delivery with attempts > 0.
+const StatsSQL = `SELECT channel, status, attempts > 0 AS tried, attempts > 1 AS retried, count(*), sum(attempts)::int
+	FROM deliveries WHERE campaign_id = $1 GROUP BY channel, status, attempts > 0, attempts > 1`
 
 // ChannelCounts are the deliveries of one channel by state, plus what the worker says about the channel.
 type ChannelCounts struct {
@@ -33,6 +34,8 @@ type ChannelCounts struct {
 	// RateLimit is the cap the worker works under for this channel, in messages per second, as it reported it; null when it
 	// never did (the screen then draws no limit line).
 	RateLimit *float64 `json:"rate_limit"`
+	// Timeline is how many messages the provider accepted per second (see timelines); null before the approval.
+	Timeline *Timeline `json:"timeline"`
 }
 
 // Stats is what the dashboard polls.
@@ -40,6 +43,8 @@ type Stats struct {
 	CampaignID int64                    `json:"campaign_id"`
 	Status     State                    `json:"status"`
 	Channels   map[string]ChannelCounts `json:"channels"`
+	// Summary is null before the approval.
+	Summary *SendSummary `json:"summary"`
 }
 
 // Provider states, as shown in ChannelCounts.Provider.State.
@@ -89,7 +94,9 @@ func ProviderStatus(s queue.ChannelStatus, reported bool, staleAfter time.Durati
 func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter time.Duration) (Stats, error) {
 	var status string
 	var channels, approved []string
-	err := s.pool.QueryRow(ctx, `SELECT status, channels, approved_channels FROM campaigns WHERE id = $1`, id).Scan(&status, &channels, &approved)
+	var approvedAt, completedAt *time.Time
+	err := s.pool.QueryRow(ctx, `SELECT status, channels, approved_channels, approved_at, completed_at FROM campaigns WHERE id = $1`, id).
+		Scan(&status, &channels, &approved, &approvedAt, &completedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Stats{}, ErrNotFound
 	}
@@ -110,11 +117,12 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 		return Stats{}, fmt.Errorf("counting the deliveries of campaign %d: %w", id, err)
 	}
 	defer rows.Close()
+	var retried, attempts int
 	for rows.Next() {
 		var channel, st string
-		var tried bool
-		var n int
-		if err := rows.Scan(&channel, &st, &tried, &n); err != nil {
+		var tried, again bool
+		var n, tries int
+		if err := rows.Scan(&channel, &st, &tried, &again, &n, &tries); err != nil {
 			return Stats{}, fmt.Errorf("counting the deliveries of campaign %d: %w", id, err)
 		}
 		c := out.Channels[channel]
@@ -136,9 +144,31 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 		}
 		c.Total += n
 		out.Channels[channel] = c
+		attempts += tries
+		if again {
+			retried += n
+		}
 	}
 	if err := rows.Err(); err != nil {
 		return Stats{}, fmt.Errorf("counting the deliveries of campaign %d: %w", id, err)
+	}
+
+	if approvedAt != nil {
+		timelines, peak, average, err := s.timelines(ctx, id, *approvedAt, completedAt, slices.Collect(maps.Keys(out.Channels)))
+		if err != nil {
+			return Stats{}, err
+		}
+		for ch, tl := range timelines {
+			c := out.Channels[ch]
+			c.Timeline = tl
+			out.Channels[ch] = c
+		}
+		sum := SendSummary{AveragePerSecond: average, PeakPerSecond: peak, RetriedMessages: retried, TotalAttempts: attempts}
+		if completedAt != nil {
+			d := completedAt.Sub(*approvedAt).Seconds()
+			sum.DurationSeconds = &d
+		}
+		out.Summary = &sum
 	}
 
 	reports, err := q.ChannelStatuses(ctx)

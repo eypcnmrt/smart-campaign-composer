@@ -714,6 +714,7 @@ func TestStore_stats(t *testing.T) {
 		t.Fatalf("sms rate limit = %v, want the 100 the worker reported", sms.RateLimit)
 	}
 	got.RateLimit = nil
+	got.Timeline = nil // tested in TestStore_statsTimelineAndSummary
 	if got != want {
 		t.Fatalf("sms counts = %+v, want %+v", got, want)
 	}
@@ -737,5 +738,100 @@ func TestStore_stats(t *testing.T) {
 	pre, err := e.store.Stats(ctx, e.q, draft.ID, time.Minute)
 	if err != nil || len(pre.Channels) != 2 || pre.Channels["sms"].Total != 0 {
 		t.Fatalf("stats of a campaign that was not approved = %+v, %v", pre, err)
+	}
+	if pre.Summary != nil || pre.Channels["sms"].Timeline != nil {
+		t.Fatalf("a campaign that was not approved has a summary or a timeline: %+v", pre)
+	}
+}
+
+// The timeline counts the messages the provider accepted per second from the approval, per channel; the summary adds the
+// duration (once completed), the rates and the retries.
+func TestStore_statsTimelineAndSummary(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+	c := e.withContent(t, e.withSegment(t, ankaraRule))
+	if _, err := e.store.Approve(ctx, c.ID, c.Version, false); err != nil {
+		t.Fatal(err)
+	}
+	ids := func(channel string) []int64 {
+		rows, err := e.pool.Query(ctx, `SELECT id FROM deliveries WHERE campaign_id = $1 AND channel = $2 ORDER BY id`, c.ID, channel)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rows.Close()
+		var out []int64
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				t.Fatal(err)
+			}
+			out = append(out, id)
+		}
+		return out
+	}
+	// sent_at is "seconds after the start of the approval second"; the campaign's own approved_at is the origin
+	send := func(id int64, offset float64, attempts int) {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, `UPDATE deliveries d SET status = 'sent', attempts = $3, sent_at = date_trunc('second', c.approved_at) + $2 * interval '1 second'
+			FROM campaigns c WHERE d.id = $1 AND c.id = d.campaign_id`, id, offset, attempts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sms, email := ids("sms"), ids("email")
+	send(sms[0], 0.5, 2) // retried once
+	send(sms[1], 0.6, 1)
+	send(sms[2], 0.7, 1)
+	send(sms[3], 1.5, 1)
+	send(sms[4], 1.9, 1)
+	send(email[0], 1.2, 3) // retried twice
+	send(email[1], 1.3, 1)
+	// the rest stays queued with no attempt
+
+	stats, err := e.store.Stats(ctx, e.q, c.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smsTL, emailTL := stats.Channels["sms"].Timeline, stats.Channels["email"].Timeline
+	if smsTL == nil || emailTL == nil {
+		t.Fatalf("a sending campaign has no timeline: %+v", stats.Channels)
+	}
+	if smsTL.BucketSeconds != 1 || len(smsTL.Accepted) < 2 || len(smsTL.Accepted) != len(emailTL.Accepted) || !smsTL.Start.Equal(emailTL.Start) {
+		t.Fatalf("timelines = %+v and %+v, want the same one-second grid", smsTL, emailTL)
+	}
+	if got := smsTL.Accepted[:2]; got[0] != 3 || got[1] != 2 {
+		t.Fatalf("sms per second = %v, want 3 then 2", smsTL.Accepted)
+	}
+	if got := emailTL.Accepted[:2]; got[0] != 0 || got[1] != 2 {
+		t.Fatalf("email per second = %v, want 0 then 2", emailTL.Accepted)
+	}
+	sum := stats.Summary
+	if sum == nil {
+		t.Fatal("a sending campaign has no summary")
+	}
+	if sum.DurationSeconds != nil {
+		t.Fatalf("duration of a campaign that is not completed = %v, want none", *sum.DurationSeconds)
+	}
+	// seven sent in 1.4 s between the first and the last; the busiest second (both channels) took four
+	if sum.AveragePerSecond < 4.99 || sum.AveragePerSecond > 5.01 || sum.PeakPerSecond != 4 {
+		t.Fatalf("average / peak = %v / %v, want 5 / 4", sum.AveragePerSecond, sum.PeakPerSecond)
+	}
+	// 5 sms: 2+1+1+1+1, 2 email: 3+1
+	if sum.RetriedMessages != 2 || sum.TotalAttempts != 10 {
+		t.Fatalf("retried / attempts = %d / %d, want 2 / 10", sum.RetriedMessages, sum.TotalAttempts)
+	}
+
+	// completed four seconds after the approval: the duration, and a timeline that ends there
+	if _, err := e.pool.Exec(ctx, `UPDATE campaigns SET status = 'completed', completed_at = approved_at + interval '4 seconds' WHERE id = $1`, c.ID); err != nil {
+		t.Fatal(err)
+	}
+	done, err := e.store.Stats(ctx, e.q, c.ID, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := done.Summary.DurationSeconds; d == nil || *d != 4 {
+		t.Fatalf("duration = %v, want 4", d)
+	}
+	if n := len(done.Channels["sms"].Timeline.Accepted); n != 5 {
+		t.Fatalf("a send that took 4 seconds has %d buckets, want 5 (second 0 to 4)", n)
 	}
 }

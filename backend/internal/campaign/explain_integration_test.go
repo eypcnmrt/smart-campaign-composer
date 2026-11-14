@@ -148,10 +148,43 @@ func TestIndex_servesTheStatsQueryAndTheCompletionCheck(t *testing.T) {
 			}
 		}
 	})
+	// The timeline is two reads of deliveries_sent_at_idx (campaign, time, channel; only sent rows): the two ends of the index, and
+	// the counts per second (checked last, below).
+	const sentIndex = "deliveries_sent_at_idx"
+	t.Run("the timeline bounds are the two ends of the sent-at index", func(t *testing.T) {
+		bounds := strings.Replace(campaign.TimelineBoundsSQL, "$1", "1", -1)
+		for _, sql := range []string{bounds} {
+			plan, text := planOf(sql)
+			t.Logf("plan:\n%s", text)
+			scans := scansOf(plan, "deliveries")
+			if len(scans) != 2 {
+				t.Fatalf("the bounds read deliveries with %v, want two index scans (first and last)\n%s", scans, text)
+			}
+			for _, s := range scans {
+				if !strings.HasSuffix(s, " using "+sentIndex) {
+					t.Fatalf("the bounds read deliveries with %v, want %s\n%s", scans, sentIndex, text)
+				}
+			}
+		}
+	})
 	t.Run("the old index is gone", func(t *testing.T) {
 		var n int
 		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_indexes WHERE indexname = 'deliveries_campaign_status_idx'`).Scan(&n); err != nil || n != 0 {
 			t.Fatalf("the redundant (campaign_id, status) index still exists (%d, %v)", n, err)
+		}
+	})
+	// The counts per second are answered from deliveries_sent_at_idx alone: it holds campaign, time and channel, and only sent rows.
+	// The stats index also fits "campaign and status", and on a test database whose visibility map is empty the planner cannot tell
+	// the two apart (its costs are within a few percent), so this check, which must come after the others, takes that one away and
+	// shows that the sent-at index by itself can answer the query without touching the table.
+	t.Run("the timeline counts come from the sent-at index alone", func(t *testing.T) {
+		exec(`DROP INDEX deliveries_campaign_status_channel_idx`)
+		exec(`VACUUM (FREEZE, ANALYZE) deliveries`)
+		counts := strings.NewReplacer("$1", "1", "$2", "now()", "$3", "1").Replace(campaign.TimelineSQL)
+		plan, text := planOf(counts, "enable_bitmapscan = off", "enable_seqscan = off")
+		t.Logf("plan:\n%s", text)
+		if scans := scansOf(plan, "deliveries"); len(scans) != 1 || scans[0] != "Index Only Scan using "+sentIndex {
+			t.Fatalf("the timeline reads deliveries with %v, want one Index Only Scan using %s\n%s", scans, sentIndex, text)
 		}
 	})
 }
