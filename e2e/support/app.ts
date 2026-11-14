@@ -64,6 +64,15 @@ export async function setOutage(request: APIRequestContext, on: boolean): Promis
 }
 
 /**
+ * Makes the provider answer the next `count` messages with a 429 (and its Retry-After); the worker retries each of them, so exactly
+ * that many messages end with a second attempt. 0 clears it. Like the outage, the switch exists only in this test stack.
+ */
+export async function setThrottleNext(request: APIRequestContext, count: number): Promise<void> {
+  const res = await request.post(`${PROVIDER_URL}/control/throttle-next/${count}`)
+  expect(res.ok(), `the throttle switch answered ${res.status()}`).toBe(true)
+}
+
+/**
  * Scans the page with axe (WCAG 2 A and AA, and the best practices) and fails on a violation that is serious or critical. The
  * lesser ones (moderate, minor) are not asserted; they are listed in the message when something serious fails the test.
  */

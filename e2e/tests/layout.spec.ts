@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test'
-import { shot, startFromExample } from '../support/app'
+import { startFromExample } from '../support/app'
 
 // The browser round found the list page touching the window's edge at about 1170 px. What is measured is what the person sees: the
 // distance from the window's edge to the nearest content of the page, left and right.
@@ -28,6 +28,5 @@ test.describe('at about 1170 px', () => {
     expect(edges.left).toBeGreaterThanOrEqual(16)
     expect(edges.right).toBeGreaterThanOrEqual(16)
     await expect(page.getByRole('link', { name: 'Yeni kampanya' })).toHaveCount(1)
-    await shot(page, '08-campaign-list')
   })
 })

@@ -1181,6 +1181,27 @@ reporting and in the stream's write path.
   timeout; on a loaded machine (a full `make test` next to a build) it did not arrive (`Requests:0`). The late delay is now 1.5 s and the
   client's timeout 300 ms; what the test asserts is unchanged.
 
+### The list picture shows five different campaigns, and a delivery with retries has a picture
+- **Problem:** `08-campaign-list.png` was taken after fifteen identical campaigns that the other scenarios had made from the same example
+  brief, so the list looked like a test artefact, and no picture showed a send that needed retries.
+- **Decision:** a scenario of its own, `e2e/tests/00-campaign-list.spec.ts`. Through the API (the screens of the other scenarios
+  cover the way a person makes a campaign) it makes five campaigns in different states: finished (SMS only, İzmir), finished
+  after retries (İstanbul, cart without purchase, both channels), waiting for approval (Bursa and Antalya), with a warning about a
+  criterion the system does not know (a gender criterion, 1 warning), and with the warning that the rule matches everybody. Then it
+  checks the rows (status, audience, warning badge, newest first) and takes `08-campaign-list.png`. The file name sorts first, so on a
+  fresh database (every normal run) the list holds these five and nothing else; on a reused stack (`KEEP=1`) the five are still the
+  newest rows, and older ones follow them.
+- **The retried campaign is exact, not lucky:** before it is approved the scenario sets `POST /control/throttle-next/6` on the
+  provider, so exactly six first attempts get a 429 with Retry-After and are retried; the scenario then asserts on the delivery page
+  "6 mesaj en az bir kez yeniden denendi (toplam N deneme)" with N = messages + 6, nothing failed and nothing left to retry, and takes
+  `09-delivery-with-retries.png` (new). The switch is cleared after every scenario and by the global setup, so a number that was not used up
+  cannot turn away the messages of another one.
+- **The pictures were made again** (`make e2e SCREENSHOTS=1`, all nine pass): the data is the seeded fake users and the demo model's text,
+  as before; the other pictures changed only in timestamps and counts. The delivery pictures now show the speeds per channel (see "Speeds are
+  per channel") and the summary line without a rate.
+- **The scenario also covers a check that the layout scenario used to make by accident:** the "Yeni kampanya" button and the 16 px
+  margins are still asserted by `layout.spec.ts`; only its picture moved.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the

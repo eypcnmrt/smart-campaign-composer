@@ -14,6 +14,9 @@ export default async function globalSetup(): Promise<void> {
     const off = await api.post(`${PROVIDER_URL}/control/outage/off`)
     if (!off.ok()) throw new Error(`closing the outage failed: the switch answered ${off.status()}`)
     if (wasOn) console.log('global setup: an outage left on by an earlier run was closed')
+    // The same for "the next N messages get a 429": a leftover would turn the retries of the first scenario into someone else's.
+    const throttle = await api.post(`${PROVIDER_URL}/control/throttle-next/0`)
+    if (!throttle.ok()) throw new Error(`clearing the forced 429s failed: the switch answered ${throttle.status()}`)
   } finally {
     await api.dispose()
   }
