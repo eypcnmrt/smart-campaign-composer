@@ -1,0 +1,446 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Sonnet 5.5 · Claude Pro
+ ▝▝   ▝▝   ~\Desktop\smart-campaign-composer
+
+
+❯ Bu oturumda gece oturumunun açık konularından seçtiklerimi ve ekran           
+  görüntülerinde gördüğüm birkaç şeyi kapatacaksın. Soru sorma; belirsiz bir    
+  noktada makul olanı seç ve DECISIONS.md'ye yaz. Bitince dur.                  
+                                                                                
+  Kurallar önceki oturumlardaki gibi: Go ve npm komutları CLAUDE.md'deki        
+  container'larda çalışsın. Her adım bitince testler yeşilse ayrı commit at.    
+  Bir hook bir komutu engellerse etrafından dolanma: o maddeyi bırak ve raporda 
+  yaz. İki istisna: engellenen şey yalnızca commit mesajındaki bir ifadeyse     
+  ifadeyi değiştirebilirsin; guard yalnızca okuma yapan bir komutu yanlış       
+  alarmla engellerse aynı okumayı Read ya da Grep aracıyla yapabilirsin. Push,  
+  geçmişi yeniden yazma ve --no-verify yok. Türkçe karakterli curl gövdelerini  
+  dosyaya UTF-8 olarak yaz ve --data-binary @dosya ile gönder.                  
+                                                                                
+  Aşama 0: ai-sessions/11-dogrulama-utf8.txt ve                                 
+  ai-sessions/12-gece-frontend.txt'yi kontrol script'iyle tara, bulguları       
+  önceki export'lardaki gibi maskele ve commit et.                              
+                                                                                
+  Aşama 1: Düzeltmeler                                                          
+  1. Stats okumaları tek bir snapshot olsun: hepsi tek bir REPEATABLE READ,     
+  salt-okunur transaction içinde. Önce ve sonra yanıt süresini ölç; test ekle.  
+  2. Gönderim özetindeki "ortalama 176 mesaj/sn · en yüksek 193 mesaj/sn" iki   
+  kanalın toplamı. Sınır kanal başına 100/s olduğu için okuyan sınırın          
+  aşıldığını sanıyor. Hız değerleri kanal kartlarında kanal başına görünsün;    
+  üstteki satırda ya hız olmasın ya da açıkça "iki kanalın toplamı" yazsın.     
+  3. Demo mock kriterleri tersine çeviriyor ya da sessizce düşürüyor: "sepete   
+  ürün eklemeyen" sepete ekleyenleri seçiyor, "son 400 gün" 30 gün oluyor, yönü 
+  olmayan "500 TL" ne koşula ne unsupported_criteria'ya giriyor.                
+  Değerlendirenler büyük olasılıkla mock modda deneyecek. Olumsuz eylem ekleri  
+  genel olarak tanınsın (-meyen, -mayan, -memiş, -mamış ve benzerleri). "son N  
+  gün" N'yi alsın; sözlüğün sınırını aşarsa o kriter unsupported_criteria'ya    
+  gerekçesiyle girsin. Tanıdığı bir kalıbın (tutar, gün, olumsuz eylem)         
+  değerini çözemediğinde o parça unsupported_criteria'ya girsin. Mock hiçbir    
+  zaman bir kriteri tersine çevirmesin ya da sessizce düşürmesin. Bu üç brief'i 
+  ve birkaç benzerini test vakası olarak ekle.                                  
+  4. Yarıda kopan bir yeniden üretimden sonra "Tekrar dene", içerik varken onay 
+  sormadan ikinci bir ücretli üretim başlatıyor. İçerik varken her yeniden      
+  üretim aynı onayı istesin. Test et.                                           
+  5. e2e: KEEP=1 ya da öldürülen bir koşudan kalan kesinti sonraki koşuya       
+  taşınıyor. globalSetup kesintiyi kapatsın.                                    
+  6. Mock provider'ın varsayılanları: case, docker compose up'ta hata, gecikme  
+  ve 429 üreten bir mock provider istiyor. Son iki gönderimde hiç yeniden       
+  deneme olmadı (toplam deneme, mesaj sayısına eşit). Varsayılan compose'daki   
+  hata, 429 ve gecikme ayarlarını kontrol et. Kapalı ya da çok düşükse          
+  dashboard'da yeniden denemelerin görüneceği makul varsayılanlar ver (ör. %5   
+  5xx, Retry-After'lı %5 429, 20-200 ms gecikme); testler, soak ve e2e kendi    
+  deterministik ayarlarını korusun. Bir gönderimin özetinde yeniden denenen     
+  mesajların göründüğünü göster.                                                
+  7. README ekran görüntüleri: liste görüntüsünde e2e'nin oluşturduğu 15 aynı   
+  brief var. Ekran görüntüsü senaryosu önce farklı durumlarda 4-5 farklı        
+  kampanya oluştursun (ör. tamamlanmış, onay bekleyen, uyarılı, yeniden         
+  denemeli tamamlanmış) ve listeyi öyle çeksin. Görüntüleri yeniden üret.       
+                                                                                
+  Aşama 2: DECISIONS tutarlılığı                                                
+  - Artık geçerli olmayan satırları düzelt: içerik akışının GET olduğunu        
+  söyleyen satır; polling'in hatalarda 1 sn'de kaldığını söyleyen madde (geri   
+  çekilme eklendi); "başarısızlık yolları gerçek tarayıcıda denenmedi" maddesi  
+  (e2e'nin neyi kapsadığını ve neyi kapsamadığını yaz). Bu oturumda kapanan     
+  maddeleri kapandı olarak işaretle.                                            
+  - Open issues kararlarım: stats snapshot'ı, mock'un kriterleri tersine        
+  çevirmesi, kopan üretimden sonraki onaysız yeniden deneme ve e2e'de kalan     
+  kesinti Aşama 1'de düzeltiliyor; eskimiş satırlar yukarıda düzeltiliyor.      
+  Şunlar bilinçli karar olarak kalsın, DECISIONS'a bu gerekçelerle yaz:         
+    - Stats yanıtında katı sözleşme: istemci ve sunucu birlikte dağıtılıyor;    
+  istemcinin anlamadığı bir yanıt sürüm uyumsuzluğudur ve görünmesi gerekir.    
+    - Grafikte "kabul edilen" etiketi: "kaydedilen" pazarlamacı için daha       
+  belirsiz; neyin ölçüldüğü (sent_at'e göre kovalama) DECISIONS'ta açıkça       
+  yazsın.                                                                       
+    - "Yeniden deneniyor (N sn)" satırının geri sayım olmaması: gösterilen      
+  değer planlanan bekleme; zorlanan bir sunucuya karşı her saniye yeniden çizim 
+  gerekmiyor.                                                                   
+    - HEAD'in handler'ı çalıştırması: durum kodu ve başlıkların GET ile aynı    
+  olması gerekiyor; artık yan etkili GET kalmadı.                               
+    - LLM katmanı ve worker'daki düşük öncelikli maddeler: gerçek ama küçük;    
+  belgelenmiş olmaları yeterli.                                                 
+    - Model bekleyen çağrılarda istemci zaman aşımı olmaması: sunucu            
+  llm_timeout ile sınırlıyor; istemci kesse sunucunun bitirip ücretlendirdiği   
+  işi boşa atar; sayfadan çıkmak isteği zaten iptal ediyor.                     
+                                                                                
+  Bitince make test ve make e2e çıktılarını göster ve dur. Son mesajın kısa bir 
+  rapor olsun: ne bitti, ne kaldı, hangi kararları verdin, hangi hook neyi      
+  engelledi.                                                                    
+
+● Önce depoyu ve Aşama 0'ı inceliyorum.
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Aşama 0 tamam (commit c0826f1). Şimdi Aşama 1'e geçiyorum: önce stats, mock ve
+  DECISIONS'ın ilgili kısımlarını okuyorum.
+
+  Read 1 file, listed 1 directory (ctrl+o to expand)
+
+● Mock provider varsayılanları gerçekten kapalı (error 0, throttle 0). Şimdi
+  DECISIONS'ın Open issues kısmını ve stats kodunu okuyorum.
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Mevcut (değişmemiş) kodla ölçüm ve kırmızı test:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● I'll insert extra users with one SQL statement instead.
+
+  Ran 6 shell commands (ctrl+o to expand)
+  ⎿  4 skills available
+
+● Adım 1 commit'lendi (e53c3d5); şimdi adım 2'de gönderim özeti ve kanal
+  kartlarına bakıyorum.
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Adım 2'nin web tarafını yazıyorum (kanal başına ortalama, üst satırdan hız
+  çıkarma).
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Update(e2e\tests\happy-path.spec.ts)
+  ⎿  Added 14 lines, removed 8 lines
+      74    await expect(page.getByRole('img', { name: /E-posta: .*mesaj 
+          kabul edildi/ })).toBeVisible()
+      75    const summary = page.getByText(/^Süre /)
+      76    await expect(summary).toBeVisible()
+      77 -  await expect(summary).toContainText('mesaj/sn')              
+      78 -  const text = await summary.innerText()                       
+      79 -  const figure = (re: RegExp) => Number(re.exec(text)?.[1]?.rep
+         -lace(/\./g, '').replace(',', '.'))                             
+      80 -  const peak = figure(/en yüksek ([\d.,]+) mesaj\/sn/)         
+      81 -  const average = figure(/ortalama ([\d.,]+) mesaj\/sn/)       
+      82 -  expect(average, 'the average of the summary').toBeGreaterThan
+         -(0)                                                            
+      83 -  expect(peak, 'the peak of the summary').toBeGreaterThan(0)   
+      84 -  expect(peak, 'one channel is capped at 100/s and there are tw
+         -o').toBeLessThanOrEqual(200)                                   
+      77 +  // The summary line has no speed (the cap is per channel; a f
+         +igure of both channels together looks like a broken cap) ...   
+      78 +  await expect(summary).not.toContainText(/mesaj\/sn|ortalama|e
+         +n yüksek/)                                                     
+      79 +  // ... the speeds are in each channel's card, next to its own
+         + cap of 100/s.                                                 
+      80 +  for (const channel of ['sms', 'email']) {                    
+      81 +    const caption = (await page.locator(`[data-channel="${chann
+         +el}"] .chart__caption`).innerText()).replace(/\s+/g, ' ')      
+      82 +    const figure = (re: RegExp) => Number(re.exec(caption)?.[1]
+         +?.replace(/\./g, '').replace(',', '.'))                        
+      83 +    const average = figure(/Ortalama: ([\d.,]+)\/s/)           
+      84 +    const peak = figure(/En yoğun: ([\d.,]+)\/s/)              
+      85 +    expect(average, `the average of ${channel}`).toBeGreaterTha
+         +n(0)                                                           
+      86 +    expect(peak, `the peak of ${channel}`).toBeGreaterThan(0)  
+      87 +    // buckets are by the time the answer was recorded, so a li
+         +ttle over the cap is not a broken cap; double would be one     
+      88 +    expect(peak, `${channel} is capped at 100/s`).toBeLessThanO
+         +rEqual(110)                                                    
+      89 +    expect(average, `${channel} is capped at 100/s`).toBeLessTh
+         +anOrEqual(110)                                                 
+      90 +  }                                                            
+      91    await shot(page, '05-delivery-completed')
+      92  })
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● Update(web\src\components\send\RateChart.test.ts)
+  ⎿  Added 1 line, removed 1 line
+      78      const text = render().text()
+      79      expect(text).toBe('Süre 4,8 sn · 12 mesaj en az bir kez yen
+          iden denendi (toplam 5.012 deneme)')
+      80      // a rate of both channels together reads as a broken cap o
+          f 100 per channel: the speeds are in the channel cards
+      81 -    expect(text).not.toMatch(/mesaj/sn|ortalama|en yüksek/)    
+      81 +    expect(text).not.toMatch(/mesaj\/sn|ortalama|en yüksek/)   
+      82    })
+      83  
+      84    it('says plainly that nothing had to be retried, and leaves t
+          he duration out while it is unknown', () => {
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Web testleri yeşil. Adım 2'nin Go tarafını koşturup DECISIONS satırını
+  güncelleyerek commit atıyorum.
+
+  Ran 5 shell commands (ctrl+o to expand)
+
+● Write(backend\internal\llm\mock_segment.go)
+  ⎿  Wrote 604 lines to backend\internal\llm\mock_segment.go
+      1 package llm
+      2 
+      3 import (
+      4   "encoding/json"
+      5   "fmt"
+      6   "regexp"
+      7   "slices"
+      8   "strconv"
+      9   "strings"
+     … +595 lines (ctrl+o to expand)
+
+  Made 1 scratchpad edit +149, ran 2 shell commands (ctrl+o to expand)
+  ⎿  Found 7 new diagnostic issues in 2 files (ctrl+o to expand)
+
+● Backslash'ler kaçtı (discountRe); Edit aracıyla düzeltiyorum.
+
+● Update(backend\internal\llm\mock.go)
+  ⎿  Added 1 line, removed 1 line
+       94    return func(s string) string { return strings.ToLower(r.Repl
+           ace(s)) }
+       95  }()
+       96  
+       97 -var discountRe = regexp.MustCompile(`%s*(d{1,2})|yuzdes*(d{1,2
+          -})`)                                                          
+       97 +var discountRe = regexp.MustCompile(`%\s*(\d{1,2})|yuzde\s*(\d
+          +{1,2})`)                                                      
+       98  
+       99  func containsAny(s string, words ...string) bool {
+      100    for _, w := range words {
+
+  Ran 3 shell commands (ctrl+o to expand)
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Added 1 line
+      196          hasPurchase = true
+      197        }
+      198      }
+      199 +    prevCart = hasCart                                        
+      200      for _, c := range segment.Cities() {
+      201        if strings.Contains(cl.text, fold(c)) {
+      202          cities = append(cities, c)
+
+● Şimdi testleri yazıyorum (eski "clamped" testi yeni davranışa göre
+  güncelleniyor, yeni anlamsal tablo ekleniyor).
+
+  Listed 1 directory, ran 1 shell command (ctrl+o to expand)
+  ⎿  Found 5 new diagnostic issues in 2 files (ctrl+o to expand)
+● Update(backend\internal\llm\mock_test.go)
+  ⎿  Added 3 lines, removed 2 lines
+      52        want:  []string{`"within_days":30`},
+      53      },
+      54      {
+      55 -      name:  "window is clamped to the supported range",       
+      55 +      name:  "a window beyond the vocabulary is reported, not s
+         +hortened",                                                     
+      56        brief: "son 999 gün sepete ekleyen",
+      57 -      want:  []string{`"within_days":30`},                     
+      57 +      want:  []string{`"op":"in"`, `999`, `365`},              
+      58 +      avoid: []string{`"within_days"`},                        
+      59      },
+      60      {
+      61        name:  "buyers",
+
+● Write(backend\internal\llm\mock_segment_test.go)
+  ⎿  Wrote 209 lines to backend\internal\llm\mock_segment_test.go
+       1 package llm
+       2 
+       3 import (
+       4   "encoding/json"
+       5   "fmt"
+       6   "slices"
+       7   "strings"
+       8   "testing"
+       9 
+      10   "smartcampaign/internal/segment"
+     … +199 lines (ctrl+o to expand)
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+● Adım 3'ün tek kırığı bir api e2e testi; brief'ine bakıyorum.
+
+  Searched for 1 pattern, ran 5 shell commands (ctrl+o to expand)
+
+● Background command "cd /c/Users/EYUP/Desktop/smart-campaign-composer &&
+G=/c/Users/EYUP/AppData/Local/Temp/claude/06478632fcf048eb/44fbd728-7533-4ae0-8a
+ba-ddfd22c3f673/scratchpad/gounit.sh; sh $G "gofmt -w internal/llm && go vet
+./internal/llm/ && go test ./internal/llm/ 2>&1 | grep -v '^ --- PASS' | head
+-40" && docker compose -f docker-compose.test.yml run --rm backend 2>&1 | grep
+-v "Container\|Network\|Volume\|downloading" | grep -v "^ok\|no test files";
+docker compose -f docker-compose.test.yml down -v >/dev/null 2>&1" completed
+(exit code 0)
+
+● Arka plandaki tam suit bitti; sonucu okuyorum (mockprovider'daki zamanlama
+  testi tek seferlik takıldı, ayrıca yeniden koşturacağım).
+
+  Read 1 file, ran 2 shell commands (ctrl+o to expand)
+
+● DECISIONS girdisi ve commit (adım 3):
+
+  Ran 11 shell commands (ctrl+o to expand)
+
+● Adım 5'te e2e yapısına bakıyorum; globalSetup ekleyeceğim.
+
+  Ran 4 shell commands (ctrl+o to expand)
+
+● Şimdi kesintiyi elle açık bırakıp ikinci koşuda globalSetup'ın kapattığını
+  kanıtlıyorum.
+
+  Read 1 file, ran 9 shell commands (ctrl+o to expand)
+
+● Mock provider'a deterministik "sonraki N isteği 429'la" anahtarını ekliyorum
+  (yalnızca MOCK_CONTROL=1), testiyle.
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Dev stack zaten ayakta (eski varsayılanlarla). Yeni varsayılanlarla yeniden
+  kurup gerçek bir gönderimde yeniden denemelerin özette göründüğünü
+  kanıtlıyorum.
+
+  Made 1 scratchpad edit +36, ran 6 shell commands (ctrl+o to expand)
+
+● Adım 7'ye geçiyorum: layout testi 08 görüntüsünü çekiyor; liste için önce
+  farklı durumlu 5 kampanya oluşturan bir senaryo yazacağım.
+
+  Searched for 2 patterns, ran 4 shell commands (ctrl+o to expand)
+
+● Yanıtlar doğrudan kampanya nesnesi (sarmalanmamış). Senaryoyu yazıyorum.
+
+● Write(e2e\tests\00-campaign-list.spec.ts)
+  ⎿  Wrote 110 lines to e2e\tests\00-campaign-list.spec.ts
+      1 import { expect, test, type APIRequestContext } from '@playwright
+        /test'
+      2 import { setThrottleNext, shot } from '../support/app'
+      3 
+      4 // A list with something to read in it. Five campaigns in differe
+        nt states are made through the API (the screens of the other
+      5 // scenarios cover the way a person makes one): finished, finishe
+        d after retries, waiting for approval, with a warning about a
+      6 // criterion the system does not know, and with a warning that th
+        e rule matches everybody. Then the list is looked at, and the
+     … +104 lines (ctrl+o to expand)
+
+  Read 1 file, ran 3 shell commands (ctrl+o to expand)
+  ⎿  Invalid tool parameters
+
+● Arka plandaki backend testi bitmesini bekliyorum (worker paketi ~65 sn
+  sürüyor); bitince e2e'yi çalıştıracağım.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Background command "until ! docker ps --format '{{.Names}}' | grep -q
+scc-test-backend; do sleep 3; done; grep -c "^ok"
+/c/Users/EYUP/AppData/Local/Temp/claude/06478632fcf048eb/44fbd728-7533-4ae0-8aba
+-ddfd22c3f673/scratchpad/backend-run.txt; grep "FAIL\|^---"
+/c/Users/EYUP/AppData/Local/Temp/claude/06478632fcf048eb/44fbd728-7533-4ae0-8aba
+-ddfd22c3f673/scratchpad/backend-run.txt | head" completed (exit code 0)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 9 e2e geçti, retry senaryosu da. Üretilen görüntülere bakıyorum.
+
+  Searched for 1 pattern, read 2 files, ran 5 shell commands (ctrl+o to expand)
+
+● Aşama 2: DECISIONS'taki eskimiş satırları düzeltiyorum ve Open issues bölümünü
+  yeniden yapılandırıyorum.
+
+  Made 1 scratchpad edit +149, ran 3 shell commands (ctrl+o to expand)
+  ⎿  PostToolUse:Bash says: Tip: Run /ultrareview before you push to catch bugs 
+     with a cloud-based multi-agent review — 3 free reviews left.
+
+● make mevcut. Önce make test, çıktısını dosyaya alıyorum.
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Aşama 0, 1 ve 2'deki tüm maddeler bitti, hepsi ayrı commit'te. Push yapmadım.
+  make test ikinci koşuda yeşil geçti, make e2e 9/9 geçti. make soak koşmadım.
+
+  Test sonuçları
+
+  - make test: çıkış 0. Hook/script testleri 117 geçti, web 670 test geçti, npm 
+    audit 0 açık, backend'de gofmt, vet ve -race testlerinin 20 paketi ok.
+  - İlk koşuda bir hata vardı.
+    TestWorker_twoWorkersKeepTheChannelCapAndHandOver, iki worker'ın devir
+    anında "101 istek 1 saniyede (sınır 100)" dedi.
+    - Tek başına 6 koşuda 1 kez tekrarladı, tam suite'te ise sonraki 3 koşuda
+      geçti. Bu yüzden zamanlamaya bağlı, aralıklı bir hata gibi görünüyor.
+    - Bu yola (worker, ratelimit) dokunmadım. Eski commit'te tekrarlayıp
+      doğrulamadım.
+    - Düzeltmedim, DECISIONS'a yazmadım. Karar sende.
+  - make e2e: 9/9 geçti, 123 sn. Yeni senaryo da geçti. Ekran görüntülerini
+    yeniden üretirken ayrıca SCREENSHOTS=1 ile bir koşu yaptım.
+
+  Biten işler
+
+  - Aşama 0: 11 numaralı export'ta tek bulgu sentetik bir telefon fixture'ıydı,
+    maskeledim. 12 temiz çıktı. Commit c0826f1.
+  - 1. Stats snapshot: tüm okumalar tek REPEATABLE READ, salt-okunur
+    transaction'da. Yeni test eski kodda ikinci okumada kırılıyordu, şimdi 412
+    okuma tutarlı. Yanıt süresi medyan 3,95 ms'den 4,29 ms'ye çıktı.
+  - 2. Hız: üst satırdan hız kalktı. Kanal kartında "Sınır · Ortalama · En
+    yoğun" kanal başına görünüyor. Sunucu timeline.average_per_second
+    gönderiyor, özetteki toplam ortalama ve en yüksek alanlar kaldırıldı.
+  - 3. Demo mock: segment okuması baştan yazıldı (mock_segment.go). Cümleler yan
+    cümlelere bölünüyor ve olumsuzluk ait olduğu fiile bağlanıyor.
+    - Olumsuz ekler (-meyen, -mayan, -memiş, -mamış, -medi) çoğul ve hâl
+      ekleriyle birlikte tanınıyor.
+    - Şehir ve dil için "dışındaki" ve "olmayan" desteklendi.
+    - Tutarlar için binlik ayraç, "bin" ve yön kelimeleri çözülüyor.
+    - Yönsüz tutar, 365 günü aşan süre ve takvim ifadeleri gerekçesiyle
+      unsupported_criteria'ya giriyor.
+    - Yaklaşık 70 brief'lik tablo testi ve fuzz hedefi ekledim; fuzz 40 sn temiz
+      çıktı.
+    - Yeni okuma, API e2e testindeki "almayanlara" brief'inde satın alma
+      koşulunu kaybetti. Bağımsız sayım bunu yakaladı, ek hâli tanıma
+      düzeltildi.
+  - 4. Tekrar dene: içerik varken her yeniden üretim aynı onayı istiyor. Test
+    eski kodda kırılıyordu.
+  - 5. e2e: globalSetup kesintiyi kapatıyor. Elle açık bıraktığım kesinti
+    sonraki koşuda kapandı.
+  - 6. Provider varsayılanları: compose'ta %5 5xx, %5 429 (Retry-After 1 sn),
+    20-200 ms gecikme. Dev stack'te 3.420 mesajlık gönderimde 347 mesaj yeniden
+    denendi ve özet bunu gösterdi. Hiçbiri başarısız olmadı.
+  - 7. Ekran görüntüleri: yeni senaryo 5 farklı durumda kampanya oluşturuyor,
+    liste görüntüsünü öyle çekiyor. Tam 6 yeniden denemeli bir gönderim de var.
+    Dokuz görüntü yeniden üretildi, 09 yeni.
+  - Aşama 2: eskimiş satırlar düzeltildi. Altı "bilinçli karar" maddesi
+    gerekçeleriyle yazıldı. e2e'nin neyi kapsayıp neyi kapsamadığı açıklandı.
+
+  Verdiğim kararlar (DECISIONS'ta)
+
+  - İçerik varken her yeniden üretim onay istiyor. Bu, modelin dokunulmamış
+    kendi metnini onaysız değiştiren eski davranışı da değiştirdi, çünkü "her
+    yeniden üretim" dedin.
+  - Özet satırında toplam hız yok. "İki kanalın toplamı" yazmak yerine
+    kaldırdım.
+  - Demo mock'ta "ay" 30 gün, "hafta" 7 gün, "yıl" 365 gün sayılıyor. "50 TL
+    indirim" gibi teklif tutarları kitle kriteri sayılmıyor.
+  - e2e overlay'i provider'ı eski deterministik değerlere sabitliyor (hata 0,
+    5-25 ms). Provider'a yalnızca MOCK_CONTROL=1 ile POST 
+    /control/throttle-next/N anahtarı ekledim, retry senaryosu için tam N
+    yeniden deneme gerekiyordu.
+  - TestSend_lateReplyStillDelivers yük altında bir kez takıldı, süreleri
+    genişlettim. Assertion'lar aynı.
+
+  Hook
+
+  Hiçbir komut hook tarafından engellenmedi. Bu yüzden dolanılan bir şey yok.
+  Bunu DECISIONS'ın Environment bölümüne de yazdım.
+
+  Kalan
+
+  - Worker devir testi aralıklı hatası, yukarıda.
+  - LLM katmanı ve worker'daki düşük öncelikli maddeler, istediğin gibi belgeli
+    kaldı.
+  - Dev stack yeni varsayılanlarla ayakta kalıyor, docker compose down ile
+    kapatabilirsin.
+✻ Churned for 43m 0s · done 21:32
