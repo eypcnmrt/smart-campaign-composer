@@ -105,8 +105,8 @@ describe('the campaign list', () => {
     const { wrapper } = await open({ [LIST]: { body: { campaigns: [] } } })
     expect(wrapper.find('table').exists()).toBe(false)
     expect(wrapper.get('.empty h2').text()).toBe('Henüz kampanya yok')
-    expect(wrapper.get('.empty a').attributes('href')).toBe('/campaigns/new')
-    expect(wrapper.get('.empty a').text()).toBe('Yeni kampanya')
+    expect(wrapper.find('.empty a').exists()).toBe(false)
+    expect(wrapper.get('.empty').text()).toContain('üstteki “Yeni kampanya” düğmesini')
     wrapper.unmount()
   })
 
@@ -134,9 +134,10 @@ describe('the campaign list', () => {
     wrapper.unmount()
   })
 
-  it('has a way to start a new campaign above the table', async () => {
+  it('has one way to start a new campaign, the one in the header, not a second one in the page', async () => {
     const { wrapper } = await open({ [LIST]: { body: { campaigns: [summary()] } } })
-    expect(wrapper.get('main .head a').attributes('href')).toBe('/campaigns/new')
+    expect(wrapper.findAll('a[href="/campaigns/new"]')).toHaveLength(1)
+    expect(wrapper.find('main a[href="/campaigns/new"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -38,7 +38,6 @@ onBeforeUnmount(() => request?.abort())
   <PageColumn wide>
     <div class="head">
       <h1>Kampanyalar</h1>
-      <RouterLink v-if="campaigns !== null && campaigns.length > 0" class="btn btn--primary" :to="{ name: 'campaign-new' }">Yeni kampanya</RouterLink>
     </div>
 
     <LoadingState v-if="campaigns === null && error === null" label="Kampanyalar yükleniyor…" />
@@ -46,8 +45,7 @@ onBeforeUnmount(() => request?.abort())
 
     <div v-else-if="campaigns.length === 0" class="empty">
       <h2>Henüz kampanya yok</h2>
-      <p>Bir brief yazın; model kitleyi ve mesajları hazırlasın, siz onaylayın.</p>
-      <RouterLink class="btn btn--primary" :to="{ name: 'campaign-new' }">Yeni kampanya</RouterLink>
+      <p>Bir brief yazın; model kitleyi ve mesajları hazırlasın, siz onaylayın. Başlamak için üstteki “Yeni kampanya” düğmesini kullanın.</p>
     </div>
 
     <template v-else>
