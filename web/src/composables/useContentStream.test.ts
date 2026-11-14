@@ -30,7 +30,7 @@ const raw = (text: string) => sseFrame('raw', { text })
 describe('useContentStream', () => {
   it('collects the text of each field as it is written and ends with the saved campaign', async () => {
     installFakeApi({
-      'GET /api/campaigns/7/content/stream': sseResponse([
+      'POST /api/campaigns/7/content/stream': sseResponse([
         attempt(1),
         delta('sms', 'Merhaba '),
         delta('sms', 'dünya'),
@@ -48,7 +48,7 @@ describe('useContentStream', () => {
 
   it('shows what has arrived while the stream is still open', async () => {
     const open = openSse()
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': open.response })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': open.response })
     const s = stream()
     const result = s.start(7)
     open.push(attempt(1))
@@ -63,7 +63,7 @@ describe('useContentStream', () => {
 
   it('clears the text when the model starts another attempt, since the rejected answer no longer counts', async () => {
     const open = openSse()
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': open.response })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': open.response })
     const s = stream()
     const result = s.start(7)
     open.push(attempt(1))
@@ -81,7 +81,7 @@ describe('useContentStream', () => {
 
   it('replaces the field view with the raw text on the first raw event, and adds the next ones to it', async () => {
     installFakeApi({
-      'GET /api/campaigns/7/content/stream': sseResponse([
+      'POST /api/campaigns/7/content/stream': sseResponse([
         attempt(1),
         delta('sms', 'Selam'),
         raw('{"sms":"Selam", oops'),
@@ -96,7 +96,7 @@ describe('useContentStream', () => {
 
   it('starts the raw text again with a new attempt', async () => {
     installFakeApi({
-      'GET /api/campaigns/7/content/stream': sseResponse([attempt(1), raw('first'), attempt(2), raw('second'), sseFrame('done', contentReady)]),
+      'POST /api/campaigns/7/content/stream': sseResponse([attempt(1), raw('first'), attempt(2), raw('second'), sseFrame('done', contentReady)]),
     })
     const s = stream()
     await s.start(7)
@@ -104,7 +104,7 @@ describe('useContentStream', () => {
   })
 
   it('asks to replace the existing content only when told to', async () => {
-    const api = installFakeApi({ 'GET /api/campaigns/7/content/stream': () => sseResponse([sseFrame('done', contentReady)]) })
+    const api = installFakeApi({ 'POST /api/campaigns/7/content/stream': () => sseResponse([sseFrame('done', contentReady)]) })
     const s = stream()
     await s.start(7)
     await s.start(7, { regenerate: true })
@@ -116,7 +116,7 @@ describe('useContentStream', () => {
 
   it('reports an error event as the failure, with the server’s code', async () => {
     installFakeApi({
-      'GET /api/campaigns/7/content/stream': sseResponse([
+      'POST /api/campaigns/7/content/stream': sseResponse([
         attempt(1),
         sseFrame('error', { error: { code: 'llm_invalid_output', message: 'English', details: { stage: 'content', attempts: 3, problems: ['x'] } } }),
       ]),
@@ -128,25 +128,25 @@ describe('useContentStream', () => {
   })
 
   it('reports a refusal before the stream (content exists) as the failure', async () => {
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': error(409, 'content_exists') })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': error(409, 'content_exists') })
     const s = stream()
     expect(await s.start(7)).toBeNull()
     expect((s.error.value as ApiError).code).toBe('content_exists')
   })
 
   it('reports a stream that ended without a result', async () => {
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': sseResponse([attempt(1), delta('sms', 'yarım')]) })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': sseResponse([attempt(1), delta('sms', 'yarım')]) })
     const s = stream()
     await s.start(7)
     expect((s.error.value as ApiError).code).toBe('stream_incomplete')
   })
 
   it('clears an earlier error and text when started again', async () => {
-    const api = installFakeApi({ 'GET /api/campaigns/7/content/stream': error(503, 'llm_busy') })
+    const api = installFakeApi({ 'POST /api/campaigns/7/content/stream': error(503, 'llm_busy') })
     const s = stream()
     await s.start(7)
     expect(s.status.value).toBe('error')
-    api.set('GET /api/campaigns/7/content/stream', sseResponse([sseFrame('done', contentReady)]))
+    api.set('POST /api/campaigns/7/content/stream', sseResponse([sseFrame('done', contentReady)]))
     await s.start(7)
     expect(s.status.value).toBe('idle')
     expect(s.error.value).toBeNull()
@@ -154,7 +154,7 @@ describe('useContentStream', () => {
 
   it('stops the request when asked, and ignores what comes after', async () => {
     const open = openSse()
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': open.response })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': open.response })
     const s = stream()
     const result = s.start(7)
     open.push(attempt(1))
@@ -188,7 +188,7 @@ describe('useContentStream', () => {
     const first = openSse()
     const second = sseResponse([attempt(1), delta('sms', 'ikinci'), sseFrame('done', contentReady)])
     let n = 0
-    installFakeApi({ 'GET /api/campaigns/7/content/stream': () => (++n === 1 ? first.response : second) })
+    installFakeApi({ 'POST /api/campaigns/7/content/stream': () => (++n === 1 ? first.response : second) })
     const s = stream()
     const a = s.start(7)
     await flushPromises()

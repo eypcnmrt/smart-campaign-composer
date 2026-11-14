@@ -35,7 +35,7 @@ func TestStream_aReaderThatStopsReadingIsDroppedAfterTheWriteDeadline(t *testing
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	if _, err := fmt.Fprintf(conn, "GET %s HTTP/1.1\r\nHost: test\r\n\r\n", path(id, "/content/stream")); err != nil {
+	if _, err := fmt.Fprintf(conn, "POST %s HTTP/1.1\r\nHost: test\r\nContent-Length: 0\r\n\r\n", path(id, "/content/stream")); err != nil {
 		t.Fatal(err)
 	}
 	<-gen.started // and the connection is never read
@@ -53,7 +53,7 @@ func TestStream_aReaderThatStopsReadingIsDroppedAfterTheWriteDeadline(t *testing
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		// only the status line matters: a stream that starts is closed again at once (it would run for minutes)
-		resp, err := http.Get(e.ts.URL + path(id, "/content/stream"))
+		resp, err := http.Post(e.ts.URL+path(id, "/content/stream"), "", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

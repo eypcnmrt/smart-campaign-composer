@@ -182,7 +182,7 @@ export interface FieldProblem {
   params?: Record<string, unknown>
 }
 
-/** The events of GET .../content/stream. `done` and `error` end the stream, exactly one of them arrives. */
+/** The events of POST .../content/stream. `done` and `error` end the stream, exactly one of them arrives. */
 export type StreamEvent =
   | { type: 'attempt'; attempt: number }
   | { type: 'delta'; field: ContentField; text: string }

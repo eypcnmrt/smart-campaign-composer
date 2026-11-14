@@ -41,7 +41,7 @@ func lastError(t *testing.T, msgs []sseMessage) (code string, details any) {
 // openStream starts a stream that the test can cancel, and returns what arrives on it once it ends.
 func (e *env) openStream(ctx context.Context, path string) (resp *http.Response, msgs <-chan []sseMessage) {
 	e.t.Helper()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, e.ts.URL+path, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, e.ts.URL+path, nil)
 	if err != nil {
 		e.t.Fatal(err)
 	}
@@ -125,13 +125,13 @@ func TestStream_existingContentIsOnlyRegeneratedOnRequest(t *testing.T) {
 
 	// what an automatically reconnecting EventSource does
 	for range 3 {
-		r := e.expect("GET", path(id, "/content/stream"), nil, http.StatusConflict, "content_exists")
+		r := e.expect("POST", path(id, "/content/stream"), nil, http.StatusConflict, "content_exists")
 		if got := r.header.Get("Content-Type"); strings.Contains(got, "event-stream") {
 			t.Fatalf("Content-Type = %q: the refusal must be a plain JSON error", got)
 		}
 	}
-	e.expect("GET", path(id, "/content/stream?regenerate=false"), nil, http.StatusConflict, "content_exists")
-	e.expect("GET", path(id, "/content/stream?regenerate=yes"), nil, http.StatusUnprocessableEntity, "validation_failed")
+	e.expect("POST", path(id, "/content/stream?regenerate=false"), nil, http.StatusConflict, "content_exists")
+	e.expect("POST", path(id, "/content/stream?regenerate=yes"), nil, http.StatusUnprocessableEntity, "validation_failed")
 	if n := len(client.Requests()); n != requests {
 		t.Fatalf("a refused stream called the model (%d requests, was %d)", n, requests)
 	}
@@ -193,7 +193,7 @@ func TestStream_aSecondGenerationOfTheSameCampaignIsAConflict(t *testing.T) {
 	e.openStream(ctx, path(id, "/content/stream"))
 	<-gen.started
 
-	e.expect("GET", path(id, "/content/stream"), nil, http.StatusConflict, "generation_in_progress")
+	e.expect("POST", path(id, "/content/stream"), nil, http.StatusConflict, "generation_in_progress")
 	e.expect("POST", path(id, "/segment"), nil, http.StatusConflict, "generation_in_progress")
 	// another campaign is not affected
 	ctx2, cancel2 := context.WithCancel(t.Context())
@@ -423,4 +423,30 @@ func TestAPI_aPanicIsAnInternalErrorInTheCommonShape(t *testing.T) {
 		t.Fatalf("body = %s, want a request id and not the panic text", r.body)
 	}
 	e.expect("GET", "/healthz", nil, http.StatusOK, "") // the server went on
+}
+
+// A HEAD request is answered by the GET handler of the same path, without a body. Nothing a GET does changes anything, and the
+// one route that costs money (the content stream) is a POST, so a HEAD (a health probe, a link checker) can never start a
+// generation.
+func TestHEAD_isAnsweredByTheGETRoutes(t *testing.T) {
+	e, _ := newEnv(t, llm.Reply(ankaraRule))
+	id := idOf(t, e.expect("POST", "/api/campaigns", map[string]string{"brief": "b"}, http.StatusCreated, ""))
+	for _, p := range []string{"/healthz", "/readyz", "/api/config", "/api/campaigns", path(id, ""), path(id, "/preview"), path(id, "/stats")} {
+		get := e.do("GET", p, nil)
+		head := e.do("HEAD", p, nil)
+		if head.status != get.status || len(head.body) != 0 {
+			t.Errorf("HEAD %s = %d with %d body bytes, want the status of the GET (%d) and none", p, head.status, len(head.body), get.status)
+		}
+		// a content-less campaign has no preview (409); every other path must be a plain success
+		if get.status != http.StatusOK && p != path(id, "/preview") {
+			t.Errorf("GET %s = %d, want 200", p, get.status)
+		}
+	}
+	// A GET of the stream is refused and starts nothing: the campaign is as it was.
+	for _, m := range []string{"GET", "HEAD"} {
+		e.expect(m, path(id, "/content/stream"), nil, http.StatusMethodNotAllowed, "")
+	}
+	if got := e.expect("GET", path(id, ""), nil, http.StatusOK, "").json(t); got["content"] != nil || got["status"] != "audience_ready" {
+		t.Errorf("campaign after GET and HEAD of the stream = %v, want no content", got)
+	}
 }

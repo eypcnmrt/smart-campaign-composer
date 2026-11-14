@@ -2,7 +2,7 @@ import { parseCampaign } from './campaigns'
 import { ApiError, isRecord, toApiError } from './client'
 import type { Campaign, ContentField, StreamEvent } from './types'
 
-// The content stream (GET /api/campaigns/{id}/content/stream) is Server-Sent Events, read with fetch and a ReadableStream
+// The content stream (POST /api/campaigns/{id}/content/stream) is Server-Sent Events, read with fetch and a ReadableStream
 // instead of EventSource. EventSource cannot send a header, cannot tell a refusal (409, 429) from a network drop, and
 // reconnects by itself, which would start a second paid generation. Here the caller decides what a failure means.
 
@@ -172,7 +172,7 @@ export async function streamContent(id: number, options: StreamOptions): Promise
 
   let res: Response
   try {
-    res = await fetch(url, { method: 'GET', headers: { Accept: 'text/event-stream' }, signal })
+    res = await fetch(url, { method: 'POST', headers: { Accept: 'text/event-stream' }, signal })
   } catch (err) {
     if (signal?.aborted) throw err
     throw new ApiError({ status: 0, code: 'network_error', message: 'The server could not be reached.' })

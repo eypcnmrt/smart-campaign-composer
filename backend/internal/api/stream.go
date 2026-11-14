@@ -15,7 +15,7 @@ import (
 	"smartcampaign/internal/llm"
 )
 
-// The content stream (GET /api/campaigns/{id}/content/stream) is Server-Sent Events:
+// The content stream (POST /api/campaigns/{id}/content/stream) is Server-Sent Events:
 //
 //	retry: 3600000                    reconnect delay: a browser's EventSource must not start a new generation by itself
 //	event: attempt  data: {"attempt":1}
@@ -89,7 +89,10 @@ type genOutcome struct {
 	err      error
 }
 
-// GET /api/campaigns/{id}/content/stream[?regenerate=true]
+// POST /api/campaigns/{id}/content/stream[?regenerate=true]
+//
+// A POST, because it starts a paid generation and saves the result: a GET must be safe to repeat, to prefetch and to retry.
+// The client reads it with fetch (EventSource can only GET, and would reconnect by itself and spend credit again).
 func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 	regenerate, err := boolParam(r, "regenerate")
 	if err != nil {

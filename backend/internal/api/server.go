@@ -187,7 +187,7 @@ func (s *Server) BeginShutdown() { s.shutdown(errShuttingDown) }
 
 func (s *Server) routes(metricsHandler http.Handler) http.Handler {
 	r := chi.NewRouter()
-	r.Use(middleware.RequestID, s.observe, s.recoverer)
+	r.Use(middleware.RequestID, headAsGet, s.observe, s.recoverer)
 	r.NotFound(func(w http.ResponseWriter, _ *http.Request) {
 		writeProblem(w, &problem{Status: http.StatusNotFound, Code: "not_found", Message: "There is no such endpoint."})
 	})
@@ -209,7 +209,7 @@ func (s *Server) routes(metricsHandler http.Handler) http.Handler {
 				r.Get("/", s.wrap(s.getCampaign))
 				r.Post("/segment", s.wrap(s.regenerateSegment))
 				r.Put("/channels", s.wrap(s.setChannels))
-				r.Get("/content/stream", s.wrap(s.contentStream))
+				r.Post("/content/stream", s.wrap(s.contentStream))
 				r.Put("/content", s.wrap(s.putContent))
 				r.Get("/preview", s.wrap(s.preview))
 				r.Post("/approve", s.wrap(s.approve))
@@ -218,6 +218,19 @@ func (s *Server) routes(metricsHandler http.Handler) http.Handler {
 		})
 	})
 	return r
+}
+
+// headAsGet routes a HEAD request through the GET routes (net/http drops the body of the answer). That is safe because nothing
+// a GET does here changes anything: the one route that costs money, the content stream, is a POST, so a HEAD for it is a 405
+// like a GET is. chi's own middleware.GetHead does the same but looks for a HEAD handler first, and a mounted sub-router
+// (every route under /api) answers that look-up for any method, so it would leave these routes at 405.
+func headAsGet(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if rctx := chi.RouteContext(r.Context()); r.Method == http.MethodHead && rctx != nil {
+			rctx.RouteMethod = http.MethodGet
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // wrap turns a handler that returns an error into an http.HandlerFunc that answers it.

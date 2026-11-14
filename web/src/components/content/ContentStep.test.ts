@@ -11,7 +11,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-const STREAM = 'GET /api/campaigns/7/content/stream'
+const STREAM = 'POST /api/campaigns/7/content/stream'
 
 async function open(path: string, handlers: Parameters<typeof installFakeApi>[0]) {
   const api = installFakeApi({ 'GET /api/config': { body: config }, ...handlers })

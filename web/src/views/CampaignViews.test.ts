@@ -256,13 +256,14 @@ describe('the campaign page', () => {
       wrapper.unmount()
     })
 
-    it('goes to the content step when asked, without calling the model', async () => {
+    it('goes to the content step when asked, and starts the generation there with one POST and nothing else that writes', async () => {
       const { wrapper, router, api } = await open('/campaigns/7', { 'GET /api/campaigns/7': { body: audienceReady } })
       await wrapper.get('main button.btn--primary').trigger('click')
       await vi.waitFor(() => expect(router.currentRoute.value.query.step).toBe('content'))
       await flushPromises()
       expect(step(wrapper)).toBe('İçerik')
-      expect(api.calls.filter((c) => c.method !== 'GET')).toHaveLength(0)
+      // The generation is the marketer's own request (the button was "İçeriği üret"); it is a POST, so a GET never starts one.
+      expect(api.calls.filter((c) => c.method !== 'GET').map((c) => `${c.method} ${c.path}`)).toEqual(['POST /api/campaigns/7/content/stream'])
       wrapper.unmount()
     })
   })

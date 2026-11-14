@@ -204,6 +204,8 @@ describe('streamContent', () => {
     ])
     const [url, init] = fetchFn.mock.calls[0] ?? []
     expect(url).toBe('/api/campaigns/9/content/stream')
+    // A POST: it starts a paid generation and saves its result, which a GET must never do.
+    expect(init?.method).toBe('POST')
     expect((init?.headers as Record<string, string>).Accept).toBe('text/event-stream')
   })
 

@@ -198,14 +198,14 @@ func readSSE(t *testing.T, body io.Reader) []sseMessage {
 
 func (e *env) stream(path string) (*http.Response, []sseMessage) {
 	e.t.Helper()
-	resp, err := http.Get(e.ts.URL + path)
+	resp, err := http.Post(e.ts.URL+path, "", nil)
 	if err != nil {
 		e.t.Fatal(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
-		e.t.Fatalf("GET %s = %d\n%s", path, resp.StatusCode, body)
+		e.t.Fatalf("POST %s = %d\n%s", path, resp.StatusCode, body)
 	}
 	return resp, readSSE(e.t, resp.Body)
 }

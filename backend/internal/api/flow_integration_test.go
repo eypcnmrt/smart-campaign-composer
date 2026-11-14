@@ -313,7 +313,7 @@ func TestAPI_wrongStateIsAConflict(t *testing.T) {
 		e.expect("PUT", path(id, "/channels"), map[string]any{"channels": []string{"sms"}}, http.StatusConflict, "invalid_state")
 		e.expect("PUT", path(id, "/content"), map[string]string{"sms": "a", "email_subject": "b", "email_body": "c"}, http.StatusConflict, "invalid_state")
 		e.expect("POST", path(id, "/segment"), nil, http.StatusConflict, "invalid_state")
-		e.expect("GET", path(id, "/content/stream"), nil, http.StatusConflict, "invalid_state")
+		e.expect("POST", path(id, "/content/stream"), nil, http.StatusConflict, "invalid_state")
 		r := e.expect("POST", path(id, "/approve"), map[string]any{"version": 3}, http.StatusConflict, "invalid_state")
 		if _, details := r.errorOf(t); field(t, details, "status") != "sending" {
 			t.Fatalf("details = %v, want the current status", details)
@@ -336,7 +336,7 @@ func TestAPI_wrongStateIsAConflict(t *testing.T) {
 		e.expect("PUT", path(id, "/channels"), map[string]any{"channels": []string{"sms"}}, http.StatusConflict, "invalid_state")
 		e.expect("PUT", path(id, "/content"), map[string]string{"sms": "a", "email_subject": "b", "email_body": "c"}, http.StatusConflict, "invalid_state")
 		e.expect("GET", path(id, "/preview"), nil, http.StatusConflict, "invalid_state")
-		e.expect("GET", path(id, "/content/stream"), nil, http.StatusConflict, "invalid_state")
+		e.expect("POST", path(id, "/content/stream"), nil, http.StatusConflict, "invalid_state")
 	})
 	t.Run("a campaign without content", func(t *testing.T) {
 		e, _ := newEnv(t, llm.Reply(ankaraRule))
@@ -434,6 +434,7 @@ func TestAPI_requestValidation(t *testing.T) {
 		{"an unknown campaign's approval", "POST", "/api/campaigns/999999/approve", map[string]any{"version": 1}, 404, "not_found", ""},
 		{"an unknown endpoint", "GET", "/api/nothing", nil, 404, "not_found", ""},
 		{"a method the endpoint does not have", "DELETE", "/api/campaigns", nil, 405, "method_not_allowed", ""},
+		{"the content stream is not a GET", "GET", "/api/campaigns/1/content/stream", nil, 405, "method_not_allowed", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

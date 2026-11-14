@@ -79,7 +79,7 @@ func TestAPI_metrics(t *testing.T) {
 		// HTTP durations by route pattern, not by raw path
 		`scc_http_request_duration_seconds_count{method="POST",route="/api/campaigns",status="201"} 1`,
 		`scc_http_request_duration_seconds_count{method="GET",route="/api/campaigns/{id}/stats",status="200"} 1`,
-		`scc_http_request_duration_seconds_count{method="GET",route="/api/campaigns/{id}/content/stream",status="200"} 1`,
+		`scc_http_request_duration_seconds_count{method="POST",route="/api/campaigns/{id}/content/stream",status="200"} 1`,
 		`scc_http_request_duration_seconds_count{method="POST",route="/api/campaigns/{id}/approve",status="200"} 1`,
 		`scc_http_request_duration_seconds_count{method="GET",route="/api/*",status="404"} 1`, // an unknown path under /api
 		// model calls by outcome
