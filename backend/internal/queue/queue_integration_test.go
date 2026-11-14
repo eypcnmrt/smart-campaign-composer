@@ -684,3 +684,99 @@ func TestRecoverLeases_keepsThePreviousError(t *testing.T) {
 		t.Fatalf("last_error = %q", lastError)
 	}
 }
+
+// The channel locks of this test database: advisory locks in the two-integer form with the queue's class (0x5343).
+const channelLocksSQL = `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND classid::bigint = 21315
+	AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`
+
+func TestChannelLock_oneHolderPerChannel(t *testing.T) {
+	ctx := context.Background()
+	pool, q, _ := enqueued(t, 6, "sms", "email")
+
+	smsLock, err := q.LockChannel(ctx, "sms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// a second worker is refused for the same channel, and the other channel is free
+	if _, err := q.LockChannel(ctx, "sms"); !errors.Is(err, queue.ErrChannelLocked) {
+		t.Fatalf("second lock of sms: err = %v, want ErrChannelLocked", err)
+	}
+	emailLock, err := q.LockChannel(ctx, "email")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := count(t, pool, channelLocksSQL); n != 2 {
+		t.Fatalf("%d channel locks held, want one per channel", n)
+	}
+
+	// the holder claims over its own connection and gets what Queue.Claim gives
+	d, ok, err := smsLock.Claim(ctx, time.Minute)
+	if err != nil || !ok || d.Channel != "sms" || d.Attempt != 1 || !uuidRe.MatchString(d.Key()) {
+		t.Fatalf("claim over the lock = %+v, %v, %v", d, ok, err)
+	}
+
+	if err := smsLock.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if err := smsLock.Release(ctx); err != nil {
+		t.Fatalf("releasing twice must be harmless: %v", err)
+	}
+	again, err := q.LockChannel(ctx, "sms")
+	if err != nil {
+		t.Fatalf("sms lock after release: %v", err)
+	}
+	for _, l := range []*queue.ChannelLock{again, emailLock} {
+		if err := l.Release(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := count(t, pool, channelLocksSQL); n != 0 {
+		t.Fatalf("%d channel locks still held after every release", n)
+	}
+	if _, err := q.LockChannel(ctx, "fax"); err == nil || errors.Is(err, queue.ErrChannelLocked) {
+		t.Fatalf("unknown channel: err = %v, want a plain error", err)
+	}
+}
+
+// The lock lives and dies with its database session: when the session is killed (a database restart, a network
+// cut), the server drops the lock, the holder's next claim fails so it notices, and another worker can take over.
+func TestChannelLock_diesWithItsConnection(t *testing.T) {
+	ctx := context.Background()
+	pool, q, _ := enqueued(t, 4, "sms")
+	lock, err := q.LockChannel(ctx, "sms")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pid int
+	if err := pool.QueryRow(ctx, `SELECT pid FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND classid::bigint = 21315
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`).Scan(&pid); err != nil {
+		t.Fatal(err)
+	}
+	var terminated bool
+	if err := pool.QueryRow(ctx, `SELECT pg_terminate_backend($1)`, pid).Scan(&terminated); err != nil || !terminated {
+		t.Fatalf("terminating the lock session = %v, %v", terminated, err)
+	}
+
+	if _, _, err := lock.Claim(ctx, time.Minute); err == nil {
+		t.Fatal("a claim over a terminated session must fail, or the holder would keep sending without the lock")
+	}
+	var next *queue.ChannelLock
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		next, err = q.LockChannel(ctx, "sms")
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, queue.ErrChannelLocked) || time.Now().After(deadline) {
+			t.Fatalf("another worker could not take the lock of the dead session: %v", err)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err := next.Release(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// releasing the dead lock reports the problem (and does not panic or return the session to the pool)
+	if err := lock.Release(ctx); err == nil {
+		t.Fatal("releasing a lock whose session is gone must report an error")
+	}
+}

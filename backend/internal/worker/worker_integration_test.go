@@ -787,3 +787,72 @@ func TestWorker_unusableContentFailsWithItsCause(t *testing.T) {
 		t.Fatalf("the provider got %d requests, want none", got)
 	}
 }
+
+// The channel locks held in this test's database (advisory locks of the queue's class, 0x5343).
+func (e *env) channelLocks(t *testing.T) int {
+	t.Helper()
+	return e.count(t, `SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND objsubid = 2 AND classid::bigint = 21315
+		AND database = (SELECT oid FROM pg_database WHERE datname = current_database())`)
+}
+
+func eventually(t *testing.T, within time.Duration, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("after %v: %s", within, what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// With two workers on one database only one of them serves a channel, so the 100 per second cap still holds at the
+// provider; the other waits, and takes the channel over when the first one stops.
+func TestWorker_twoWorkersKeepTheChannelCapAndHandOver(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{DelayMin: time.Millisecond, DelayMax: 4 * time.Millisecond})
+	const users = 450 // per channel
+	id := e.campaign(t, users, "sms", "email")
+	cfg := worker.Config{LockRetryInterval: 100 * time.Millisecond} // the default rate: 100 per second and channel
+
+	w1, stop1 := e.start(t, cfg)
+	eventually(t, 10*time.Second, "the first worker did not take both channel locks", func() bool { return e.channelLocks(t) == 2 })
+	w2, stop2 := e.start(t, cfg)
+
+	eventually(t, 20*time.Second, "the first worker never got going", func() bool { return w1.Counters().Sent >= 100 })
+	if got := w2.Counters().Sent; got != 0 {
+		t.Fatalf("the second worker sent %d messages while the first one held the locks", got)
+	}
+	if n := e.channelLocks(t); n != 2 {
+		t.Fatalf("%d channel locks held with two workers running, want one per channel", n)
+	}
+
+	// hand-over: the first worker stops (its in-flight sends finish) and the second takes both channels
+	if err := stop1(); err != nil {
+		t.Fatal(err)
+	}
+	e.waitFinished(t, id, 60*time.Second)
+	if err := stop2(); err != nil {
+		t.Fatal(err)
+	}
+
+	sent1, sent2 := w1.Counters().Sent, w2.Counters().Sent
+	if sent2 == 0 {
+		t.Fatal("the second worker never took over")
+	}
+	if total := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); int64(total) != sent1+sent2 || total != 2*users {
+		t.Fatalf("database has %d sent, workers report %d + %d, want %d", total, sent1, sent2, 2*users)
+	}
+	stats := e.provider.Stats()
+	for channel, st := range map[string]mockprovider.ChannelStats{"sms": stats.SMS, "email": stats.Email} {
+		if st.MaxRequestsPerSecond > 100 {
+			t.Errorf("%s: %d requests arrived within one second with two workers, the cap is 100", channel, st.MaxRequestsPerSecond)
+		}
+		if st.UniqueAccepted != users || st.DuplicateKeys != 0 {
+			t.Errorf("%s: provider accepted %d with %d duplicates, want %d and 0", channel, st.UniqueAccepted, st.DuplicateKeys, users)
+		}
+	}
+	if n := e.channelLocks(t); n != 0 {
+		t.Errorf("%d channel locks still held after both workers stopped", n)
+	}
+	e.requireProviderMatchesDatabase(t)
+}

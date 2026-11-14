@@ -371,6 +371,26 @@ here when the README is written.
 - **Alternative:** the token bucket alone at exactly 100/s. It matches the wording of the requirement but fails the
   measurement. Setting it to 95/s works too, but then nothing states why 95.
 
+### Each channel is served by the worker that holds its advisory lock
+- **Decision:** before it claims anything, a worker takes `pg_try_advisory_lock(0x5343, channel)` for each channel (sms = 1,
+  email = 2; the two-integer form, so it cannot collide with the migration and seed locks, which use the one-bigint
+  form). A worker that does not get the lock waits and tries again every `LockRetryInterval` (5 s by default) and logs
+  once per wait. The lock is session-level, so the dispatcher holds one dedicated connection per channel and makes its
+  claims through it (`queue.ChannelLock`). If a claim fails, the dispatcher gives the lock up (an unlock that fails closes
+  the session instead of returning it to the pool, as in `migrate`) and takes it again from scratch. The rate limiter
+  and the send slots live outside one tenure of the lock. Lease recovery and campaign completion run in every worker; they
+  are idempotent.
+- **Why:** the 100 messages per second cap is enforced inside one process, so a second worker would double it
+  (assumption 9 in docs/PLAN.md). With the lock, any number of workers can run and only one sends per channel; the others
+  are standbys that take over within `LockRetryInterval` of the holder stopping or dying (the server drops the lock when
+  the session ends; a test kills the session and checks that a claim over it fails and another worker gets the lock). A
+  test with two workers measures the busiest second at the provider across the hand-over (at most 100 per channel, no
+  duplicate keys). A holder whose session dies keeps sending until its next claim, which is at most one poll away and
+  fails; during that moment another worker may hold the lock too, so the cap can be exceeded for the length of one claim.
+- **Alternative:** a shared token bucket in the database (a round trip per message), or leader election by a heartbeat
+  table (more moving parts than the lock the database already offers). Scaling throughput with more workers is not a goal:
+  the cap is per channel, so the standby only provides availability.
+
 ### Lease recovery, completion and shutdown
 - **Decision:** a maintenance loop (every second) returns deliveries whose lease expired to `queued`, due at once,
   without resetting `attempts`; one whose attempts are used up becomes `failed`. The same loop completes campaigns
@@ -479,8 +499,6 @@ silent-failure review of the overnight session; defects that were clear-cut were
   `ErrUnavailable` and would be retried; a blank city renders as "Türkiye" inside prose.
 
 ### Worker, queue and operations
-- **The rate cap is per worker process.** Two workers allow twice the cap at the provider. PLAN assumption 9 says one
-  instance; a shared limiter is out of scope. The compose file runs exactly one worker.
 - **The retry window is short** (five attempts span about 7-15 s plus request time). A provider outage longer than that, or
   a wrong `PROVIDER_URL` (not validated at start-up; a URL without a scheme is classed transient), sends every delivery to
   `failed` for good. A circuit breaker that parks `queued` rows while the provider is down would be the real fix.

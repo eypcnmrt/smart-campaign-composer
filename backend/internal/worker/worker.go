@@ -3,7 +3,10 @@
 //
 // Shape (per channel, one dispatcher goroutine):
 //
-//	wait for a rate-limit token -> claim one due delivery -> hand it to a send goroutine
+//	take the channel's advisory lock (another worker holding it: wait and retry)
+//	  -> wait for a rate-limit token -> claim one due delivery -> hand it to a send goroutine
+//
+// The lock keeps the per-channel cap when more than one worker runs: only the lock holder sends on a channel.
 //
 // Claiming after the token, one row at a time, means nothing sits claimed while it waits for its
 // turn, and the consent flag read by the claim is the one in force a moment before the request is made.
@@ -50,7 +53,10 @@ type Config struct {
 	// period of lease recovery and campaign completion (default 1s).
 	PollInterval        time.Duration
 	MaintenanceInterval time.Duration
-	Retry               retry.Policy
+	// LockRetryInterval is how often a worker that does not hold a channel's lock (another worker serves the
+	// channel) tries to take it (default 5s).
+	LockRetryInterval time.Duration
+	Retry             retry.Policy
 	// Jitter returns a number in [0, 1) for the backoff; default math/rand/v2.
 	Jitter func() float64
 	Logger *slog.Logger
@@ -84,6 +90,9 @@ func (c Config) withDefaults() Config {
 	if c.MaintenanceInterval == 0 {
 		c.MaintenanceInterval = time.Second
 	}
+	if c.LockRetryInterval == 0 {
+		c.LockRetryInterval = 5 * time.Second
+	}
 	if c.Retry.MaxAttempts == 0 {
 		c.Retry = retry.DefaultPolicy()
 	}
@@ -112,6 +121,9 @@ func (c Config) validate() error {
 	}
 	if c.MaxInFlight < 1 {
 		return errors.New("max in flight must be at least 1")
+	}
+	if c.LockRetryInterval < 0 {
+		return errors.New("lock retry interval must not be negative")
 	}
 	return nil
 }
@@ -182,34 +194,74 @@ func (w *Worker) Run(ctx context.Context) error {
 	return nil
 }
 
-// dispatch is the loop of one channel.
+// dispatch is the loop of one channel. Only the worker that holds the channel's advisory lock sends on it, so the
+// per-channel cap holds with several workers; the others wait and try again every LockRetryInterval.
 func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Limiter, sends *sync.WaitGroup) {
 	log := w.cfg.Logger.With("channel", channel)
+	// The send slots and the limiter belong to the channel, not to one tenure of the lock: sends still in flight
+	// when the lock is lost keep counting, and the pacing does not restart.
 	slots := make(chan struct{}, w.cfg.MaxInFlight)
+	waiting := false
+	for ctx.Err() == nil {
+		lockCtx, cancel := context.WithTimeout(ctx, dbTimeout)
+		lock, err := w.q.LockChannel(lockCtx, channel)
+		cancel()
+		switch {
+		case errors.Is(err, queue.ErrChannelLocked):
+			if !waiting { // say it once per wait, not every retry
+				log.Info("another worker serves this channel, waiting for its lock")
+				waiting = true
+			}
+			w.pause(ctx, w.cfg.LockRetryInterval)
+			continue
+		case err != nil:
+			if ctx.Err() == nil {
+				log.Error("taking the channel lock failed", "err", err)
+			}
+			w.pause(ctx, w.cfg.LockRetryInterval)
+			continue
+		}
+		waiting = false
+
+		log.Info("serving the channel")
+		serveErr := w.serve(ctx, channel, lock, lim, slots, sends)
+		if err := lock.Release(ctx); err != nil {
+			log.Error("releasing the channel lock failed", "err", err)
+		}
+		if serveErr != nil {
+			// The connection that holds the lock may be gone, and the lock with it. Take it again from scratch.
+			log.Error("serving stopped, the channel lock is given up and taken again", "err", serveErr)
+			w.pause(ctx, time.Second)
+		}
+	}
+}
+
+// serve claims and sends on one channel while the lock is held and ctx lives. It returns nil when ctx ended, and the
+// error of the first failed claim otherwise.
+func (w *Worker) serve(ctx context.Context, channel string, lock *queue.ChannelLock, lim *ratelimit.Limiter, slots chan struct{}, sends *sync.WaitGroup) error {
+	log := w.cfg.Logger.With("channel", channel)
 	for ctx.Err() == nil {
 		select {
 		case slots <- struct{}{}: // a free send slot
 		case <-ctx.Done():
-			return
+			return nil
 		}
 		release := func() { <-slots }
 
 		if err := lim.Wait(ctx); err != nil {
 			release()
-			return // only the context ends a wait
+			return nil // only the context ends a wait
 		}
 
 		// The claim is not tied to ctx: if it commits we must handle the delivery, not strand it
 		// until its lease expires.
 		claimCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), dbTimeout)
-		d, ok, err := w.q.Claim(claimCtx, channel, w.cfg.Lease)
+		d, ok, err := lock.Claim(claimCtx, w.cfg.Lease)
 		cancel()
 		switch {
 		case err != nil && !ok:
 			release()
-			log.Error("claim failed", "err", err)
-			w.pause(ctx, time.Second)
-			continue
+			return err
 		case err != nil:
 			// Claimed but unusable (corrupt campaign content). Waiting for the lease to expire would repeat this
 			// for every attempt and leave a misleading "lease expired" in the row, so fail it now with the cause.
@@ -231,6 +283,7 @@ func (w *Worker) dispatch(ctx context.Context, channel string, lim *ratelimit.Li
 			w.process(context.WithoutCancel(ctx), d)
 		})
 	}
+	return nil
 }
 
 // process sends one claimed delivery and records the outcome.

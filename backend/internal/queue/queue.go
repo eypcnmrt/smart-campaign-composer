@@ -186,7 +186,16 @@ func (d Delivery) Key() string { return d.IdempotencyKey }
 // it to sending, counts the attempt and sets a lease of the given length. ok is false when nothing is
 // due. FOR UPDATE SKIP LOCKED lets any number of workers claim at once without waiting for or
 // duplicating each other.
-func (q *Queue) Claim(ctx context.Context, channel string, lease time.Duration) (d Delivery, ok bool, err error) {
+func (q *Queue) Claim(ctx context.Context, channel string, lease time.Duration) (Delivery, bool, error) {
+	return claim(ctx, q.pool, channel, lease)
+}
+
+// rowQuerier is what claim needs: the pool, or the single connection that holds a channel lock.
+type rowQuerier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+func claim(ctx context.Context, db rowQuerier, channel string, lease time.Duration) (d Delivery, ok bool, err error) {
 	const query = `
 WITH due AS (
 	SELECT id FROM deliveries
@@ -212,7 +221,7 @@ JOIN users u ON u.id = c.user_id
 JOIN campaigns camp ON camp.id = c.campaign_id`
 
 	var raw []byte
-	err = q.pool.QueryRow(ctx, query, channel, lease.Seconds()).Scan(
+	err = db.QueryRow(ctx, query, channel, lease.Seconds()).Scan(
 		&d.ID, &d.CampaignID, &d.UserID, &d.Channel, &d.Attempt, &d.IdempotencyKey,
 		&d.Recipient, &d.Vars.FirstName, &d.Vars.City, &d.Consent, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
