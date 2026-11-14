@@ -8,7 +8,9 @@
 #   sh scripts/web.sh npx vitest run
 #   sh scripts/web.sh dev                          dev server on http://127.0.0.1:5173 (proxies /api to the host's :8080)
 #
-# Only web/ is mounted. node_modules and the npm cache live in named volumes, so no package is written to the checkout.
+# Only web/ is mounted, plus the shared test fixtures of the backend (read-only, JSON only, at the same relative place:
+# web/src/domain/x.test.ts reaches ../../../backend/internal/content/testdata, which is /backend/... in the container).
+# node_modules and the npm cache live in named volumes, so no package is written to the checkout.
 # Lifecycle scripts are off (npm_config_ignore_scripts); a package that needs one must be reviewed by a human first.
 set -eu
 cd "$(dirname "$0")/.."
@@ -16,7 +18,8 @@ cd "$(dirname "$0")/.."
 IMAGE="node:24.14.0-alpine"
 # Git Bash on Windows needs a drive path for -v and must not rewrite the container paths.
 export MSYS_NO_PATHCONV=1
-src="$(pwd -W 2>/dev/null || pwd)/web"
+root="$(pwd -W 2>/dev/null || pwd)"
+src="$root/web"
 
 set -- "$@"
 if [ "$#" -eq 0 ]; then
@@ -36,5 +39,7 @@ fi
 exec docker run --rm \
 	--security-opt=no-new-privileges \
 	-v "$src:/app" -v scc-web-node-modules:/app/node_modules -v scc-npm-cache:/root/.npm -w /app \
+	-v "$root/backend/internal/content/testdata:/backend/internal/content/testdata:ro" \
+	-v "$root/backend/internal/segment/testdata:/backend/internal/segment/testdata:ro" \
 	-e npm_config_ignore_scripts=true \
 	"$IMAGE" "$@"

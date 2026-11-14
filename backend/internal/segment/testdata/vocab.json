@@ -1,0 +1,27 @@
+{
+  "fields": {
+    "city": {
+      "kind": "enum",
+      "ops": ["eq", "neq", "in", "not_in"],
+      "enum": ["İstanbul", "Ankara", "İzmir", "Bursa", "Antalya", "Adana", "Konya", "Kocaeli", "Gaziantep", "Kayseri", "Eskişehir", "Samsun"]
+    },
+    "language": {
+      "kind": "enum",
+      "ops": ["eq", "neq", "in", "not_in"],
+      "enum": ["tr", "en"]
+    },
+    "total_orders": {
+      "kind": "int",
+      "ops": ["eq", "neq", "gt", "gte", "lt", "lte"]
+    },
+    "total_spent": {
+      "kind": "money",
+      "ops": ["eq", "neq", "gt", "gte", "lt", "lte"]
+    }
+  },
+  "events": ["cart_add", "purchase"],
+  "event_ops": ["performed", "not_performed"],
+  "cities": ["İstanbul", "Ankara", "İzmir", "Bursa", "Antalya", "Adana", "Konya", "Kocaeli", "Gaziantep", "Kayseri", "Eskişehir", "Samsun"],
+  "languages": ["tr", "en"],
+  "channels": ["sms", "email"]
+}
