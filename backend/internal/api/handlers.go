@@ -118,14 +118,26 @@ func withCampaignID(details any, id int64) map[string]any {
 
 // runSegment asks the model for the segment of c's brief, counts the audience and stores both. The caller holds a
 // generation slot.
+//
+// The generation ends when the client goes away (ctx), when the server starts shutting down (BeginShutdown, the same signal
+// the content stream listens to: the request then ends with server_shutting_down while http.Server.Shutdown is still
+// waiting for it, instead of outliving the grace period and getting a cut connection) or when it takes too long.
 func (s *Server) runSegment(ctx context.Context, c campaign.Campaign, id string) (campaign.Campaign, error) {
-	ctx, cancel := context.WithTimeoutCause(ctx, s.cfg.SegmentTimeout, errTaskTimeout)
-	defer cancel()
+	if s.shutdownCtx.Err() != nil {
+		return campaign.Campaign{}, errShuttingDown // the model is not asked, no credit is spent
+	}
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	stop := context.AfterFunc(s.shutdownCtx, func() { cancel(errShuttingDown) })
+	defer stop()
+	ctx, cancelTimeout := context.WithTimeoutCause(ctx, s.cfg.SegmentTimeout, errTaskTimeout)
+	defer cancelTimeout()
 	start := time.Now()
 
 	res, err := s.gen.Segment(ctx, c.Brief)
 	if err != nil {
-		err = taskTimeout(err)
+		// A context error that the model layer wrapped is reported by what stopped the generation (shutdown, deadline).
+		err = cause(ctx, taskTimeout(err))
 		s.metrics.ObserveLLM("segment", outcomeOf(err), time.Since(start))
 		return campaign.Campaign{}, err
 	}

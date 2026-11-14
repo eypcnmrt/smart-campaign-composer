@@ -85,7 +85,7 @@ func scan(row scanner) (Campaign, error) {
 			return Campaign{}, fmt.Errorf("campaign %d: reading the approved warnings: %w", c.ID, err)
 		}
 	case c.Audience != nil && c.Segment != nil:
-		c.Warnings = Warnings(c.Audience.Audience, c.Segment.UnsupportedCriteria)
+		c.Warnings = Warnings(c.Audience.Audience, c.Channels, c.Segment.UnsupportedCriteria)
 	}
 	c.Warnings = nonNil(c.Warnings)
 	c.Channels = nonNil(c.Channels)
@@ -210,7 +210,8 @@ type ApproveResult struct {
 
 // Approve freezes a campaign and queues its recipients, in one transaction: it locks the row, checks the state (which makes
 // the second approval of a campaign a conflict), checks that the version is the one the marketer reviewed, validates the
-// rule and the content again, counts the audience and asks for an acknowledgement when it has warnings, copies the rule, the
+// rule and the content again, counts the audience, refuses a campaign whose open channels reach nobody (ErrNoRecipients, which
+// no acknowledgement can pass) and asks for an acknowledgement when it has other warnings, copies the rule, the
 // content and the channels into the approval snapshot and writes one delivery per recipient and channel. Either all of it
 // happens or none of it does. The worker only ever reads the snapshot.
 func (s *Store) Approve(ctx context.Context, id int64, version int, acknowledge bool) (res ApproveResult, err error) {
@@ -230,9 +231,10 @@ func (s *Store) Approve(ctx context.Context, id int64, version int, acknowledge 
 		status           string
 		current          int
 		ruleJSON, ctJSON []byte
+		channels         []string
 	)
-	err = tx.QueryRow(ctx, `SELECT status, version, segment_rule, content FROM campaigns WHERE id = $1 FOR UPDATE`, id).
-		Scan(&status, &current, &ruleJSON, &ctJSON)
+	err = tx.QueryRow(ctx, `SELECT status, version, segment_rule, content, channels FROM campaigns WHERE id = $1 FOR UPDATE`, id).
+		Scan(&status, &current, &ruleJSON, &ctJSON, &channels)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ApproveResult{}, ErrNotFound
 	}
@@ -272,7 +274,12 @@ func (s *Store) Approve(ctx context.Context, id int64, version int, acknowledge 
 	if err != nil {
 		return ApproveResult{}, err
 	}
-	warnings := Warnings(aud, rule.UnsupportedCriteria)
+	warnings := Warnings(aud, channels, rule.UnsupportedCriteria)
+	if HasWarning(warnings, WarnNoRecipients) {
+		// Checked before the acknowledgement and whatever it says: there is nothing to send, so there is nothing to confirm.
+		err = &NoRecipientsError{Channels: channels, Audience: aud}
+		return ApproveResult{}, err
+	}
 	if err = RequireAcknowledgement(warnings, acknowledge); err != nil {
 		return ApproveResult{}, &AcknowledgementRequiredError{Warnings: warnings}
 	}

@@ -107,6 +107,13 @@ func (e *env) withContent(t *testing.T, c campaign.Campaign) campaign.Campaign {
 	return c
 }
 
+func (e *env) exec(t *testing.T, sql string, args ...any) {
+	t.Helper()
+	if _, err := e.pool.Exec(context.Background(), sql, args...); err != nil {
+		t.Fatalf("%s: %v", sql, err)
+	}
+}
+
 func (e *env) count(t *testing.T, sql string, args ...any) int {
 	t.Helper()
 	var n int
@@ -402,16 +409,104 @@ func TestStore_theWorkerSendsTheSnapshot(t *testing.T) {
 	}
 }
 
-func TestStore_aCampaignWithNobodyToSendToCompletesAtOnce(t *testing.T) {
+// A campaign whose open channels reach nobody carries a no_recipients warning and cannot be approved at all: unlike the
+// other warnings, an acknowledgement does not get it through, because there is nothing to send.
+func TestStore_aCampaignWithNobodyToSendToIsRefused(t *testing.T) {
+	const (
+		nobodyMatches = `{"conditions":[{"type":"attribute","field":"total_orders","op":"gt","value":1000}],"unsupported_criteria":[],"explanation":"nobody","channels":[]}`
+		ankaraSMS     = `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Ankara"}],"unsupported_criteria":[],"explanation":"Ankara","channels":["sms"]}`
+	)
+	tests := []struct {
+		name string
+		// build returns the campaign with content, after the database and the channels were arranged.
+		build    func(t *testing.T, e *env) campaign.Campaign
+		channels []string
+	}{
+		{"the rule matches nobody", func(t *testing.T, e *env) campaign.Campaign {
+			return e.withContent(t, e.withSegment(t, nobodyMatches))
+		}, []string{"sms", "email"}},
+		{"users match, but nobody consented to the one open channel", func(t *testing.T, e *env) campaign.Campaign {
+			e.exec(t, `UPDATE users SET sms_consent = false`)
+			return e.withContent(t, e.withSegment(t, ankaraSMS))
+		}, []string{"sms"}},
+		{"the marketer closes the only channel that had consenters", func(t *testing.T, e *env) campaign.Campaign {
+			e.exec(t, `UPDATE users SET email_consent = false`)
+			c := e.withContent(t, e.withSegment(t, ankaraRule))
+			if len(c.Warnings) != 0 {
+				t.Fatalf("warnings = %+v before the channel change, want none (sms still reaches people)", c.Warnings)
+			}
+			c, err := e.store.SetChannels(context.Background(), c, []string{"email"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			return c
+		}, []string{"email"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			e := newEnv(t)
+			ctx := context.Background()
+			c := tt.build(t, e)
+
+			var codes []string
+			for _, w := range c.Warnings {
+				codes = append(codes, w.Code)
+			}
+			if !slices.Equal(codes, []string{campaign.WarnNoRecipients}) {
+				t.Fatalf("warnings = %v, want only no_recipients", codes)
+			}
+
+			// neither without nor with an acknowledgement
+			for _, acknowledge := range []bool{false, true} {
+				_, err := e.store.Approve(ctx, c.ID, c.Version, acknowledge)
+				var nr *campaign.NoRecipientsError
+				if !errors.Is(err, campaign.ErrNoRecipients) || !errors.As(err, &nr) || !slices.Equal(nr.Channels, tt.channels) {
+					t.Fatalf("Approve(acknowledge=%v) error = %v, want ErrNoRecipients for %v", acknowledge, err, tt.channels)
+				}
+				if errors.Is(err, campaign.ErrAcknowledgementRequired) {
+					t.Fatalf("Approve(acknowledge=%v) asked for an acknowledgement: nothing can be acknowledged here", acknowledge)
+				}
+			}
+			if n := e.count(t, `SELECT count(*) FROM deliveries`); n != 0 {
+				t.Fatalf("%d deliveries for a campaign nobody can receive", n)
+			}
+			got, err := e.store.Get(ctx, c.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Status != campaign.StateContentReady || got.Version != c.Version || got.ApprovedAt != nil {
+				t.Fatalf("after the refusals: status %s, version %d (was %d), approved_at %v; want it untouched", got.Status, got.Version, c.Version, got.ApprovedAt)
+			}
+		})
+	}
+}
+
+// Fixing the cause is enough: the same campaign can be approved once an open channel reaches somebody.
+func TestStore_aRefusedCampaignCanBeApprovedOnceItReachesSomeone(t *testing.T) {
 	e := newEnv(t)
-	nobody := `{"conditions":[{"type":"attribute","field":"total_orders","op":"gt","value":1000}],"unsupported_criteria":[],"explanation":"nobody","channels":[]}`
-	c := e.withContent(t, e.withSegment(t, nobody))
-	res, err := e.store.Approve(context.Background(), c.ID, c.Version, false)
+	ctx := context.Background()
+	e.exec(t, `UPDATE users SET email_consent = false`)
+	c := e.withContent(t, e.withSegment(t, ankaraRule))
+	c, err := e.store.SetChannels(ctx, c, []string{"email"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Campaign.Status != campaign.StateCompleted || res.Campaign.CompletedAt == nil || len(res.Enqueued) == 0 {
-		t.Fatalf("result = %+v", res)
+	if _, err := e.store.Approve(ctx, c.ID, c.Version, true); !errors.Is(err, campaign.ErrNoRecipients) {
+		t.Fatalf("Approve = %v, want ErrNoRecipients", err)
+	}
+	c, err = e.store.SetChannels(ctx, c, []string{"sms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Warnings) != 0 {
+		t.Fatalf("warnings = %+v after the channel change, want none", c.Warnings)
+	}
+	res, err := e.store.Approve(ctx, c.ID, c.Version, false)
+	if err != nil {
+		t.Fatalf("Approve after fixing the channels: %v", err)
+	}
+	if res.Enqueued["sms"] != 8 || res.Campaign.Status != campaign.StateSending {
+		t.Fatalf("result = %+v, want 8 sms deliveries and sending", res)
 	}
 }
 

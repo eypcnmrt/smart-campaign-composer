@@ -37,6 +37,8 @@ func TestWorker_metrics(t *testing.T) {
 	w.LockHeld("sms", true)
 	w.LockHeld("email", false)
 	w.HeartbeatError("sms")
+	w.MaintenanceError(worker.TaskRecoverLeases)
+	w.MaintenanceError(worker.TaskRecoverLeases)
 
 	out := scrape(t, w.Handler())
 	for _, want := range []string{
@@ -50,6 +52,9 @@ func TestWorker_metrics(t *testing.T) {
 		`scc_worker_channel_lock_held{channel="sms"} 1`,
 		`scc_worker_channel_lock_held{channel="email"} 0`,
 		`scc_worker_heartbeat_errors_total{channel="sms"} 1`,
+		`scc_worker_maintenance_errors_total{task="recover_leases"} 2`,
+		// a task that never failed is reported as zero, not left out
+		`scc_worker_maintenance_errors_total{task="complete_campaigns"} 0`,
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the scrape is missing %q", want)
@@ -84,6 +89,17 @@ func TestAPI_httpAndLLMMetrics(t *testing.T) {
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("the scrape is missing %q\n%s", want, out)
+		}
+	}
+}
+
+// Every task the worker can report is a series from the start.
+func TestWorker_everyMaintenanceTaskStartsAtZero(t *testing.T) {
+	t.Parallel()
+	out := scrape(t, NewWorker().Handler())
+	for _, task := range worker.MaintenanceTasks() {
+		if want := `scc_worker_maintenance_errors_total{task="` + task + `"} 0`; !strings.Contains(out, want) {
+			t.Errorf("the scrape is missing %q", want)
 		}
 	}
 }

@@ -146,6 +146,14 @@ func storeProblem(err error) *problem {
 			p.Details = map[string]any{"current_version": vm.Current}
 		}
 		return p
+	case errors.Is(err, campaign.ErrNoRecipients):
+		p := &problem{Status: http.StatusUnprocessableEntity, Code: "no_recipients",
+			Message: "Nobody in the audience has consented to the selected channels, so there is nothing to send. " +
+				"Select another channel or change the brief; acknowledging warnings does not apply."}
+		if nr, ok := errors.AsType[*campaign.NoRecipientsError](err); ok {
+			p.Details = map[string]any{"channels": nr.Channels, "audience": nr.Audience}
+		}
+		return p
 	case errors.Is(err, campaign.ErrAcknowledgementRequired):
 		p := &problem{Status: http.StatusUnprocessableEntity, Code: "acknowledgement_required", Message: "The campaign has warnings. Approve it with acknowledge_warnings set to true to confirm them."}
 		if ack, ok := errors.AsType[*campaign.AcknowledgementRequiredError](err); ok {

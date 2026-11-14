@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -248,6 +249,107 @@ func TestStream_shutdownEndsOpenStreamsWithAnEvent(t *testing.T) {
 	}
 }
 
+// A segment generation is tied to the shutdown signal like the stream: the request that is in flight when the server starts
+// shutting down ends with 503 server_shutting_down (and its model request is canceled) while http.Server.Shutdown is still
+// waiting for it, instead of running out its two minutes and getting a cut connection. The draft stays and says so.
+func TestAPI_shutdownEndsAnOpenSegmentRequest(t *testing.T) {
+	for _, tt := range []struct {
+		name string
+		// request sends the segment request that blocks; it runs after a campaign exists.
+		request func(e *env, id int64) response
+		// campaigns is how many campaigns exist at the end: the one that was prepared, and the draft a refused create leaves.
+		campaigns int
+	}{
+		{"creating a campaign", func(e *env, _ int64) response {
+			return e.do("POST", "/api/campaigns", map[string]string{"brief": "yeni"})
+		}, 2},
+		{"generating the segment again", func(e *env, id int64) response { return e.do("POST", path(id, "/segment"), nil) }, 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			gen := newBlockingGen()
+			var calls atomic.Int32
+			started, canceled := make(chan struct{}, 1), make(chan error, 1)
+			gen.segment = func(ctx context.Context) (compose.SegmentResult, error) {
+				if calls.Add(1) == 1 { // the first call only prepares a campaign
+					return compose.New(llm.NewScripted(llm.Reply(ankaraRule))).Segment(ctx, "hazırlık")
+				}
+				started <- struct{}{}
+				<-ctx.Done()
+				canceled <- context.Cause(ctx)
+				return compose.SegmentResult{}, ctx.Err()
+			}
+			e := newEnvWith(t, gen, llm.NewScripted())
+			id := idOf(t, e.expect("POST", "/api/campaigns", map[string]string{"brief": "hazırlık"}, http.StatusCreated, ""))
+
+			got := make(chan response, 1)
+			go func() { got <- tt.request(e, id) }()
+			<-started
+			e.server.BeginShutdown()
+
+			var r response
+			select {
+			case r = <-got:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the segment request did not end after the shutdown began")
+			}
+			if r.status != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, want 503\n%s", r.status, r.body)
+			}
+			if code, details := r.errorOf(t); code != "server_shutting_down" {
+				t.Fatalf("error code = %q (details %v), want server_shutting_down", code, details)
+			}
+			select {
+			case cause := <-canceled:
+				if cause == nil || !strings.Contains(cause.Error(), "shutting down") {
+					t.Fatalf("the model request was canceled with %v, want the shutdown", cause)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("the model request was not canceled by the shutdown")
+			}
+			if n := e.count(`SELECT count(*) FROM campaigns`); n != tt.campaigns {
+				t.Fatalf("%d campaigns after the shutdown, want %d", n, tt.campaigns)
+			}
+			if body := e.expect("GET", "/metrics", nil, http.StatusOK, "").body; !strings.Contains(string(body), `scc_llm_calls_total{outcome="server_shutting_down",task="segment"} 1`) {
+				t.Fatalf("the shutdown is not counted as the outcome of the generation:\n%s", grepLines(body, "scc_llm_calls_total"))
+			}
+		})
+	}
+}
+
+// After the shutdown has begun a new segment request does not ask the model at all (no credit is spent), whatever the route.
+func TestAPI_aSegmentRequestAfterTheShutdownBeganDoesNotCallTheModel(t *testing.T) {
+	gen := newBlockingGen()
+	var calls atomic.Int32
+	gen.segment = func(ctx context.Context) (compose.SegmentResult, error) {
+		calls.Add(1)
+		return compose.New(llm.NewScripted(llm.Reply(ankaraRule))).Segment(ctx, "b")
+	}
+	e := newEnvWith(t, gen, llm.NewScripted())
+	id := idOf(t, e.expect("POST", "/api/campaigns", map[string]string{"brief": "b"}, http.StatusCreated, ""))
+	before := calls.Load()
+
+	e.server.BeginShutdown()
+	r := e.expect("POST", "/api/campaigns", map[string]string{"brief": "geç kaldı"}, http.StatusServiceUnavailable, "server_shutting_down")
+	if _, details := r.errorOf(t); field(t, details, "campaign_id") == nil {
+		t.Fatalf("details = %v, want the id of the draft that was left", details)
+	}
+	e.expect("POST", path(id, "/segment"), nil, http.StatusServiceUnavailable, "server_shutting_down")
+	if got := calls.Load(); got != before {
+		t.Fatalf("the model was called %d times after the shutdown began", got-before)
+	}
+}
+
+// grepLines returns the lines of text that contain substr, for failure messages.
+func grepLines(text []byte, substr string) string {
+	var out []string
+	for _, l := range strings.Split(string(text), "\n") {
+		if strings.Contains(l, substr) && !strings.HasPrefix(l, "#") {
+			out = append(out, l)
+		}
+	}
+	return strings.Join(out, "\n")
+}
+
 // A client that does not read cannot make the model's read loop wait: the generation is canceled instead.
 func TestStream_aSlowClientIsCutOff(t *testing.T) {
 	gen := newBlockingGen()
@@ -277,7 +379,7 @@ func TestStream_aSlowClientIsCutOff(t *testing.T) {
 func TestAPI_theGenerationGateAnswers503WhenFull(t *testing.T) {
 	gen := newBlockingGen()
 	hold, started := make(chan struct{}), make(chan struct{}, 1)
-	gen.segment = func() (compose.SegmentResult, error) {
+	gen.segment = func(context.Context) (compose.SegmentResult, error) {
 		started <- struct{}{}
 		<-hold
 		return compose.New(llm.NewScripted(llm.Reply(ankaraRule))).Segment(context.Background(), "b")

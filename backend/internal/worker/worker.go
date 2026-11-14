@@ -164,6 +164,9 @@ type Counters struct {
 	// HeartbeatErrors counts failed writes of worker_channel_status; while they last, the dashboard sees the worker as
 	// not running.
 	HeartbeatErrors int64
+	// MaintenanceErrors counts failed tasks of the maintenance loop (lease recovery, campaign completion). While they
+	// last, expired leases stay "sending" and finished campaigns are not completed.
+	MaintenanceErrors int64
 }
 
 // Worker is the dispatcher. Create it with New and run it with Run.
@@ -173,7 +176,7 @@ type Worker struct {
 	sender Sender
 	now    func() time.Time // the breakers' clock; tests of the worker leave it alone
 
-	sent, retried, failed, skipped, leaseLost, refunded, recordErrors, heartbeatErrors atomic.Int64
+	sent, retried, failed, skipped, leaseLost, refunded, recordErrors, heartbeatErrors, maintenanceErrors atomic.Int64
 }
 
 // New returns a worker.
@@ -190,7 +193,7 @@ func (w *Worker) Counters() Counters {
 	return Counters{
 		Sent: w.sent.Load(), Retried: w.retried.Load(), Failed: w.failed.Load(),
 		Skipped: w.skipped.Load(), LeaseLost: w.leaseLost.Load(), Refunded: w.refunded.Load(),
-		RecordErrors: w.recordErrors.Load(), HeartbeatErrors: w.heartbeatErrors.Load(),
+		RecordErrors: w.recordErrors.Load(), HeartbeatErrors: w.heartbeatErrors.Load(), MaintenanceErrors: w.maintenanceErrors.Load(),
 	}
 }
 
@@ -481,11 +484,15 @@ func (w *Worker) maintainOnce(ctx context.Context) {
 	log := w.cfg.Logger
 	rec, err := w.q.RecoverLeases(ctx, w.cfg.Retry.MaxTotalAttempts())
 	if err != nil {
+		w.maintenanceErrors.Add(1)
+		w.cfg.Observer.MaintenanceError(TaskRecoverLeases)
 		log.Error("recovering leases failed", "err", err)
 	} else if rec.Requeued+rec.Failed > 0 {
 		log.Warn("took back expired leases", "requeued", rec.Requeued, "failed", rec.Failed)
 	}
 	if n, err := w.q.CompleteFinished(ctx); err != nil {
+		w.maintenanceErrors.Add(1)
+		w.cfg.Observer.MaintenanceError(TaskCompleteCampaigns)
 		log.Error("completing campaigns failed", "err", err)
 	} else if n > 0 {
 		log.Info("campaigns completed", "count", n)

@@ -34,6 +34,7 @@ func TestKnownProblem(t *testing.T) {
 		{"canceled by the client", context.Canceled, 499, "client_closed"},
 		{"an approval that may have been applied", fmt.Errorf("%w: commit: boom", campaign.ErrApprovalUnconfirmed), 500, "approval_unconfirmed"},
 		{"not found", campaign.ErrNotFound, 404, "not_found"},
+		{"nobody to send to", &campaign.NoRecipientsError{Channels: []string{"sms"}}, 422, "no_recipients"},
 		{"a state change", fmt.Errorf("x: %w", campaign.ErrStateChanged), 409, "state_changed"},
 		{"a database error", errors.New("pq: connection reset"), 0, ""},
 	}

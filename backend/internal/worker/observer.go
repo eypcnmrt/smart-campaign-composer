@@ -12,11 +12,24 @@ type Observer interface {
 	LockHeld(channel string, held bool)
 	// HeartbeatError is called when writing the channel's heartbeat failed.
 	HeartbeatError(channel string)
+	// MaintenanceError is called when one task of a maintenance pass failed (a Task constant). While it keeps happening,
+	// expired leases are not taken back and finished campaigns stay "sending", although the heartbeat says the worker is fine.
+	MaintenanceError(task string)
 }
+
+// The tasks of the maintenance loop, as reported to Observer.MaintenanceError.
+const (
+	TaskRecoverLeases     = "recover_leases"
+	TaskCompleteCampaigns = "complete_campaigns"
+)
+
+// MaintenanceTasks lists every task MaintenanceError can name (a metrics package starts each of them at zero).
+func MaintenanceTasks() []string { return []string{TaskRecoverLeases, TaskCompleteCampaigns} }
 
 type nopObserver struct{}
 
-func (nopObserver) Attempt(string, string) {}
-func (nopObserver) Circuit(string, string) {}
-func (nopObserver) LockHeld(string, bool)  {}
-func (nopObserver) HeartbeatError(string)  {}
+func (nopObserver) Attempt(string, string)  {}
+func (nopObserver) Circuit(string, string)  {}
+func (nopObserver) LockHeld(string, bool)   {}
+func (nopObserver) HeartbeatError(string)   {}
+func (nopObserver) MaintenanceError(string) {}

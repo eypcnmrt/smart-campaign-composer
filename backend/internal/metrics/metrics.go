@@ -14,6 +14,8 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"smartcampaign/internal/worker"
 )
 
 // durationBuckets cover a health check (milliseconds) up to a content generation (minutes).
@@ -114,6 +116,7 @@ type Worker struct {
 	circuit  *prometheus.GaugeVec
 	lockHeld *prometheus.GaugeVec
 	hbErrors *prometheus.CounterVec
+	maintErr *prometheus.CounterVec
 }
 
 // circuitStates are the values of the circuit gauge's state label.
@@ -135,9 +138,17 @@ func NewWorker() *Worker {
 		hbErrors: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "scc_worker_heartbeat_errors_total", Help: "Failed writes of the channel heartbeat.",
 		}, []string{"channel"}),
+		maintErr: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "scc_worker_maintenance_errors_total",
+			Help: "Failed tasks of the worker's maintenance loop by task (recover_leases, complete_campaigns). While they rise, expired leases are not taken back and finished campaigns are not completed.",
+		}, []string{"task"}),
+	}
+	// Every task starts at zero, so a rate() or an alert on the counter works before the first failure.
+	for _, task := range worker.MaintenanceTasks() {
+		w.maintErr.WithLabelValues(task)
 	}
 	w.reg.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
-		w.attempts, w.circuit, w.lockHeld, w.hbErrors)
+		w.attempts, w.circuit, w.lockHeld, w.hbErrors, w.maintErr)
 	return w
 }
 
@@ -171,3 +182,6 @@ func (w *Worker) LockHeld(channel string, held bool) {
 
 // HeartbeatError implements worker.Observer.
 func (w *Worker) HeartbeatError(channel string) { w.hbErrors.WithLabelValues(channel).Inc() }
+
+// MaintenanceError implements worker.Observer.
+func (w *Worker) MaintenanceError(task string) { w.maintErr.WithLabelValues(task).Inc() }

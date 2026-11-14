@@ -240,6 +240,46 @@ func TestAPI_aRuleThatMatchesEveryoneNeedsAnAcknowledgement(t *testing.T) {
 	}
 }
 
+// A campaign whose open channels reach nobody says so in its warnings, and approval is a 422 no_recipients that the
+// acknowledgement field cannot get past.
+func TestAPI_aCampaignNobodyCanReceiveCannotBeApproved(t *testing.T) {
+	const nobodyRule = `{"conditions":[{"type":"attribute","field":"total_orders","op":"gt","value":1000}],"unsupported_criteria":[],"explanation":"Kimse","channels":[]}`
+	e, _ := newEnv(t, llm.Reply(nobodyRule), llm.Reply(goodContent))
+	created := e.expect("POST", "/api/campaigns", map[string]string{"brief": "kimsenin olmadığı bir kitle"}, http.StatusCreated, "")
+	id := idOf(t, created)
+	warningCodes := func(c map[string]any) []string {
+		var codes []string
+		for _, w := range c["warnings"].([]any) {
+			codes = append(codes, field(t, w, "code").(string))
+		}
+		return codes
+	}
+	if got := warningCodes(created.json(t)); !slices.Equal(got, []string{"no_recipients"}) {
+		t.Fatalf("warnings = %v, want no_recipients", got)
+	}
+	e.stream(path(id, "/content/stream"))
+
+	for _, body := range []map[string]any{{"version": 3}, {"version": 3, "acknowledge_warnings": true}} {
+		r := e.expect("POST", path(id, "/approve"), body, http.StatusUnprocessableEntity, "no_recipients")
+		_, details := r.errorOf(t)
+		if !slices.Equal(strs(t, field(t, details, "channels")), []string{"sms", "email"}) || field(t, details, "audience", "matched") != 0.0 ||
+			field(t, details, "audience", "total_users") != 20.0 {
+			t.Fatalf("details = %v, want the channels and the audience counts", details)
+		}
+	}
+	if n := e.count(`SELECT count(*) FROM deliveries`); n != 0 {
+		t.Fatalf("%d deliveries for a campaign nobody can receive", n)
+	}
+	c := e.expect("GET", path(id, ""), nil, http.StatusOK, "").json(t)
+	if c["status"] != "content_ready" || c["version"] != 3.0 || c["approved_at"] != nil || !slices.Equal(warningCodes(c), []string{"no_recipients"}) {
+		t.Fatalf("campaign after the refusals = %v, want it untouched and still flagged", c)
+	}
+	list := e.expect("GET", "/api/campaigns", nil, http.StatusOK, "").json(t)["campaigns"].([]any)
+	if len(list) != 1 || field(t, list[0], "warning_count") != 1.0 {
+		t.Fatalf("list = %v, want the warning counted", list)
+	}
+}
+
 func TestAPI_versionMismatch(t *testing.T) {
 	e, _ := newEnv(t, llm.Reply(ankaraRule), llm.Reply(goodContent))
 	id := idOf(t, e.expect("POST", "/api/campaigns", map[string]string{"brief": "b"}, http.StatusCreated, ""))

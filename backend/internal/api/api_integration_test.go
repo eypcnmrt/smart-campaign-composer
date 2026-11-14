@@ -239,7 +239,7 @@ type blockingGen struct {
 	started  chan struct{}
 	release  chan string // the content JSON to return
 	canceled chan error
-	segment  func() (compose.SegmentResult, error)
+	segment  func(ctx context.Context) (compose.SegmentResult, error)
 	emit     func(onEvent func(compose.Event))
 }
 
@@ -249,7 +249,7 @@ func newBlockingGen() *blockingGen {
 
 func (g *blockingGen) Segment(ctx context.Context, brief string) (compose.SegmentResult, error) {
 	if g.segment != nil {
-		return g.segment()
+		return g.segment(ctx)
 	}
 	return compose.New(llm.NewScripted(llm.Reply(ankaraRule))).Segment(ctx, brief)
 }

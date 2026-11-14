@@ -10,8 +10,9 @@ import (
 //	draft -> audience_ready -> content_ready -> approved -> sending -> completed | completed_with_failures
 //
 // approved is only ever visible inside the approval transaction: the same transaction writes the recipients and
-// moves the campaign on to sending (or straight to completed when nobody is eligible). sending and the two final
-// states are moved by the queue, not by the actions below.
+// moves the campaign on to sending. (Approval is refused when the open channels reach nobody, so the queue's "straight to
+// completed" only happens if consent changed between the count and the insert.) sending and the two final states are
+// moved by the queue, not by the actions below.
 type State string
 
 // The states, as stored in campaigns.status.

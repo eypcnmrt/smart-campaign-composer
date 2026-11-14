@@ -108,6 +108,15 @@ here when the README is written.
   `mock` is the opt-in for demos and for recording a run while a key is present on the machine.
 - **Alternative:** warn and fall back to the mock in every case (still looks like a working system to a script), or fail without a key
   in every case (breaks `docker compose up` for someone without one, which the case requires to work).
+- **Known limit, kept on purpose:** with `auto` and no usable key the api serves the demo mock. A key that is blank, misspelled or
+  not passed through compose therefore looks like a working system until someone reads the start-up log or the badge. It is made
+  visible in three places: the api logs `llm client chosen` with `mode=mock`, `setting=auto` and the reason ("no ANTHROPIC_API_KEY
+  is set, so the demo mock is used") at every start; `GET /api/config` returns `llm_mode: "mock"` (and `model: "mock"`); and the UI
+  will show a "Mock LLM" badge from that field (the UI is the next stage, the field is there now). `LLM_MODE=anthropic` is the strict
+  setting: it exits at start-up without a key.
+- **Why it stays a fallback:** the case requires `docker compose up` to work for someone who has no key and no dotenv file, and a
+  start-up failure there would be the worse failure. The mock cannot cost money or reach the real API, so the risk of the fallback is
+  a wrong impression, not a wrong action, and the three signals above are what keep that impression honest.
 
 ### One structured-output request per task, effort set explicitly, nothing the model rejects
 - **Decision:** segment: one non-streaming request, `output_config.format` = the schema, effort `low`.
@@ -371,6 +380,19 @@ here when the README is written.
   database sent" could not hold), or a separate `unknown` status (one more state in every query and in the dashboard
   for a rare case; the text in `last_error` carries the information). This deviates from the literal "at most 5
   attempts" by one request that cannot send twice; `confirms` returning false restores the strict reading.
+- **Known limit: a result that cannot be written on the last attempt can end as `failed` although the provider accepted the
+  message.** The outcome of a send is written up to four times (0.5 s, 1 s, 1.5 s apart). If the database is unreachable for all of
+  them on the confirmation request, the row stays `sending`, the lease expires and recovery marks it failed with the "outcome
+  unknown ... may have delivered" text. So "provider accepted = database sent" holds strictly only while the database can be
+  written; in that case the row says `failed` with a text that hedges instead of `sent`. The same wording also covers a
+  confirmation that was claimed and never sent (a worker killed in between), where "ended without an answer" is not verified.
+  Nothing is sent again, and `scc_worker_attempts_total{result="record_error"}` counts every outcome that could not be written, so it
+  shows when this can have happened.
+- **Why it is accepted:** the alternatives are worse. Marking such a row `sent` guesses in the other direction, and a message that
+  was not delivered would then be reported as delivered; sending again is bounded by the attempt limit for a reason; a local
+  write-ahead file for results would be a second source of truth to keep in step with the database. It needs a database outage of
+  more than a few seconds that starts exactly while the last attempt of one delivery is in flight, and the delivery says plainly
+  what is unknown, so an operator can compare with the provider's records.
 
 ### Rate limit: x/time/rate plus a sliding-window guard, about 4 % under the cap
 - **Decision:** each channel has a `rate.Limiter` (100/s, burst 1, so sends are 10 ms apart and there is no
@@ -441,6 +463,16 @@ here when the README is written.
 - **Alternative:** a shared token bucket in the database (a round trip per message), or leader election by a heartbeat
   table (more moving parts than the lock the database already offers). Scaling throughput with more workers is not a goal:
   the cap is per channel, so the standby only provides availability.
+- **Known limit: a dead lock connection is noticed at most one cooldown later.** While a channel's circuit is open the dispatcher
+  claims nothing, so it does not touch its lock connection; a session that dies in that time (the server then drops the lock) is
+  noticed at the first probe, up to the cooldown (10 s) later, plus a poll. If another worker took the channel meanwhile, both write
+  `worker_channel_status` for a moment and the dashboard can flap between their circuits. Nothing can be sent twice and the cap
+  holds: the stale holder is parked, and the probe it finally makes goes through the dead session, fails, and makes it give up the
+  lock and wait like a standby (the new holder is the only one that sends).
+- **Why it is accepted:** the effect is a few seconds of a wrong status on the dashboard, never a wrong send, and only after a
+  database session died during an outage of the provider. Closing the window needs a `SELECT 1` on each lock connection every poll
+  (or every heartbeat tick), one more statement per channel per tick forever, to fix something that cannot hurt a delivery. If the
+  flapping shows up in practice, that statement is the fix.
 
 ### Lease recovery, completion and shutdown
 - **Decision:** a maintenance loop (every second) returns deliveries whose lease expired to `queued`, due at once,
@@ -456,7 +488,8 @@ here when the README is written.
 ### Enqueue happens in one transaction and counts event windows from approval
 - **Decision:** `Enqueue` locks the campaign row, requires `approved`, runs one `INSERT ... SELECT` per channel over
   `segment.Compile` output and the consent column, and moves the campaign to `sending` (or straight to `completed`
-  when nobody is eligible). The compile time is `approved_at`, not the clock of the worker.
+  when nobody is eligible; the API's approval refuses that case before it gets here, see `no_recipients`). The compile time is
+  `approved_at`, not the clock of the worker.
 - **Why:** the audience is the one the marketer saw when approving; running the worker later or twice cannot change it.
 - **Alternative:** compiling with `now()` at enqueue time (the audience drifts by the hours between approval and enqueue).
 
@@ -479,6 +512,31 @@ here when the README is written.
   because sending to everyone should be a deliberate click. No users at all is not "everyone".
 - **Alternative:** reject the match-all shape in `compose` (it cannot tell a deliberate broadcast from a failure, and needs the
   database to know "everyone"), or only warn without asking for an acknowledgement (what happened before: it passed silently).
+- **Known limit:** the acknowledgement is one boolean for the whole list, and the audience is counted again inside the approval
+  transaction, so the warnings the approval sees can differ from the ones the marketer was shown (consent changes, the event
+  windows moving with `now()`); the version check does not cover that. The 422 `acknowledgement_required` carries the warnings that
+  applied, so the UI can show them again. Accepted because a warning is a prompt to look, not a contract; the counts that matter
+  for correctness (who is queued) are the ones taken in the approval transaction.
+
+### A campaign nobody can receive is flagged `no_recipients`, and approval is refused whatever the acknowledgement says
+- **Decision:** `campaign.Warnings(audience, channels, unsupported)` also takes the campaign's open channels and adds
+  `no_recipients` when `Audience.Recipients(channels)` is 0: the sum of the matched users who consented to each open channel (a
+  user who consented to both counts twice, as they get two deliveries). That covers a rule that matches nobody, matched users who
+  did not consent to the open channels, a channel selection that leaves out the only consenting channel, and a database with no
+  users. The warning is part of the campaign's `warnings` from the moment the segment exists and follows the marketer's channel
+  changes without a recount (the audience stores both consent counts). `Store.Approve` reads the channels from the locked row,
+  counts the audience in the transaction and, before it looks at the acknowledgement, returns `NoRecipientsError`
+  (`ErrNoRecipients`): 422 `no_recipients` with `details {channels, audience}`. `acknowledge_warnings: true` does not pass it.
+  Nothing is written: the campaign stays `content_ready` at the same version, and fixing the channels or the brief makes the same
+  campaign approvable.
+- **Why:** an approval that queued nothing used to report success and go straight to `completed` with no warning. The other
+  warnings are judgements the marketer can overrule; this one is a fact with nothing to overrule, so an acknowledgement would only
+  teach people to click through. It is not a state of its own and not an exception to the single warnings list, so the UI shows it
+  like the others and only the approval treats it differently.
+- **Alternative:** an acknowledgeable `empty_audience` warning (what the open issue proposed): a zero-recipient campaign is then a
+  deliberate no-op, which no marketer wants, and it would leave a `completed` campaign that never sent anything in the history.
+- `queue.EnqueueTx` still completes a campaign with no deliveries on the spot. After this change it is only reachable when consent
+  changes between the count and the insert of one approval; the queue tests keep covering it.
 
 ### The brief names its channels in the rule; empty means both
 - **Decision:** the segment schema and `segment.Rule` have a `channels` array (`sms`, `email`), required in the schema and
@@ -510,7 +568,8 @@ here when the README is written.
   the current version when it differs). `Store.Approve` locks the row (`FOR UPDATE`), checks the state (so the second approval
   is a 409 `invalid_state`), checks the version, decodes and validates the stored rule and content again, counts the
   audience at the transaction's `now()` (the instant `approved_at` gets, so the count is the audience the queue selects),
-  requires `acknowledge_warnings` when there are warnings, copies rule, content, channels and the warnings into
+  refuses a campaign whose open channels reach nobody (`no_recipients`, whatever the acknowledgement says), requires
+  `acknowledge_warnings` when there are other warnings, copies rule, content, channels and the warnings into
   `approved_rule`, `approved_content`, `approved_channels` and `approved_warnings`, and calls `queue.EnqueueTx` for the
   recipients. `Enqueue` and `Claim` read only the snapshot columns. Checks in the schema keep a campaign from being approved
   without a complete snapshot.
@@ -524,7 +583,7 @@ here when the README is written.
 ### One error shape; codes are the contract
 - **Decision:** every error response, including 404 and 405, is `{"error": {"code", "message", "details"}}`. Codes used:
   `invalid_json` 400, `validation_failed` 422 (details: `[{path, message}]`), `acknowledgement_required` 422 (details: the
-  warnings), `not_found` 404 (also a malformed id), `invalid_state`, `state_changed`, `version_mismatch`, `content_exists`,
+  warnings), `no_recipients` 422 (details: the open channels and the audience counts), `not_found` 404 (also a malformed id), `invalid_state`, `state_changed`, `version_mismatch`, `content_exists`,
   `generation_in_progress` 409, `body_too_large` 413, `llm_refused` 422, `llm_rate_limited` 429 (with `Retry-After` and
   `details.retry_after_seconds` when the provider gave a wait), `llm_invalid_output` and `llm_output_truncated` and `llm_error`
   502, `llm_unavailable` and `llm_busy` 503, `llm_timeout` 504, `internal` 500 (details: the request id, never the cause).
@@ -560,6 +619,21 @@ here when the README is written.
   none behind). A whole segment generation, repairs included, is limited to 2 minutes and a content generation to 5.
 - **Why:** with a real key every request spends credit; the repair loop can make up to nine HTTP requests per task.
 
+### A segment generation ends with the shutdown signal, like a content stream
+- **Decision:** `runSegment` (used by `POST /api/campaigns` and `POST /api/campaigns/{id}/segment`) derives its context from the
+  request and cancels it with the cause `errShuttingDown` when `BeginShutdown` is called, the same signal the content stream
+  listens to. The request then ends with 503 `server_shutting_down` (on create, with `details.campaign_id` of the draft that stays,
+  as for every failed generation), the model request is canceled, and the outcome is counted in `scc_llm_calls_total` as
+  `server_shutting_down`. The error is mapped with `cause()`, so only a context error is replaced by the shutdown; a failure that
+  arrives at the same moment keeps its own face. A request that arrives after `BeginShutdown` is refused before the model is asked
+  (no credit is spent). Counting and saving a segment that finished are not canceled by the shutdown: a generation that was paid
+  for is stored.
+- **Why:** `http.Server.Shutdown` waits for in-flight requests (15 s). A segment request that was still running (the limit is 2
+  minutes) outlived that wait and its client got a cut connection instead of an answer it could act on; the stream already ended
+  with an event. One signal for both keeps the rule simple: when the server is going down, every generation ends with the same code.
+- **Alternative:** let a running segment generation finish (up to 2 minutes, longer than the grace period, so it gets killed
+  anyway), or give it its own shorter deadline during shutdown (a second timeout to explain, and the client still sees a timeout).
+
 ### Stats: one indexed query, and the worker's state next to the counts
 - **Decision:** `StatsSQL` groups `deliveries` by channel, status and `attempts > 0` for one campaign; "retrying" is a queued
   delivery that has been tried. The index is `(campaign_id, status, channel, attempts)` (migration 0005) and the old
@@ -583,10 +657,15 @@ here when the README is written.
   counted by a query when the scrape arrives, so it covers every process that writes deliveries; if that query fails the scrape
   is a 500, not a zero. The worker serves its own `/metrics` and `/healthz` on `WORKER_METRICS_ADDR` (`:9091`, inside the compose
   network only): `scc_worker_attempts_total{channel,result}` (including `refunded`), `scc_worker_circuit_state`,
-  `scc_worker_channel_lock_held` and `scc_worker_heartbeat_errors_total`. The worker package defines an `Observer` interface and
-  does not import Prometheus; `internal/metrics` implements it.
+  `scc_worker_channel_lock_held`, `scc_worker_heartbeat_errors_total` and `scc_worker_maintenance_errors_total{task}`
+  (`recover_leases`, `complete_campaigns`; both series exist at 0 from the start, so a `rate()` or an alert works before the first
+  failure). The worker package defines an `Observer` interface and does not import Prometheus; `internal/metrics` implements it.
 - **Why:** deliveries are written by the worker and read by the api, so neither process could count them alone without the other
-  seeing a partial picture. Using the route pattern keeps the number of series fixed.
+  seeing a partial picture. Using the route pattern keeps the number of series fixed. The maintenance counter exists because a
+  failing maintenance pass is otherwise invisible: leases that expire are not taken back and finished campaigns stay `sending`,
+  while the heartbeat still says the worker is fine. Each failed task is counted once per pass (a pass runs every second) and also
+  logged, and `Counters.MaintenanceErrors` has the total. The test makes one task fail at a time with a statement-level trigger
+  (it fires even when the statement touches no row) and checks that only that task is reported.
 
 ### Dependencies, pinned
 - `github.com/go-chi/chi/v5 v5.5.0` (released 14 October 2026): a small router with route patterns for the metrics labels and
@@ -717,29 +796,12 @@ silent-failure review of the overnight session; defects that were clear-cut were
   `total_orders = 1,000,000` in the database it runs against (the compose soak project is thrown away afterwards).
 
 ### Campaign API and worker (second review, design-level points)
-- **An approval that queues nothing reports success.** A rule that matches nobody, or nobody who consented to the chosen
-  channels, goes `approved` and straight to `completed` with `enqueued` of 0 and no warning, because the warnings cover only
-  "matches everyone" and unsupported criteria. An `empty_audience` warning that needs an acknowledgement would fit; it is a
-  product decision (is a zero-recipient campaign an error or a no-op?). The acknowledgement is also a plain boolean, and the
-  audience is counted again at approval, so the warnings can differ from the ones the marketer saw; the version check does not
-  cover that.
-- **`LLM_MODE=auto` without a key serves the demo mock** (by design, logged and shown in `/api/config`). A key that is blank or
-  misspelled in the compose environment looks like a working system until the badge is read; `LLM_MODE=anthropic` is the strict
-  setting.
-- **While a circuit is open the dispatcher does not touch its lock connection**, so a dead lock session is noticed at the first
-  probe, up to the cooldown (10 s) later. If another worker took the channel meanwhile, both write `worker_channel_status` for a
-  moment and the dashboard can flap; no message can be sent twice (the stale holder claims nothing). A `SELECT 1` on the lock
-  connection each poll would close the window.
-- **A result lost on the last attempt can end as `failed` although the provider accepted the message**: if the outcome of the
-  confirmation request cannot be written four times, the lease expires and recovery marks it "outcome unknown". The text hedges
-  ("may have delivered"), but "provider accepted = database sent" holds less strictly there; the same wording also covers a
-  confirmation that was claimed and never sent (a worker killed in between), where "ended without an answer" is not verified.
-- **Maintenance failures are log-only** (lease recovery, campaign completion): no counter or metric like `RecordErrors` and
-  `HeartbeatErrors`. If they fail for good, rows stay `sending` and campaigns never complete while the heartbeat still says the
-  worker is fine.
-- **A segment generation is not tied to the shutdown signal**: one that is running (up to 2 minutes) outlives the 15 s grace, and
-  its client gets a cut connection instead of `server_shutting_down`; the draft stays, as documented. Only the content stream
-  listens to the shutdown.
+All six points of the second review are closed: the zero-recipient approval, the maintenance counter and the segment generation
+that ignored the shutdown were fixed (see "A campaign nobody can receive is flagged `no_recipients`", the metrics entry and "A segment
+generation ends with the shutdown signal"); the mock fallback of `LLM_MODE=auto`, the dead lock connection and the unwritable last
+result are recorded as known limits with their reasons under "LLM_MODE", "Each channel is served by the worker that holds its
+advisory lock" and "At most 5 send attempts". The acknowledgement being one boolean is a known limit under "A segment that matches
+everyone".
 
 ### Environment
 - The guard hook stopped four commands during the API stage and none was worked around: a `rm` of a temporary copy in `/tmp`
@@ -750,3 +812,10 @@ silent-failure review of the overnight session; defects that were clear-cut were
   Linux counterpart for them.
 - Nothing was blocked by a hook in a way that needs a dotenv change: the optional compose settings were added to
   `.env.example` as comments; no variable is required.
+- The guard hook stopped two commands while the design skills were installed. (1) A staging command that copied the downloaded
+  files into a scan folder and deleted the skill's `scripts/tests/` there with a recursive `rm`: it was redone without any
+  deletion (`tar --exclude`), so the guard was not bypassed, but the rule behind it still means the quarantine folder (a temporary
+  directory outside the repository, as the install policy asks) cannot be deleted by a session; it was left in place. (2) A shell
+  heredoc that appended the scan results to `docs/ai-tooling.md`, probably because the text names commands such as `rm -rf`: the
+  same text was written with the editor tool, with those words described instead of spelled. Also, a first scan of the install set
+  with AgentShield reported "0 files scanned" for skills (it does not read skill folders), which `docs/ai-tooling.md` says plainly.
