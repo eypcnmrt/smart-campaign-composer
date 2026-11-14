@@ -948,9 +948,9 @@ advisory lock" and "At most 5 send attempts". The acknowledgement being one bool
 everyone".
 
 ### Web app (silent-failure review of web/)
-A read-only review of  (no code was run) found fourteen points. Fixed, each with a test: a failed reload while a campaign
+A read-only review of `web/src` (no code was run) found fourteen points. Fixed, each with a test: a failed reload while a campaign
 is on screen was invisible (now a banner with a retry); a request that never answers froze the polling without a word (reads
-now time out after 10 s as  and are retried); a configuration that cannot be read left a spinner on the brief and
+now time out after 10 s as `timeout` and are retried); a configuration that cannot be read left a spinner on the brief and
 content steps; a failed or lost action (channels, content stream, content save) left the screen as it believed it was (the
 page now reads the campaign again when the answer may have been lost or the state is another one); a channel box stayed in a
 state nobody saved; polling asked every second for a campaign that does not exist and ignored Retry-After; a failure of the
@@ -961,13 +961,13 @@ counts were not validated; an older read could overwrite the answer of an action
 gave no hint that a draft may exist.
 Not changed, with the reasons:
 - **No timeout on the calls that wait for the model** (create, segment, and the content stream). They legitimately take tens of
-  seconds and the API already bounds them (); a client limit would cut off work the server finishes and charges for.
+  seconds and the API already bounds them (`llm_timeout`); a client limit would cut off work the server finishes and charges for.
   The page stays usable (the rail and the header work) and leaving it aborts the request. A hung connection there shows the busy
-  state until the marketer leaves; a keep-alive check on the stream ( comments exist) would be the way to detect it.
-- **After a stream that broke off, the retry repeats the same kind of request** ( as before). The page reads the
+  state until the marketer leaves; a keep-alive check on the stream (`: ping` comments exist) would be the way to detect it.
+- **After a stream that broke off, the retry repeats the same kind of request** (`regenerate` as before). The page reads the
   campaign again first, so when the server did save the text it is shown; but if text existed before and the regeneration was
   the one that broke, the retry button still starts a second paid generation. The confirmation dialog is not shown again for it.
-- **Polling after other errors stays at one request a second** (only  and Retry-After change it); a capped back-off
+- **Polling after other errors stays at one request a second** (only `not_found` and Retry-After change it); a capped back-off
   would be kinder to a struggling server, and is cheap to add.
 - The review was static. The fixes are covered by Vitest tests (happy-dom); the failure paths were not tried in a real browser.
 
