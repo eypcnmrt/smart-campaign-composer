@@ -351,3 +351,21 @@ func TestScripted_Stream(t *testing.T) {
 		}
 	})
 }
+
+// The demo mock is slow on purpose (the fields should be seen filling in); every mock the tests build waits for nothing.
+func TestDemoMock_StreamTakesAFewSeconds(t *testing.T) {
+	t.Parallel()
+	demo, ok := newDemoMock().(*Mock)
+	if !ok || demo.cfg.ChunkDelay != DemoChunkDelay {
+		t.Fatalf("newDemoMock() = %#v, want a Mock that waits DemoChunkDelay between pieces", newDemoMock())
+	}
+	pieces := 0
+	brief := "İstanbul’da yaşayan ve son 30 günde sepete ürün ekleyip satın almayan müşterilere %10 indirim SMS’i gönder."
+	// A zero delay keeps the test fast; the piece count is what the demo's delay is multiplied by.
+	if _, err := NewMock(MockConfig{}).Stream(t.Context(), Request{Task: TaskContent, Brief: brief}, func(string) { pieces++ }); err != nil {
+		t.Fatal(err)
+	}
+	if total := time.Duration(pieces) * DemoChunkDelay; total < 3*time.Second || total > 4500*time.Millisecond {
+		t.Errorf("%d pieces at %v take %v, want 3 to 4.5 seconds", pieces, DemoChunkDelay, total)
+	}
+}

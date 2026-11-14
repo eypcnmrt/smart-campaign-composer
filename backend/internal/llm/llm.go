@@ -216,7 +216,12 @@ func FromEnv(getenv func(string) string) (Selection, error) {
 	return sel, nil
 }
 
-func newDemoMock() Client { return NewMock(MockConfig{ChunkDelay: 15 * time.Millisecond}) }
+// DemoChunkDelay is the pause between the pieces of the demo mock's stream. A demo content (about 47 pieces) then takes three to
+// four seconds, long enough to see the fields fill in; at 15 ms it was over in under a second. Only the demo mock waits: the
+// tests build their mocks with a zero delay.
+const DemoChunkDelay = 75 * time.Millisecond
+
+func newDemoMock() Client { return NewMock(MockConfig{ChunkDelay: DemoChunkDelay}) }
 
 // fallbackEnabled reads ANTHROPIC_FALLBACK. Empty and the usual spellings of "yes" keep the server-side
 // refusal fallback on (the documented default). Any other value, "off" and also a typo, turns it off: a
