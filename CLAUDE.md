@@ -16,6 +16,12 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - Packages added in `backend/internal/`: `migrate`, `db`, `testdb`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `worker` (queue dispatcher, circuit breaker, channel lock, heartbeat), `soak`, `campaign` (state machine, store, approval, stats), `api` (chi handlers, SSE stream), `metrics` (Prometheus); SQL in `backend/migrations/`
 - `make fmt` / `make vet` / `make test-unit` - Go formatting, `go vet`, `go test ./...` (local, no Docker, no API key)
 - `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per target; `-race` runs later in Docker (needs a C compiler on Windows)
+- Web (`web/`): npm, vite, vitest and vue-tsc run only in a pinned node container, never on the host (third-party package code stays off
+  this machine). `sh scripts/web.sh <command>` mounts only `web/`, keeps `node_modules` and the npm cache in named volumes and turns
+  lifecycle scripts off: `sh scripts/web.sh npm ci`, `sh scripts/web.sh npm run typecheck`, `sh scripts/web.sh npx vitest run`,
+  `sh scripts/web.sh npm install --save-exact pkg@x.y.z` (writes package.json and the lock file), `sh scripts/web.sh dev` (dev server on
+  127.0.0.1:5173, proxies `/api` to the host's :8080, so run `docker compose up -d` first). Only read-only queries such as `npm view` run on the host.
+  Pin exact versions that are at least two weeks old and keep `npm audit` clean; there are no dotenv files for Vite (settings come from `vite.config.ts` and `/api/config`).
 - Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`
   and run vet in a container: `docker run --rm -v "$PWD/backend:/src:ro" -w /src -e GOCACHE=/tmp/gocache golang:1.27 go vet ./...`
 - Go commands run in a container, not on Windows (Application Control blocks new binaries). From PowerShell, with module and
@@ -28,7 +34,7 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
   `docker run --rm --network none -v "${PWD}:/work:ro" -w /work python:3.14.10-slim-trixie python -I -B .claude/skills/ui-ux-pro-max/scripts/search.py "marketing campaign dashboard" --design-system`
   (other modes: `"<query>" --domain ux|chart|color|typography|...`, `"<query>" --stack vue`). Only `--persist` writes, and only to `design-system/<slug>/`;
   to allow it, mount the repo writable (`:rw` instead of `:ro`) and add `--output-dir /work`. The upstream `SKILL.md` is kept unmodified.
-- Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue app will live in `web/`
+- Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue 3 + Vite + TypeScript app is in `web/` (no UI library, no Pinia; tokens in `web/src/styles/tokens.css`, design notes in `design-system/MASTER.md`)
 - Packages in `backend/internal/`: `segment` (rule DSL, validation, SQL, JSON schema), `content` (limits, variables, render, SMS info),
   `streamjson` (partial JSON for streamed text), `llm` (`Client`, Anthropic + mocks, `FromEnv` with `LLM_MODE`), `compose` (prompts and repair loop).
   Tests never need an API key: the Anthropic client is tested against a fake API server, the repair loop with `llm.Scripted`.
