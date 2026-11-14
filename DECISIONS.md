@@ -629,11 +629,13 @@ here when the README is written.
   covered by the content validator and the repair loop, not by this check.
 
 ### The content stream: reconnect-safe, cancel-safe, never blocking the model
-- **Decision:** `GET /api/campaigns/{id}/content/stream` is Server-Sent Events: `attempt`, then `delta {field, text}` (or `raw`),
+- **Decision:** `POST /api/campaigns/{id}/content/stream` (it was a GET until the overnight session; see "The content stream is a POST,
+  and a HEAD is answered by the GET routes") is Server-Sent Events: `attempt`, then `delta {field, text}` (or `raw`),
   then `done {campaign}` or `error {error}`, always exactly one of the last two. The first line is `retry: 3600000`.
   - A campaign that is already `content_ready` is only generated again with `?regenerate=true`; otherwise 409 `content_exists`
-    before the model is called. A browser's `EventSource` reconnects by itself when the connection drops and again after the
-    server ends a stream; without the rule that would spend credit and overwrite hand edits.
+    before the model is called. A browser's `EventSource` (a GET) reconnects by itself when the connection drops and again after the
+    server ends a stream; without the rule that would spend credit and overwrite hand edits. The client reads the stream with
+    `fetch` (a POST) and cannot reconnect by itself, but the rule stayed: a retrying client must not spend credit twice.
   - The save is conditional on the version the stream started at: an edit made while the model writes wins, the stream ends with
     `state_changed`, and the generated text is dropped. The save does not depend on the connection: a generation that finished
     is saved even if the client left in that instant (it was paid for).
@@ -683,7 +685,8 @@ here when the README is written.
   17.6 container stays empty even after `VACUUM` (`relallvisible` 0, `pg_visibility` agrees); autovacuum fills it in a running
   database and the planner then prefers the index-only scan. The completion check is a `Nested Loop Anti Join` with an index scan
   on the new index and an index-only subplan for the failed check.
-- **Why:** the dashboard polls once a second; both queries stay off the table.
+- **Why:** the dashboard polls once a second; both queries stay off the table. (All the reads of a stats request run in one
+  `REPEATABLE READ` read-only transaction since the closing session: see "Stats are read in one snapshot".)
 
 ### Metrics: the api counts requests and generations, the database counts deliveries, the worker exposes its own
 - **Decision:** `/metrics` of the api has `scc_http_request_duration_seconds{method,route,status}` (route pattern, never the raw
@@ -795,20 +798,24 @@ here when the README is written.
   sends `retry: 3600000` for the same reason); it cannot send a custom header or be aborted from code; and it cannot show a JSON
   error body. With `fetch` a generation starts only when the marketer asks, and leaving the page aborts it (the server cancels the
   model call when the connection closes).
-- **Mock visibility:** the demo mock writes in pieces of 6 characters with 15 ms between them, so the text is visibly written
-  (about 2.3 s for the demo content through nginx). Checked with `curl -N` through nginx: the first line arrives after about 45 ms and
-  the lines of the stream keep arriving until `done` at 2.35 s, so nothing buffers it.
+- **Mock visibility:** the demo mock writes in pieces of 6 characters, so the text is visibly written. The pause between the pieces
+  was 15 ms when this was first checked (about 2.3 s for the demo content through nginx: with `curl -N` the first line arrived after
+  about 45 ms and the lines kept arriving until `done` at 2.35 s, so nothing buffers it); it is 75 ms now, three to four seconds (see
+  "The demo mock streams for three to four seconds").
 
 ### Polling, not a second stream, for the delivery
 - **Decision:** `useStatsPolling` asks `/stats` once a second while the campaign is `approved` or `sending`, scheduling the next
   request when the last one has ended (a slow server is not buried in requests), keeps the last numbers when a request fails
-  (and says so in a line), and stops when the campaign is no longer sending or the page is left (the request in flight is aborted).
+  (and says so in a line) and then waits longer between requests (1, 2, 4, 8, 10 s: see "Polling backs off after failures"; the one
+  second holds only while the answers work), and stops when the campaign is no longer sending or the page is left (the request in
+  flight is aborted).
 - **Rate:** the rate per channel is the change of the `sent` count between the oldest and the newest measurement inside a window
   of 5 s, from `performance.now()`, and nothing is shown before the window spans 2 s, so one slow answer or one burst moves the
   figure only by its share. It is labelled "kabul edilen mesaj/s" (accepted messages per second): the API does not say how many
   attempts reached the provider, only how many were accepted. The limit is per channel in the worker (each channel has its own
-  limiter), so every channel bar has its own 100/s line and there is no line on the total. The 100 is the worker's default; the
-  API does not report the configured value, so a deployment with another `WORKER_RATE` would draw a wrong line (a known limit).
+  limiter), so every channel bar has its own 100/s line and there is no line on the total. *Superseded:* the 100 used to be a number
+  in the page; since "Send evidence" the worker reports its configured rate per channel and stats return it as `rate_limit`, so a
+  deployment with another `WORKER_RATE` draws its own line, and none when the worker never reported one.
 - **Why polling:** one request a second against an indexed query (see "Stats") is cheap, needs no new endpoint and no connection
   state to recover after a restart, and the numbers are the database's, not a sum of events a client could miss.
 
@@ -974,7 +981,8 @@ reporting and in the stream's write path.
 - **Rate cap:** the worker writes its configured `RatePerSecond` into `worker_channel_status.rate_per_second` with each heartbeat
   (migration 0007; NULL = not reported); stats return it as `rate_limit` per channel and the dashboard draws that value. When it is
   missing there is no line and no caption (the page no longer has a number of its own). Standby workers report nothing, as before.
-- **Timeline:** `channels.<ch>.timeline = {start, bucket_seconds, accepted[]}`: messages whose delivery was recorded as sent in each
+- **Timeline:** `channels.<ch>.timeline = {start, bucket_seconds, accepted[], average_per_second}` (the average was added in "Speeds are
+  per channel"): messages whose delivery was recorded as sent in each
   bucket, from the second of the approval to the last message (or to now while sending, by the database clock). **At most 600
   buckets**: a campaign longer than that is counted in the narrowest of 2, 5, 10, 30 s ... buckets that fit, so the bars of a long
   send do not change width every second. `sent_at` is the time the worker *recorded* success, which is when the provider's answer
@@ -1020,8 +1028,10 @@ reporting and in the stream's write path.
   or remembered, so the retry after the outage is accepted once. *Why not something else:* the scenario needs a provider that
   fails exactly while the test says so, and a chaos rate cannot do that. The switch is unauthenticated on purpose: it exists only
   on the provider's port, which is not published, and only when asked for; a provider that anybody can switch off must never be
-  started with `MOCK_CONTROL`. Unit-tested, including "the switch is not there unless asked for".
-- **Scenarios (8 tests, about one minute of test time, 91 s for the whole `make e2e` with the images in the cache):**
+  started with `MOCK_CONTROL`. Unit-tested, including "the switch is not there unless asked for". A second switch of the same kind,
+  `POST /control/throttle-next/N` (the next N messages get a 429), came with the closing session (see "The demo provider fails a little").
+- **Scenarios (9 tests since the closing session, about 1.5 minutes of test time, 125 s for the whole `make e2e` including the
+  image builds):** the list in five states and a send with exactly six retries (see "The list picture shows five different campaigns");
   brief to a finished delivery (rule text, counts that agree, the content seen in at least two partly written states, an unknown
   variable that blocks saving, the fix, approval, the sent counts equal the audience counts, a chart per channel and the summary
   line); a rule that matches everybody (warning, the send button needs the acknowledgement); a regenerated segment (hint on both
@@ -1040,12 +1050,22 @@ reporting and in the stream's write path.
   the test now says what is true.
 - **1.5 measured:** at a 1170 px window the list page keeps 25 px from the left edge and from the right (the gutter is 1.5 rem from
   768 px up); the test asserts at least 16 px and one "Yeni kampanya" link. No change was needed to the layout.
-- **Screenshots:** `make e2e SCREENSHOTS=1` writes `docs/screenshots/*.png` (eight pictures, full page, from the test run: the
+- **Screenshots:** `make e2e SCREENSHOTS=1` writes `docs/screenshots/*.png` (nine pictures, full page, from the test run: the
   data is the seeded fake users and the demo model's text, no real data). A normal run does not touch them. They are
-  not byte-stable between runs (timestamps, counts of the campaigns made by earlier tests are in some of them).
+  not byte-stable between runs (timestamps, counts of the campaigns made by earlier tests are in some of them). The list
+  picture is made by the scenario that builds its own five campaigns and runs first, on an empty database.
 - **No retries, one worker:** the scenarios share one database, and a retry would hide a flaw a person would meet.
-- **Not done:** no test for the "Yeniden deneniyor" line in the browser (the polling is covered by vitest with fake timers; stopping
-  the API container would need a second switch); no Firefox/WebKit project (one engine keeps `make e2e` at about a minute and a half).
+- **What the browser tests cover, and what they do not.** *In a real browser, against the real stack:* the whole way from the brief to a
+  finished delivery; an unknown variable that blocks saving; the confirmation before regenerating over edited text; the "matches
+  everybody" acknowledgement; a provider outage (the "provider unreachable" badge, and the delivery that finishes once it is back);
+  a send with exactly six retries (the summary line, nothing failed, nothing left to retry); the list in five states; axe on the list
+  and on every step; a phone width; the keyboard alone; the side margins at 1170 px. *Not tried in a browser:* the failure paths
+  of the app's own connection: a stats request that fails or never answers ("Yeniden deneniyor (N sn)", the back-off, "Güncelleme
+  durdu"), a campaign that disappears (`not_found`), a content stream that breaks off or is refused (`llm_busy`,
+  `llm_unavailable`, `content_exists`) and the retry with its confirmation, a lost answer to a creation or an action, a page load that
+  fails after an update. Those would need a way to cut the api or the network from the test (a second switch, or a proxy in front
+  of `web`); they are covered by Vitest with a fake `fetch` (happy-dom), which is not a browser. No Firefox/WebKit project (one
+  engine keeps `make e2e` at about two minutes).
 
 ### Fixed after the silent-failure review of the overnight session
 - **A finished campaign could say "worker not running".** The provider health is the worker's, per channel, not the campaign's; a
@@ -1057,8 +1077,8 @@ reporting and in the stream's write path.
 - **A generation saved after its client left** left no trace (the comment promised one); it is logged at info level now.
 - **e2e:** a failed `make e2e` printed the stack's last log lines before removing it (they were discarded); `forbidOnly` stops a
   leftover `test.only` from shrinking the run; the layout test waits for a row of the list and fails when it measured nothing (and
-  makes its own campaign, so it passes alone); the summary assertion reads the average and the peak and checks them (> 0, peak
-  <= 200 for two channels capped at 100/s); `tabTo` no longer turns a wrong locator into "Tab did not reach it"; `settled()`
+  makes its own campaign, so it passes alone); the summary assertion read the average and the peak and checked them (> 0, peak
+  <= 200 for two channels capped at 100/s; since the closing session it reads them per channel, each against its own cap); `tabTo` no longer turns a wrong locator into "Tab did not reach it"; `settled()`
   ignores infinite animations; the axe report lists lesser findings next to a serious one, as its comment said.
 
 ## The closing session (open issues of the overnight session and the screenshots)
@@ -1204,38 +1224,56 @@ reporting and in the stream's write path.
 
 ## Open issues
 
-(Things that were not finished or need a human decision; one entry per issue. The first block comes from the
-silent-failure review of the overnight session; defects that were clear-cut were fixed and are listed under
-"Fixed after the review" above.)
+(What was not finished, and what was decided to stay as it is. "Settled" items are kept on purpose, with the reason, and wait for
+nobody. "Closed" items say where they were closed. What is left open is the low-priority list at the end of each block.)
 
-### Overnight session (judgement calls from the silent-failure review)
-- **A malformed optional `timeline` or `summary` rejects the whole stats response** (`bad_response`), so valid counts are replaced by
-  "Güncel durum alınamıyor" while the server is fine. Dropping just the decoration (and logging it) would keep the counts; strict
-  contract checking was kept because a shape the client does not understand is a version mismatch worth seeing.
-- **The stats reads are not one snapshot** (counts, bounds, timeline, heartbeat are separate queries). A message recorded between the
-  bounds query and the bucket query is not in the chart for one poll (it heals on the next). A `REPEATABLE READ` read-only
-  transaction would make it exact; not done, the cost is a longer-held snapshot on every poll.
-- **The chart says "kabul edilen" but buckets by `sent_at`**, the time the worker recorded the answer, not the provider's clock. A bar
-  can be over the cap while the provider's own rate was not. The label and the DECISIONS entry say what is measured; renaming the
-  label to "kaydedilen" is the alternative.
-- **"Yeniden deneniyor (N sn)" is the wait that was scheduled, not a countdown**, so it keeps its number while the next request is in
-  flight (up to the 10 s timeout). A live countdown would re-render every second against a struggling server.
-- **`KEEP=1` and an outage left on by a killed run** carry into the next run (the `afterEach` reset needs the process). A
-  `globalSetup` that switches the outage off would close it.
-- **A HEAD on a GET route runs the whole handler** (queries included), as the status and headers must match. Accepted.
-- **`DECISIONS.md` line about the content stream** in the earlier "Streaming" section still says GET; the entry "The content stream
-  is a POST" supersedes it.
+### Settled on purpose (not open)
+- **The stats response has a strict contract.** A malformed optional `timeline` or `summary` rejects the whole response
+  (`bad_response`) and the screen says "Güncel durum alınamıyor" although the counts were fine. Kept: the client and the server are
+  deployed together, so a shape the client does not understand is a version mismatch, and it must be seen, not smoothed over by
+  dropping the part that does not fit. (A field that older servers did not send, like `timeline.average_per_second`, is optional;
+  a field that is there and wrong is not.)
+- **The chart says "kabul edilen" and buckets by `sent_at`.** `sent_at` is the time the worker *recorded* the answer, not the provider's
+  clock, so a bar can be over the cap while the provider's own rate was not. Kept: "kaydedilen" would be vaguer for a marketer, and what
+  is measured is written down here and in "Send evidence": messages per second, bucketed by the `sent_at` of the delivery.
+- **"Yeniden deneniyor (N sn)" is not a countdown.** N is the wait that was scheduled, so it keeps its number while the next request is
+  in flight (up to the 10 s timeout). Kept: a live countdown would re-render every second against a server that is already struggling.
+- **A HEAD on a GET route runs the whole handler,** queries included. Kept: its status and headers must be those of the GET, and
+  since the content stream became a POST no GET writes anything, so running it has no side effect (see "The content stream is a POST,
+  and a HEAD is answered by the GET routes").
+- **No client timeout on the calls that wait for the model** (create, segment, the content stream). They legitimately take tens of
+  seconds and the server bounds them (`llm_timeout`). Kept: if the client cut the request, the server would still finish the work and
+  the marketer would still be charged for it; leaving the page already aborts the request. A hung connection shows the busy state
+  until the marketer leaves; a keep-alive check on the stream (`: ping` comments exist) would be the way to detect it.
+- **The low-priority points of the LLM layer and the worker** (the two lists below) are real but small; they are documented, which is
+  enough.
+
+### Closed in the closing session
+- **Stats were not one snapshot** → "Stats are read in one snapshot" (one `REPEATABLE READ` read-only transaction, a test that failed
+  before, 0.3 ms more per request).
+- **The demo mock inverted or dropped criteria** ("sepete ürün eklemeyen", "son 400 gün", an amount without a direction) → "The demo
+  mock never turns a criterion around and never drops one without saying so".
+- **"Tekrar dene" after a broken regeneration started a second paid generation without asking** → "Every regeneration over existing
+  text asks the same question". (This replaces the bullet that was here under "Web app": the retry repeated the same kind of request.)
+- **`KEEP=1` or a killed run left the provider's outage on for the next run** → "The e2e run closes an outage an earlier run left on".
+- **Polling after other errors stayed at one request a second** → already closed by "Polling backs off after failures"; the bullet under
+  "Web app" was left standing and is gone now.
+- **Stale lines of this file:** the content stream was still a GET in "The content stream: reconnect-safe..."; the demo mock's pace
+  (15 ms, 2.3 s); the polling "stays at one a second"; the rate limit that "the API does not report"; "the failure paths were not tried in
+  a real browser" (now says what the browser tests cover and what they do not, under "Browser tests"); the counts of scenarios and pictures.
+- **From the screenshots:** the speed that was two channels added together → "Speeds are per channel"; no retries in the demo →
+  "The demo provider fails a little by default"; fifteen identical campaigns in the list picture → "The list picture shows five different
+  campaigns".
 
 ### LLM layer (internal/llm, internal/compose)
 - Duplicate JSON keys resolve to last-wins in `segment.Decode` and `content.Parse` (the preview extractor rejects them). The
   stored snapshot is the validated model text; `jsonb` applies the same last-wins rule, so the two agree (see "Approval").
-- The demo mock drops or inverts some criteria: an amount without a direction ("500 TL altında") produces no condition and
-  no `unsupported_criteria` entry, "son 400 gün" becomes 30 days, "sepete ürün eklemeyen" selects people who did add to
-  cart. The mocks also return a bare `ctx.Err()` where the real client returns `ErrTimeout`. Demo-only, low.
+- **Demo mock, what is left:** the mocks return a bare `ctx.Err()` where the real client returns `ErrTimeout`. Demo-only, low.
 - Low: an empty `end_turn` answer costs a repair round instead of its own error; `model_context_window_exceeded` is
   reported as `ErrMaxTokens` (the remedy is a shorter prompt, not a larger limit); `RefusalError.Error()` omits the
   provider's explanation; an error that is not an API error (for example a local schema-marshal failure) is classed
   `ErrUnavailable` and would be retried; a blank city renders as "Türkiye" inside prose.
+
 
 ### Worker, queue and operations
 - Low: `Finish` reports every "no row updated" as a lost lease (it may also be a deleted campaign); `seed` treats a
@@ -1263,17 +1301,10 @@ unsaved edits were lost when leaving by any route but the step rail; failed page
 render errors left a dead link or a blank part (now a banner with a reload, and the error is still logged); the audience
 counts were not validated; an older read could overwrite the answer of an action; a lost answer to the creation of a campaign
 gave no hint that a draft may exist.
-Not changed, with the reasons:
-- **No timeout on the calls that wait for the model** (create, segment, and the content stream). They legitimately take tens of
-  seconds and the API already bounds them (`llm_timeout`); a client limit would cut off work the server finishes and charges for.
-  The page stays usable (the rail and the header work) and leaving it aborts the request. A hung connection there shows the busy
-  state until the marketer leaves; a keep-alive check on the stream (`: ping` comments exist) would be the way to detect it.
-- **After a stream that broke off, the retry repeats the same kind of request** (`regenerate` as before). The page reads the
-  campaign again first, so when the server did save the text it is shown; but if text existed before and the regeneration was
-  the one that broke, the retry button still starts a second paid generation. The confirmation dialog is not shown again for it.
-- **Polling after other errors stays at one request a second** (only `not_found` and Retry-After change it); a capped back-off
-  would be kinder to a struggling server, and is cheap to add.
-- The review was static. The fixes are covered by Vitest tests (happy-dom); the failure paths were not tried in a real browser.
+Not changed, with the reasons: the one point about the model calls without a client timeout is under "Settled on purpose"; the two points
+about the retry after a stream that broke off and about polling after other errors are closed (above). The review was static; the
+fixes are covered by Vitest tests (happy-dom). What a real browser has been run against is listed under "Browser tests" ("What the
+browser tests cover, and what they do not").
 
 ### Environment
 - The guard hook stopped four commands during the API stage and none was worked around: a `rm` of a temporary copy in `/tmp`
@@ -1300,3 +1331,6 @@ Not changed, with the reasons:
 - **UTF-8 check: one command was stopped by the guard hook.** A `grep` over the API test files whose pattern contained the bare
   word for the process environment was read as an attempt to dump it. It was not retried in another form; the files were read
   with the editor's read tool instead (they hold no secrets) and the owner is told in the session report.
+- **Closing session: no command was stopped by a hook.** Every Go and npm command ran in the containers of CLAUDE.md; the guard was
+  not asked anything it refused, and nothing was worked around. A flaky provider test (a 50 ms client timeout that a loaded machine
+  missed) failed once in a full run and was hardened, see "The demo provider fails a little by default".
