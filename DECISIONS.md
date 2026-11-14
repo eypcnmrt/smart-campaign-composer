@@ -1090,6 +1090,45 @@ reporting and in the stream's write path.
 - **Choice:** removing the two summary fields rather than keeping and relabelling them ("iki kanalın toplamı"): nothing needs a total
   speed, and a number that has to be explained is a number that gets misread. The e2e test now reads the figures from each channel card.
 
+### The demo mock never turns a criterion around and never drops one without saying so
+- **Problem:** evaluators will most likely try the demo model. It read "sepete ürün eklemeyen" as people who *did* add to the cart,
+  "son 400 gün" as 30 days, "5.000 TL" as 0 TL, and a "500 TL" without a direction as nothing at all (no condition and no
+  `unsupported_criteria`). The real model is told to do none of this; the demo showed it.
+- **Decision (`llm/mock_segment.go`, the mock's reading of a segment brief was rewritten; content is unchanged):** the brief is cut into
+  clauses (at punctuation, after an "-ip/-up" gerund and before "ama"), because a negation belongs to the verb it is attached to:
+  in "sepete ürün ekleyip satın almayan" the purchase is negated, the cart is not. A verb form is read as stem + optional
+  negation (-me/-ma) + ending (-yen/-yan, -mış, -dı, -yip, ... with the plural and case a participle takes: "almayanlara"), so every
+  negative ending is recognised on every action the mock knows (cart: ekle, at, koy, bırak; purchase: satın al, alışveriş yap/et,
+  sipariş ver; place: ol, yaşa, otur, bulun; language: konuş; spend: harca). Negation also reaches "dışındaki/hariç", cities
+  (`neq` / `not_in`), languages (`neq` / `not_in`) and amounts (the direction flips: "1000 TL üzeri harcamayan" is `lt 1000`).
+- **Periods:** "son N gün/hafta/ay/yıl" (N as digits or a small number word) and "N gün içinde"; a week is 7 days, a month 30,
+  a year 365 (the vocabulary has no calendar). Beyond `segment.MaxWithinDays` (365), zero, an unresolvable value ("birkaç"), no value
+  ("son günlerde") and calendar phrases ("geçen ay", "bu hafta", "dün") are put into `unsupported_criteria` with the reason, and the
+  events of that clause are **not** made with some other period (before: silently 30 days). A period with no event to belong to is
+  reported too. An event whose brief names no period still gets 30 days, and the explanation says it was assumed.
+- **Amounts:** thousands separators ("5.000"), decimals ("99,5"), "bin" and "milyon". The direction comes from the words around the amount
+  (üzeri/ve üzeri/en az, altında/en fazla/kadar, "den fazla"); an amount without one is reported ("yön belirtilmemiş") instead of
+  guessed. An amount followed by an offer word ("50 TL indirim", "kupon", "puan") belongs to the offer, not to the audience, and is
+  skipped on purpose. A spending word without any amount ("çok harcayan") is reported. A count of orders ("en az 3 sipariş") is reported
+  as not read, and its words are kept out of the purchase reading.
+- **Any negated verb the mock has no rule for** ("bülten okumayan", "mesaj almayan") is reported as unresolved, whatever its stem: a
+  recognised pattern whose value cannot be resolved always ends up in `unsupported_criteria`. A bare "almayan" counts as a purchase only
+  right after a cart clause ("sepete ekleyip almayan"). A clause that contradicts itself (a cart that was added and not added) is reported.
+- **Last guard:** every condition is validated alone by the real `segment.Validate` before it is kept; one the vocabulary refuses is
+  reported instead of failing the whole rule. A fuzz target (`FuzzDemoSegment`) checks that any text gives a valid rule and never panics
+  (40 s, about 300,000 inputs, clean).
+- **Limits that remain, said plainly:** it is still a keyword reader. Free text it does not recognise at all (a criterion in words it has
+  no rule for) is not detected as a gap; the explanation line shows what was understood, and a rule that expresses nothing falls back to
+  "everyone" with a warning. One period per clause is used for all events of the clause, and the first period of the brief for clauses
+  without one.
+- **A bug the new reading found in the old tests:** the API end-to-end brief ("... satın almayanlara %20 indirim") ended in "-lara"; the
+  first version of the new reading skipped it and the purchase condition vanished (the independent count caught it). Case endings after a
+  participle are now part of the verb form.
+- **Tests:** `TestMock_segmentNeverInvertsOrDropsACriterion` (about 70 briefs, among them the three of the review, each checked for the
+  exact conditions and the reasons), `TestMock_negativeEndingsAreNeverReadAsPositive` (every negative ending on every action),
+  `TestMock_participlesWithPluralAndCase`, the fuzz target. The old test "the window is clamped to the supported range" asserted
+  the very behaviour that was wrong (999 days became 30) and now asserts the report.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the

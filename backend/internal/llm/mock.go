@@ -6,13 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
-
-	"smartcampaign/internal/segment"
 )
 
 var (
@@ -96,112 +93,7 @@ var fold = func() func(string) string {
 	return func(s string) string { return strings.ToLower(r.Replace(s)) }
 }()
 
-var (
-	daysRe     = regexp.MustCompile(`son (\d{1,3}) gun`)
-	amountRe   = regexp.MustCompile(`(\d{2,7})\s*(?:tl|lira)`)
-	discountRe = regexp.MustCompile(`%\s*(\d{1,2})|yuzde\s*(\d{1,2})`)
-)
-
-func demoSegment(brief string) string {
-	b := fold(brief)
-	var conds []any
-	var parts, unsupported []string
-
-	attr := func(field, op string, value any) map[string]any {
-		return map[string]any{"type": "attribute", "field": field, "op": op, "value": value}
-	}
-	event := func(name, op string, days int) map[string]any {
-		return map[string]any{"type": "event", "event": name, "op": op, "within_days": days}
-	}
-
-	var cities []any
-	var cityNames []string
-	for _, c := range segment.Cities() {
-		if strings.Contains(b, fold(c)) {
-			cities = append(cities, attr("city", "eq", c))
-			cityNames = append(cityNames, c)
-		}
-	}
-	switch len(cities) {
-	case 0:
-	case 1:
-		conds = append(conds, cities[0])
-		parts = append(parts, cityNames[0]+" şehrindeki")
-	default:
-		conds = append(conds, map[string]any{"type": "any_of", "conditions": cities})
-		parts = append(parts, strings.Join(cityNames, "/")+" şehirlerindeki")
-	}
-
-	switch {
-	case strings.Contains(b, "ingilizce"):
-		conds = append(conds, attr("language", "eq", "en"))
-		parts = append(parts, "İngilizce konuşan")
-	case strings.Contains(b, "turkce"):
-		conds = append(conds, attr("language", "eq", "tr"))
-		parts = append(parts, "Türkçe konuşan")
-	}
-
-	days := 30
-	if m := daysRe.FindStringSubmatch(b); m != nil {
-		if n, err := strconv.Atoi(m[1]); err == nil && n >= 1 && n <= 365 {
-			days = n
-		}
-	}
-	negative := strings.Contains(b, "yapmayan") || strings.Contains(b, "almayan") || strings.Contains(b, "vermeyen") || strings.Contains(b, "etmeyen")
-	if strings.Contains(b, "sepet") {
-		conds = append(conds, event("cart_add", "performed", days))
-		parts = append(parts, fmt.Sprintf("son %d günde sepete ürün ekleyen", days))
-	}
-	switch {
-	case negative && (strings.Contains(b, "satin") || strings.Contains(b, "alisveris") || strings.Contains(b, "siparis")):
-		conds = append(conds, event("purchase", "not_performed", days))
-		parts = append(parts, fmt.Sprintf("son %d günde satın almayan", days))
-	case strings.Contains(b, "satin alan") || strings.Contains(b, "alisveris yapan") || strings.Contains(b, "siparis veren"):
-		conds = append(conds, event("purchase", "performed", days))
-		parts = append(parts, fmt.Sprintf("son %d günde satın alan", days))
-	}
-
-	if m := amountRe.FindStringSubmatch(b); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		if strings.Contains(b, "ustu") || strings.Contains(b, "uzeri") || strings.Contains(b, "fazla") {
-			conds = append(conds, attr("total_spent", "gte", n))
-			parts = append(parts, fmt.Sprintf("toplam %d TL ve üzeri harcayan", n))
-		}
-	}
-
-	for _, word := range []string{"cinsiyet", "kadin", "erkek", "yas "} {
-		if strings.Contains(b, word) {
-			unsupported = append(unsupported, "Cinsiyet ve yaş kriterleri desteklenmiyor")
-			break
-		}
-	}
-	if len(conds) == 0 {
-		// Nothing could be expressed, so the rule falls back to the catch-all the real prompt asks for. Unless the brief
-		// itself asks for everyone, that is reported as an unsupported criterion: the scenario the API must flag.
-		conds = []any{attr("language", "in", []any{"tr", "en"})}
-		if !containsAny(b, "herkes", "tum musteri", "tum kullanici", "butun musteri") {
-			unsupported = append(unsupported, "Demo modu bu brief'ten bir kural çıkaramadı; tüm kullanıcılar seçildi")
-		}
-		parts = append(parts, "tüm")
-	}
-
-	// The channels the brief names; none named is an empty list.
-	channels := []string{}
-	if strings.Contains(b, "sms") {
-		channels = append(channels, "sms")
-	}
-	if containsAny(b, "e-posta", "eposta", "email", "mail") {
-		channels = append(channels, "email")
-	}
-
-	explanation := "Demo modu: " + strings.Join(parts, ", ") + " kullanıcılar"
-	return mustJSON(map[string]any{
-		"conditions":           conds,
-		"unsupported_criteria": append([]string{}, unsupported...),
-		"explanation":          explanation,
-		"channels":             channels,
-	})
-}
+var discountRe = regexp.MustCompile(`%\s*(\d{1,2})|yuzde\s*(\d{1,2})`)
 
 func containsAny(s string, words ...string) bool {
 	for _, w := range words {

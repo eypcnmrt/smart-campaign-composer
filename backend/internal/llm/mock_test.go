@@ -52,9 +52,10 @@ func TestMock_segment(t *testing.T) {
 			want:  []string{`"within_days":30`},
 		},
 		{
-			name:  "window is clamped to the supported range",
+			name:  "a window beyond the vocabulary is reported, not shortened",
 			brief: "son 999 gün sepete ekleyen",
-			want:  []string{`"within_days":30`},
+			want:  []string{`"op":"in"`, `999`, `365`},
+			avoid: []string{`"within_days"`},
 		},
 		{
 			name:  "buyers",
