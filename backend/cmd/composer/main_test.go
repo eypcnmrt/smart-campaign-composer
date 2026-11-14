@@ -5,6 +5,7 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestRun(t *testing.T) {
@@ -16,7 +17,7 @@ func TestRun(t *testing.T) {
 		wantOut  string
 		wantErr  string
 	}{
-		{"api", []string{"api"}, 0, "composer api: not implemented yet", ""},
+		{"api without a database", []string{"api"}, 1, "", "DATABASE_URL is not set"},
 		{"migrate without a database", []string{"migrate"}, 1, "", "DATABASE_URL is not set"},
 		{"worker without a database", []string{"worker"}, 1, "", "DATABASE_URL is not set"},
 		{"seed without a database", []string{"seed"}, 1, "", "DATABASE_URL is not set"},
@@ -84,6 +85,50 @@ func TestValidateProviderURL_doesNotEchoTheValue(t *testing.T) {
 	err := validateProviderURL("ftp://user:secret-pw@provider")
 	if err == nil || strings.Contains(err.Error(), "secret-pw") {
 		t.Fatalf("err = %v, want a rejection that does not contain the credentials", err)
+	}
+}
+
+func TestRun_apiRejectsBadSettings(t *testing.T) {
+	for name, tt := range map[string]struct {
+		env     map[string]string
+		wantErr string
+	}{
+		"parallelism is not a number": {map[string]string{envLLMMaxParallel: "many"}, envLLMMaxParallel},
+		"parallelism is zero":         {map[string]string{envLLMMaxParallel: "0"}, envLLMMaxParallel},
+		"stale limit is not valid":    {map[string]string{envWorkerStale: "soon"}, envWorkerStale},
+		"stale limit is negative":     {map[string]string{envWorkerStale: "-5s"}, envWorkerStale},
+		// the real model was asked for and there is no key: the api must stop, not fall back to the demo
+		"anthropic mode without a key": {map[string]string{"LLM_MODE": "anthropic", "ANTHROPIC_API_KEY": ""}, "needs ANTHROPIC_API_KEY"},
+		"an unknown llm mode":          {map[string]string{"LLM_MODE": "gpt"}, "LLM_MODE must be"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Setenv(envDatabaseURL, "")
+			t.Setenv("LLM_MODE", "")
+			t.Setenv("ANTHROPIC_API_KEY", "")
+			for k, v := range tt.env {
+				t.Setenv(k, v)
+			}
+			var stdout, stderr bytes.Buffer
+			if code := run(context.Background(), []string{"api"}, &stdout, &stderr); code != 1 {
+				t.Fatalf("code = %d, want 1; stderr %q", code, stderr.String())
+			}
+			if !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Fatalf("stderr = %q, want it to contain %q (and not the missing database)", stderr.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestApiSettings_defaults(t *testing.T) {
+	addr, cfg, err := apiSettings(func(string) string { return "" })
+	if err != nil || addr != ":8080" || cfg.LLMConcurrency != 0 || cfg.WorkerStaleAfter != 0 {
+		t.Fatalf("apiSettings() = %q, %+v, %v; want the default address and the API's own defaults", addr, cfg, err)
+	}
+	addr, cfg, err = apiSettings(func(k string) string {
+		return map[string]string{envAPIAddr: "127.0.0.1:9000", envLLMMaxParallel: "4", envWorkerStale: "30s"}[k]
+	})
+	if err != nil || addr != "127.0.0.1:9000" || cfg.LLMConcurrency != 4 || cfg.WorkerStaleAfter != 30*time.Second {
+		t.Fatalf("apiSettings() = %q, %+v, %v", addr, cfg, err)
 	}
 }
 

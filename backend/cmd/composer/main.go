@@ -1,5 +1,5 @@
 // Command composer is the single backend binary: api, worker, migrate and seed are
-// subcommands of it. api is a stub until its component is implemented.
+// subcommands of it.
 package main
 
 import (
@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smartcampaign/internal/db"
+	"smartcampaign/internal/metrics"
 	"smartcampaign/internal/migrate"
 	"smartcampaign/internal/queue"
 	"smartcampaign/internal/seed"
@@ -56,8 +58,7 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	var err error
 	switch args[0] {
 	case "api":
-		fmt.Fprintf(stdout, "composer %s: not implemented yet\n", args[0])
-		return 0
+		err = runAPI(ctx, stderr)
 	case "worker":
 		err = runWorker(ctx, stderr)
 	case "migrate":
@@ -172,15 +173,32 @@ func runWorker(ctx context.Context, logOut io.Writer) error {
 		return err
 	}
 
+	metricsAddr := os.Getenv(envWorkerMetrics)
+	if metricsAddr == "" {
+		metricsAddr = defaultWorkerAddr
+	}
+
 	pool, err := openDB(ctx)
 	if err != nil {
 		return err
 	}
 	defer pool.Close()
+	obs := metrics.NewWorker()
+	cfg.Observer = obs
 	w, err := worker.New(queue.New(pool), worker.NewHTTPSender(providerURL), cfg)
 	if err != nil {
 		return err
 	}
+	// The worker's own /metrics and /healthz (liveness: the process runs). Whether it is actually sending is what the
+	// heartbeat in the database says.
+	mux := http.NewServeMux()
+	mux.Handle("GET /metrics", obs.Handler())
+	mux.HandleFunc("GET /healthz", func(rw http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(rw, "ok\n") })
+	stopOps, err := startOpsServer("worker-metrics", metricsAddr, mux, cfg.Logger)
+	if err != nil {
+		return err
+	}
+	defer stopOps()
 	cfg.Logger.Info("worker started", "provider", providerURL)
 	if err := w.Run(ctx); err != nil {
 		return err

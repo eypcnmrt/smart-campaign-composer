@@ -65,6 +65,9 @@ type Config struct {
 	Retry             retry.Policy
 	// Breaker tunes the circuit breaker each channel has (see breaker).
 	Breaker BreakerConfig
+	// Observer is told what the worker does, for metrics; the worker does not depend on any metrics library. Nil means
+	// nobody is told.
+	Observer Observer
 	// Jitter returns a number in [0, 1) for the backoff; default math/rand/v2.
 	Jitter func() float64
 	Logger *slog.Logger
@@ -105,6 +108,9 @@ func (c Config) withDefaults() Config {
 		c.HeartbeatInterval = 2 * time.Second
 	}
 	c.Breaker = c.Breaker.withDefaults()
+	if c.Observer == nil {
+		c.Observer = nopObserver{}
+	}
 	if c.Retry.MaxAttempts == 0 {
 		c.Retry = retry.DefaultPolicy()
 	}
@@ -259,6 +265,7 @@ func (w *Worker) dispatch(ctx context.Context, ch *channelState, sends *sync.Wai
 		waiting = false
 
 		log.Info("serving the channel")
+		w.cfg.Observer.LockHeld(ch.name, true)
 		// The heartbeat belongs to the tenure of the lock: only the worker that serves the channel reports on it.
 		hbCtx, stopHeartbeat := context.WithCancel(ctx)
 		var heartbeat sync.WaitGroup
@@ -266,6 +273,7 @@ func (w *Worker) dispatch(ctx context.Context, ch *channelState, sends *sync.Wai
 		serveErr := w.serve(ctx, ch, lock, sends)
 		stopHeartbeat()
 		heartbeat.Wait()
+		w.cfg.Observer.LockHeld(ch.name, false)
 		if err := lock.Release(ctx); err != nil {
 			log.Error("releasing the channel lock failed", "err", err)
 		}
@@ -322,7 +330,7 @@ func (w *Worker) serve(ctx context.Context, ch *channelState, lock *queue.Channe
 			sends.Go(func() {
 				defer release()
 				w.record(context.WithoutCancel(ctx), log.With("delivery", d.ID), d,
-					queue.Outcome{Status: queue.StatusFailed, Reason: "unusable campaign content: " + err.Error()}, &w.failed)
+					queue.Outcome{Status: queue.StatusFailed, Reason: "unusable campaign content: " + err.Error()}, &w.failed, "failed")
 			})
 			continue
 		case !ok:
@@ -350,12 +358,14 @@ func (w *Worker) heartbeat(ctx context.Context, ch *channelState) {
 	failing := false
 	for {
 		state, lastError := ch.br.Snapshot()
+		w.cfg.Observer.Circuit(ch.name, state.String())
 		writeCtx, cancel := context.WithTimeout(ctx, dbTimeout)
 		err := w.q.SetChannelStatus(writeCtx, ch.name, state.String(), lastError)
 		cancel()
 		switch {
 		case err != nil && ctx.Err() == nil:
 			w.heartbeatErrors.Add(1)
+			w.cfg.Observer.HeartbeatError(ch.name)
 			if !failing { // once per streak, not every tick
 				log.Error("writing the heartbeat failed", "err", err)
 				failing = true
@@ -380,7 +390,7 @@ func (w *Worker) process(ctx context.Context, br *breaker, p permit, d queue.Del
 
 	if !d.Consent {
 		br.Cancel(p) // no request is made, so there is nothing to tell the breaker
-		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusSkipped, Reason: "consent withdrawn before sending"}, &w.skipped)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusSkipped, Reason: "consent withdrawn before sending"}, &w.skipped, "skipped")
 		return
 	}
 
@@ -392,26 +402,26 @@ func (w *Worker) process(ctx context.Context, br *breaker, p permit, d queue.Del
 	if br.Record(p, classify(res), retry.Describe(res)) {
 		reason := retry.Describe(res)
 		log.Info("the provider is unreachable, the attempt is not counted", "reason", reason, "probe", p.probe)
-		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusQueued, Reason: reason, Refund: true}, &w.refunded)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusQueued, Reason: reason, Refund: true}, &w.refunded, "refunded")
 		return
 	}
 
 	decision := w.cfg.Retry.Decide(d.Attempt, res, w.cfg.Jitter())
 	switch decision.Action {
 	case retry.Done:
-		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusSent}, &w.sent)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusSent}, &w.sent, "sent")
 	case retry.Retry:
 		log.Info("will retry", "reason", decision.Reason, "delay", decision.Delay)
-		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusQueued, Delay: decision.Delay, Reason: decision.Reason}, &w.retried)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusQueued, Delay: decision.Delay, Reason: decision.Reason}, &w.retried, "retried")
 	default:
 		log.Warn("delivery failed", "reason", decision.Reason)
-		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusFailed, Reason: decision.Reason}, &w.failed)
+		w.record(ctx, log, d, queue.Outcome{Status: queue.StatusFailed, Reason: decision.Reason}, &w.failed, "failed")
 	}
 }
 
 // record writes the outcome. A lost lease is expected now and then and harmless (the provider
 // de-duplicates); any other error leaves the delivery in sending, and its lease expiry will requeue it.
-func (w *Worker) record(ctx context.Context, log *slog.Logger, d queue.Delivery, o queue.Outcome, counter *atomic.Int64) {
+func (w *Worker) record(ctx context.Context, log *slog.Logger, d queue.Delivery, o queue.Outcome, counter *atomic.Int64, result string) {
 	var err error
 	for try := 1; try <= recordTries; try++ {
 		attemptCtx, cancel := context.WithTimeout(ctx, dbTimeout)
@@ -427,11 +437,14 @@ func (w *Worker) record(ctx context.Context, log *slog.Logger, d queue.Delivery,
 	switch {
 	case err == nil:
 		counter.Add(1)
+		w.cfg.Observer.Attempt(d.Channel, result)
 	case errors.Is(err, queue.ErrLeaseLost):
 		w.leaseLost.Add(1)
+		w.cfg.Observer.Attempt(d.Channel, "lease_lost")
 		log.Warn("result dropped, the lease was lost", "outcome", o.Status)
 	default:
 		w.recordErrors.Add(1)
+		w.cfg.Observer.Attempt(d.Channel, "record_error")
 		log.Error("recording the outcome failed; the lease will expire and the delivery will be retried", "outcome", o.Status, "err", err)
 	}
 }

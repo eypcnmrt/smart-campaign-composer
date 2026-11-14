@@ -1,5 +1,5 @@
-# The delivery side of the stack: database, migrations, seed data, mock provider and worker.
-# The api and the web app are added with their components.
+# The stack: database, migrations, seed data, mock provider, worker and the api (port 8080 on this machine).
+# The web app is added with its component.
 #
 # Every setting has a default, so `docker compose up` works without a .env file. The values below
 # are for local development only (the database is not published outside the compose network).
@@ -70,6 +70,34 @@ services:
       retries: 20
     restart: unless-stopped
 
+  api:
+    <<: *composer
+    command: ["api"]
+    environment:
+      <<: *composer-env
+      # auto: the real model when a key is set, the demo mock otherwise (no dotenv file is needed to start).
+      LLM_MODE: ${LLM_MODE:-auto}
+      LLM_MAX_CONCURRENCY: ${LLM_MAX_CONCURRENCY:-2}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${ANTHROPIC_MODEL:-}
+      ANTHROPIC_FALLBACK: ${ANTHROPIC_FALLBACK:-}
+      WORKER_STALE_AFTER: ${WORKER_STALE_AFTER:-10s}
+    # No authentication (docs/PLAN.md, assumption 13) and it can spend credit: reachable from this machine only.
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/readyz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    # Open content streams end with an event, requests in flight finish (15s inside the api).
+    stop_grace_period: 20s
+    restart: unless-stopped
+
   worker:
     <<: *composer
     command: ["worker"]
@@ -77,11 +105,20 @@ services:
       <<: *composer-env
       WORKER_RATE: ${WORKER_RATE:-100}
       WORKER_REQUEST_TIMEOUT: ${WORKER_REQUEST_TIMEOUT:-5s}
+      WORKER_HEARTBEAT_INTERVAL: ${WORKER_HEARTBEAT_INTERVAL:-2s}
+      # The worker's own /metrics and /healthz; inside the compose network only (nothing is published on the host).
+      WORKER_METRICS_ADDR: ":9091"
     depends_on:
       seed:
         condition: service_completed_successfully
       mock-provider:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9091/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
     # Time to finish the sends in flight after SIGTERM (the request timeout is 5s).
     stop_grace_period: 20s
     restart: unless-stopped
