@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -246,9 +247,42 @@ func enqueued(t *testing.T, users int, channels ...string) (*pgxpool.Pool, *queu
 	return pool, q, id
 }
 
+var uuidRe = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+
+// Every delivery gets its own key when it is enqueued, and a retry of the same delivery carries the same key.
+func TestIdempotencyKey_isUniqueAndStableAcrossAttempts(t *testing.T) {
+	ctx := context.Background()
+	pool, q, _ := enqueued(t, 20, "sms", "email")
+	if n := count(t, pool, `SELECT count(DISTINCT idempotency_key) FROM deliveries`); n != count(t, pool, `SELECT count(*) FROM deliveries`) {
+		t.Fatalf("%d distinct keys for the deliveries: every delivery needs its own", n)
+	}
+
+	first, ok, err := q.Claim(ctx, "sms", time.Minute)
+	if err != nil || !ok {
+		t.Fatalf("claim = %v, %v", ok, err)
+	}
+	if err := q.Finish(ctx, first, queue.Outcome{Status: queue.StatusQueued, Reason: "http 500"}); err != nil {
+		t.Fatal(err)
+	}
+	// the retry is the same delivery, claimed again as attempt 2: same key
+	var again queue.Delivery
+	for range 20 {
+		d, ok, err := q.Claim(ctx, "sms", time.Minute)
+		if err != nil || !ok {
+			t.Fatalf("claim = %v, %v", ok, err)
+		}
+		if d.ID == first.ID {
+			again = d
+			break
+		}
+	}
+	if again.ID != first.ID || again.Attempt != 2 || again.Key() != first.Key() {
+		t.Fatalf("retry = %+v (key %q), want delivery %d, attempt 2 and key %q", again, again.Key(), first.ID, first.Key())
+	}
+}
+
 func TestClaim_carriesEverythingNeededToSend(t *testing.T) {
 	pool, q, _ := enqueued(t, 3, "sms", "email")
-	_ = pool
 	d, ok, err := q.Claim(context.Background(), "sms", time.Minute)
 	if err != nil || !ok {
 		t.Fatalf("claim = %v, %v", ok, err)
@@ -265,8 +299,12 @@ func TestClaim_carriesEverythingNeededToSend(t *testing.T) {
 	if d.Content.SMS != "Merhaba {{first_name}}, {{city}} için fırsat" {
 		t.Fatalf("content = %+v, want the frozen template", d.Content)
 	}
-	if d.Key() != fmt.Sprint(d.ID) {
-		t.Fatalf("key = %q, want the delivery id", d.Key())
+	var stored string
+	if err := pool.QueryRow(context.Background(), `SELECT idempotency_key::text FROM deliveries WHERE id = $1`, d.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if d.Key() != stored || d.Key() == fmt.Sprint(d.ID) || !uuidRe.MatchString(d.Key()) {
+		t.Fatalf("key = %q, want the UUID stored in deliveries.idempotency_key (%q), not the id %d", d.Key(), stored, d.ID)
 	}
 
 	e, ok, err := q.Claim(context.Background(), "email", time.Minute)

@@ -5,6 +5,7 @@ package migrate_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"sync"
 	"testing"
@@ -14,6 +15,18 @@ import (
 	"smartcampaign/internal/testdb"
 	"smartcampaign/migrations"
 )
+
+// nextMigration returns the file name and the version of a migration that would come right after the real ones, so
+// the tests do not break every time a real migration is added.
+func nextMigration(t *testing.T, suffix string) (name string, version int) {
+	t.Helper()
+	all, err := migrate.Load(migrations.FS)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version = len(all) + 1
+	return fmt.Sprintf("%04d_%s.sql", version, suffix), version
+}
 
 // withExtra returns the real migrations plus one more file.
 func withExtra(t *testing.T, name, sql string) fstest.MapFS {
@@ -65,7 +78,8 @@ func TestUp_detectsModifiedMigration(t *testing.T) {
 func TestUp_failedMigrationLeavesNothingBehind(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
-	fsys := withExtra(t, "0003_broken.sql", "CREATE TABLE half_done (id int); SELECT * FROM table_that_does_not_exist;")
+	name, version := nextMigration(t, "broken")
+	fsys := withExtra(t, name, "CREATE TABLE half_done (id int); SELECT * FROM table_that_does_not_exist;")
 	if _, err := migrate.Up(ctx, pool, fsys); err == nil {
 		t.Fatal("want an error from the broken migration")
 	}
@@ -77,7 +91,7 @@ func TestUp_failedMigrationLeavesNothingBehind(t *testing.T) {
 		t.Fatal("the first statement of the failed migration must be rolled back")
 	}
 	var recorded int
-	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version = 3`).Scan(&recorded); err != nil {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM schema_migrations WHERE version = $1`, version).Scan(&recorded); err != nil {
 		t.Fatal(err)
 	}
 	if recorded != 0 {
@@ -88,7 +102,8 @@ func TestUp_failedMigrationLeavesNothingBehind(t *testing.T) {
 func TestUp_concurrentRunnersApplyOnce(t *testing.T) {
 	pool := testdb.New(t)
 	ctx := context.Background()
-	fsys := withExtra(t, "0003_extra.sql", "CREATE TABLE extra (id int)")
+	name, version := nextMigration(t, "extra")
+	fsys := withExtra(t, name, "CREATE TABLE extra (id int)")
 
 	const runners = 6
 	counts := make([]int, runners)
@@ -110,7 +125,7 @@ func TestUp_concurrentRunnersApplyOnce(t *testing.T) {
 		applied += counts[i]
 	}
 	if applied != 1 {
-		t.Fatalf("migration 3 was applied %d times in total, want once", applied)
+		t.Fatalf("migration %d was applied %d times in total, want once", version, applied)
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -137,21 +136,24 @@ func (e *env) count(t *testing.T, sql string, args ...any) int {
 	return n
 }
 
-// ids returns the sorted delivery ids of the channel in the status, as the strings used for idempotency keys.
-func (e *env) ids(t *testing.T, channel, status string) []string {
+// keys returns the sorted idempotency keys of the channel's deliveries in the status.
+func (e *env) keys(t *testing.T, channel, status string) []string {
 	t.Helper()
-	rows, err := e.pool.Query(context.Background(), `SELECT id FROM deliveries WHERE channel = $1 AND status = $2`, channel, status)
+	rows, err := e.pool.Query(context.Background(), `SELECT idempotency_key::text FROM deliveries WHERE channel = $1 AND status = $2`, channel, status)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer rows.Close()
 	var out []string
 	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
+		var key string
+		if err := rows.Scan(&key); err != nil {
 			t.Fatal(err)
 		}
-		out = append(out, strconv.FormatInt(id, 10))
+		out = append(out, key)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
 	}
 	slices.Sort(out)
 	return out
@@ -163,13 +165,13 @@ func (e *env) requireProviderMatchesDatabase(t *testing.T) {
 	t.Helper()
 	stats := e.provider.Stats()
 	for channel, st := range map[string]mockprovider.ChannelStats{"sms": stats.SMS, "email": stats.Email} {
-		sent := e.ids(t, channel, "sent")
+		sent := e.keys(t, channel, "sent")
 		accepted := e.provider.AcceptedKeys(channel)
 		if st.UniqueAccepted != len(sent) {
 			t.Errorf("%s: provider accepted %d unique keys, the database has %d sent", channel, st.UniqueAccepted, len(sent))
 		}
 		if !slices.Equal(accepted, sent) {
-			t.Errorf("%s: accepted keys differ from sent delivery ids (provider %d, database %d)", channel, len(accepted), len(sent))
+			t.Errorf("%s: accepted keys differ from the idempotency keys of the sent deliveries (provider %d, database %d)", channel, len(accepted), len(sent))
 		}
 	}
 }
@@ -459,16 +461,16 @@ func TestWorker_noSendAfterConsentIsWithdrawn(t *testing.T) {
 	}
 	withdrawn := map[string][]string{}
 	for channel, cond := range map[string]string{"sms": "user_id <= 10", "email": "user_id BETWEEN 11 AND 15"} {
-		rows, err := e.pool.Query(ctx, `SELECT id FROM deliveries WHERE channel = $1 AND `+cond, channel)
+		rows, err := e.pool.Query(ctx, `SELECT idempotency_key::text FROM deliveries WHERE channel = $1 AND `+cond, channel)
 		if err != nil {
 			t.Fatal(err)
 		}
 		for rows.Next() {
-			var d int64
-			if err := rows.Scan(&d); err != nil {
+			var key string
+			if err := rows.Scan(&key); err != nil {
 				t.Fatal(err)
 			}
-			withdrawn[channel] = append(withdrawn[channel], strconv.FormatInt(d, 10))
+			withdrawn[channel] = append(withdrawn[channel], key)
 		}
 		rows.Close()
 	}
@@ -482,11 +484,11 @@ func TestWorker_noSendAfterConsentIsWithdrawn(t *testing.T) {
 	if status != "completed" {
 		t.Fatalf("campaign = %q: skipping a withdrawn consent is not a failure", status)
 	}
-	for channel, ids := range withdrawn {
+	for channel, keys := range withdrawn {
 		accepted := e.provider.AcceptedKeys(channel)
-		for _, id := range ids {
-			if slices.Contains(accepted, id) {
-				t.Errorf("%s delivery %s was sent although the user withdrew consent", channel, id)
+		for _, key := range keys {
+			if slices.Contains(accepted, key) {
+				t.Errorf("%s delivery with key %s was sent although the user withdrew consent", channel, key)
 			}
 		}
 	}
@@ -500,6 +502,40 @@ func TestWorker_noSendAfterConsentIsWithdrawn(t *testing.T) {
 		t.Errorf("accepted sms %d (want 40), email %d (want 45)", st.SMS.UniqueAccepted, st.Email.UniqueAccepted)
 	}
 	e.requireProviderMatchesDatabase(t)
+}
+
+// The database is reset (or a second one is used) while the provider keeps its memory: delivery ids start from 1
+// again, but the idempotency keys do not repeat, so no new message is mistaken for an old one.
+func TestWorker_keysDoNotCollideWhenIdsRestartAgainstALongLivedProvider(t *testing.T) {
+	first := newEnv(t, mockprovider.Config{})
+	const users = 20
+	id1 := first.campaign(t, users, "sms")
+	_, stop1 := first.start(t, worker.Config{RatePerSecond: 200})
+	first.waitFinished(t, id1, 30*time.Second)
+	if err := stop1(); err != nil {
+		t.Fatal(err)
+	}
+
+	// "the same system after a reset": a fresh database, the same provider
+	pool2 := testdb.New(t)
+	second := &env{pool: pool2, q: queue.New(pool2), provider: first.provider, url: first.url}
+	id2 := second.campaign(t, users, "sms")
+	if a, b := first.count(t, `SELECT min(id) FROM deliveries`), second.count(t, `SELECT min(id) FROM deliveries`); a != b {
+		t.Fatalf("the two databases do not start at the same id (%d, %d); the test would prove nothing", a, b)
+	}
+	_, stop2 := second.start(t, worker.Config{RatePerSecond: 200})
+	second.waitFinished(t, id2, 30*time.Second)
+	if err := stop2(); err != nil {
+		t.Fatal(err)
+	}
+
+	st := first.provider.Stats().SMS
+	if st.UniqueAccepted != 2*users || st.DuplicateKeys != 0 {
+		t.Fatalf("provider accepted %d messages with %d duplicates, want %d and 0: ids repeated, keys must not", st.UniqueAccepted, st.DuplicateKeys, 2*users)
+	}
+	if n := second.count(t, `SELECT count(*) FROM deliveries WHERE status = 'sent'`); n != users {
+		t.Fatalf("%d deliveries of the second database are sent, want %d", n, users)
+	}
 }
 
 func TestWorker_permanentErrorIsNotRetried(t *testing.T) {

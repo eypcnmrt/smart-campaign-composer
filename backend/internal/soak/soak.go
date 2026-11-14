@@ -267,8 +267,8 @@ func channelResult(ctx context.Context, pool *pgxpool.Pool, id int64, channel st
 	return r, nil
 }
 
-// keyDifference compares the keys the provider accepted for the channel with the delivery ids the database
-// calls sent, and returns the size of the symmetric difference.
+// keyDifference compares the keys the provider accepted for the channel with the idempotency keys of the deliveries
+// the database calls sent, and returns the size of the symmetric difference.
 func keyDifference(ctx context.Context, pool *pgxpool.Pool, campaign int64, channel, providerURL string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(providerURL, "/")+"/accepted/"+channel, nil)
 	if err != nil {
@@ -291,7 +291,7 @@ func keyDifference(ctx context.Context, pool *pgxpool.Pool, campaign int64, chan
 	for _, k := range accepted {
 		diff[k]++
 	}
-	rows, err := pool.Query(ctx, `SELECT id::text FROM deliveries WHERE campaign_id = $1 AND channel = $2 AND status = 'sent'`, campaign, channel)
+	rows, err := pool.Query(ctx, `SELECT idempotency_key::text FROM deliveries WHERE campaign_id = $1 AND channel = $2 AND status = 'sent'`, campaign, channel)
 	if err != nil {
 		return 0, fmt.Errorf("reading the sent deliveries: %w", err)
 	}
@@ -299,7 +299,7 @@ func keyDifference(ctx context.Context, pool *pgxpool.Pool, campaign int64, chan
 	for rows.Next() {
 		var k string
 		if err := rows.Scan(&k); err != nil {
-			return 0, fmt.Errorf("scanning a delivery id: %w", err)
+			return 0, fmt.Errorf("scanning an idempotency key: %w", err)
 		}
 		diff[k]--
 	}

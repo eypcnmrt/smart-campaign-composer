@@ -75,18 +75,18 @@ func TestBuildRequest(t *testing.T) {
 	}{
 		{
 			"sms",
-			queue.Delivery{ID: 42, Channel: "sms", Recipient: "+900000000001", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"}, Content: tpl},
-			SendRequest{Channel: "sms", Key: "42", To: "+900000000001", Body: "Merhaba Ayşe, İzmir için fırsat"},
+			queue.Delivery{ID: 42, IdempotencyKey: "key-42", Channel: "sms", Recipient: "+900000000001", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"}, Content: tpl},
+			SendRequest{Channel: "sms", Key: "key-42", To: "+900000000001", Body: "Merhaba Ayşe, İzmir için fırsat"},
 		},
 		{
 			"email",
-			queue.Delivery{ID: 43, Channel: "email", Recipient: "a@example.com", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"}, Content: tpl},
-			SendRequest{Channel: "email", Key: "43", To: "a@example.com", Subject: "Fırsat İzmir", Body: "Merhaba Ayşe"},
+			queue.Delivery{ID: 43, IdempotencyKey: "key-43", Channel: "email", Recipient: "a@example.com", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"}, Content: tpl},
+			SendRequest{Channel: "email", Key: "key-43", To: "a@example.com", Subject: "Fırsat İzmir", Body: "Merhaba Ayşe"},
 		},
 		{
 			"blank first name falls back",
-			queue.Delivery{ID: 44, Channel: "email", Recipient: "b@example.com", Vars: content.Vars{FirstName: " ", City: "Bursa"}, Content: tpl},
-			SendRequest{Channel: "email", Key: "44", To: "b@example.com", Subject: "Fırsat Bursa", Body: "Merhaba Değerli müşterimiz"},
+			queue.Delivery{ID: 44, IdempotencyKey: "key-44", Channel: "email", Recipient: "b@example.com", Vars: content.Vars{FirstName: " ", City: "Bursa"}, Content: tpl},
+			SendRequest{Channel: "email", Key: "key-44", To: "b@example.com", Subject: "Fırsat Bursa", Body: "Merhaba Değerli müşterimiz"},
 		},
 	}
 	for _, tt := range tests {
@@ -101,10 +101,11 @@ func TestBuildRequest(t *testing.T) {
 
 func TestBuildRequest_keyIsStableAcrossAttempts(t *testing.T) {
 	t.Parallel()
-	first := buildRequest(queue.Delivery{ID: 7, Channel: "sms", Attempt: 1})
-	fifth := buildRequest(queue.Delivery{ID: 7, Channel: "sms", Attempt: 5})
-	if first.Key != fifth.Key || first.Key != "7" {
-		t.Fatalf("keys %q and %q must both be the delivery id", first.Key, fifth.Key)
+	const key = "5b2a8f0e-1111-4222-8333-444455556666"
+	first := buildRequest(queue.Delivery{ID: 7, IdempotencyKey: key, Channel: "sms", Attempt: 1})
+	fifth := buildRequest(queue.Delivery{ID: 7, IdempotencyKey: key, Channel: "sms", Attempt: 5})
+	if first.Key != fifth.Key || first.Key != key {
+		t.Fatalf("keys %q and %q must both be the delivery's idempotency key %q, not its id", first.Key, fifth.Key, key)
 	}
 }
 

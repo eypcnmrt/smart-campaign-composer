@@ -168,16 +168,19 @@ type Delivery struct {
 	Channel    string
 	// Attempt is the number of this attempt (1 for the first); it also fences the result: a
 	// result is only written while the row still has this attempt number and is still sending.
-	Attempt   int
-	Recipient string // phone for sms, e-mail address for email
-	Vars      content.Vars
-	Content   content.Content // the template frozen at approval, not yet rendered
+	Attempt int
+	// IdempotencyKey is generated when the delivery is enqueued (deliveries.idempotency_key) and never changes.
+	IdempotencyKey string
+	Recipient      string // phone for sms, e-mail address for email
+	Vars           content.Vars
+	Content        content.Content // the template frozen at approval, not yet rendered
 	// Consent is the user's consent for this channel as read at the moment of the claim.
 	Consent bool
 }
 
-// Key is the idempotency key sent to the provider: the delivery id, the same on every attempt.
-func (d Delivery) Key() string { return fmt.Sprintf("%d", d.ID) }
+// Key is the idempotency key sent to the provider: a UUID made at enqueue time, the same on every attempt. It is
+// not the delivery id, so a database that is reset and starts counting ids from 1 again cannot repeat a key.
+func (d Delivery) Key() string { return d.IdempotencyKey }
 
 // Claim takes the next due delivery of the channel: status queued and next_attempt_at reached. It moves
 // it to sending, counts the attempt and sets a lease of the given length. ok is false when nothing is
@@ -197,9 +200,9 @@ WITH due AS (
 	    lease_until = now() + make_interval(secs => $2), updated_at = now()
 	FROM due
 	WHERE d.id = due.id
-	RETURNING d.id, d.campaign_id, d.user_id, d.channel, d.attempts
+	RETURNING d.id, d.campaign_id, d.user_id, d.channel, d.attempts, d.idempotency_key
 )
-SELECT c.id, c.campaign_id, c.user_id, c.channel, c.attempts,
+SELECT c.id, c.campaign_id, c.user_id, c.channel, c.attempts, c.idempotency_key::text,
        CASE c.channel WHEN 'sms' THEN u.phone ELSE u.email END,
        u.first_name, u.city,
        CASE c.channel WHEN 'sms' THEN u.sms_consent ELSE u.email_consent END,
@@ -210,7 +213,7 @@ JOIN campaigns camp ON camp.id = c.campaign_id`
 
 	var raw []byte
 	err = q.pool.QueryRow(ctx, query, channel, lease.Seconds()).Scan(
-		&d.ID, &d.CampaignID, &d.UserID, &d.Channel, &d.Attempt,
+		&d.ID, &d.CampaignID, &d.UserID, &d.Channel, &d.Attempt, &d.IdempotencyKey,
 		&d.Recipient, &d.Vars.FirstName, &d.Vars.City, &d.Consent, &raw)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Delivery{}, false, nil
