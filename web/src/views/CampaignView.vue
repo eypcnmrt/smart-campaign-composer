@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { generateSegment } from '@/api/campaigns'
+import ApproveStep from '@/components/approve/ApproveStep.vue'
 import AudienceCard from '@/components/audience/AudienceCard.vue'
 import BriefForm from '@/components/brief/BriefForm.vue'
 import ContentStep from '@/components/content/ContentStep.vue'
@@ -122,6 +123,7 @@ async function retrySegment(): Promise<void> {
           @reload="load"
           @approve="goTo('approve')"
         />
+        <ApproveStep v-else-if="step === 'approve'" :campaign="campaign" @updated="replace" @reload="load" />
         <p v-else-if="step !== 'brief'">Bu adım hazırlanıyor.</p>
         <LoadingState v-else label="Ayarlar yükleniyor…" />
       </div>
