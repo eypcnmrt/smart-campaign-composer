@@ -346,6 +346,62 @@ func TestAPI_wrongStateIsAConflict(t *testing.T) {
 	})
 }
 
+// A body that is not UTF-8 is refused whole; text that holds U+FFFD is a field problem. Neither reaches the store or the model.
+func TestAPI_invalidUTF8(t *testing.T) {
+	e, _ := newEnv(t, llm.Reply(ankaraRule), llm.Reply(ankaraRule))
+	// "İstanbul'daki müşterilere" as Windows-1254 bytes: İ is 0xDD, ü is 0xFC, ş is 0xFE (none of them is valid UTF-8 here).
+	cp1254 := "{\"brief\":\"\xddstanbul'daki m\xfc\xfeterilere indirim\"}"
+	for name, tt := range map[string]struct{ method, path, body string }{
+		"a brief in Windows-1254": {"POST", "/api/campaigns", cp1254},
+		"a stray continuation":    {"POST", "/api/campaigns", "{\"brief\":\"a\x80b\"}"},
+		"a cut-off sequence":      {"POST", "/api/campaigns", "{\"brief\":\"a\xc4\"}"},
+		"an invalid key":          {"POST", "/api/campaigns", "{\"br\xfdef\":\"a\"}"},
+		"bytes after the object":  {"POST", "/api/campaigns", "{\"brief\":\"a\"}\xff"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := e.expect(tt.method, tt.path, tt.body, http.StatusBadRequest, "invalid_utf8")
+			if _, details := r.errorOf(t); details != nil {
+				t.Fatalf("details = %v, want none", details)
+			}
+		})
+	}
+	// Content and channels go through the same decoder.
+	id := idOf(t, e.expect("POST", "/api/campaigns", map[string]string{"brief": "Ankara"}, http.StatusCreated, ""))
+	before := e.expect("GET", path(id, ""), nil, http.StatusOK, "").json(t)
+	e.expect("PUT", path(id, "/content"), "{\"sms\":\"M\xfc\xfeteri\",\"email_subject\":\"b\",\"email_body\":\"c\"}", http.StatusBadRequest, "invalid_utf8")
+	e.expect("PUT", path(id, "/channels"), "{\"channels\":[\"s\xfdms\"]}", http.StatusBadRequest, "invalid_utf8")
+	if after := e.expect("GET", path(id, ""), nil, http.StatusOK, "").json(t); after["version"] != before["version"] || after["content"] != nil {
+		t.Fatalf("a refused body changed the campaign: %v", after)
+	}
+
+	// U+FFFD in valid UTF-8 (as the character, as an escape, or as a lone surrogate) is a problem of its own field.
+	fffd := string(rune(0xFFFD))
+	for name, body := range map[string]any{
+		"the character":      map[string]string{"brief": "İstanbul" + fffd + "daki"},
+		"an escape":          "{\"brief\":\"a\\" + "ufffd" + "b\"}",
+		"a lone surrogate":   "{\"brief\":\"a\\" + "ud800" + "b\"}",
+		"after leading text": map[string]string{"brief": "  " + fffd + "  "},
+	} {
+		t.Run("a brief with U+FFFD as "+name, func(t *testing.T) {
+			r := e.expect("POST", "/api/campaigns", body, http.StatusUnprocessableEntity, "validation_failed")
+			_, details := r.errorOf(t)
+			list, _ := details.([]any)
+			if len(list) != 1 || field(t, list[0], "path") != "brief" || field(t, list[0], "code") != "invalid_utf8" {
+				t.Fatalf("details = %v, want one invalid_utf8 problem at brief", details)
+			}
+		})
+	}
+	// Nothing was stored and the model was not asked: the campaign above is the only one.
+	if list := e.expect("GET", "/api/campaigns", nil, http.StatusOK, "").json(t)["campaigns"].([]any); len(list) != 1 {
+		t.Fatalf("%d campaigns after the refused requests, want 1", len(list))
+	}
+	// Well-formed Turkish text is untouched.
+	got := e.expect("POST", "/api/campaigns", map[string]string{"brief": "İstanbul'daki müşterilere ğüşıöç indirimi"}, http.StatusCreated, "").json(t)
+	if got["brief"] != "İstanbul'daki müşterilere ğüşıöç indirimi" {
+		t.Fatalf("brief = %q", got["brief"])
+	}
+}
+
 func TestAPI_requestValidation(t *testing.T) {
 	e, _ := newEnv(t, llm.Reply(ankaraRule), llm.Reply(ankaraRule))
 	long := strings.Repeat("ç", 2001)

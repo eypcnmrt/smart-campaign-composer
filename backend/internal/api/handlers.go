@@ -73,6 +73,11 @@ func (s *Server) createCampaign(w http.ResponseWriter, r *http.Request) error {
 	switch n := utf8.RuneCountInString(brief); {
 	case n == 0:
 		return validationProblem(detail{Path: "brief", Code: content.CodeEmpty, Message: "must not be empty"})
+	case strings.ContainsRune(brief, utf8.RuneError):
+		// The same rule as for the content fields: U+FFFD means the text was damaged on its way here (a wrong encoding, a
+		// lossy copy) and the model must not be asked to work from it.
+		return validationProblem(detail{Path: "brief", Code: codeInvalidUTF8,
+			Message: "contains a replacement character (U+FFFD), the text was damaged; write it again without it"})
 	case n > s.cfg.MaxBriefChars:
 		return validationProblem(detail{Path: "brief", Code: content.CodeTooLong, Params: map[string]any{"length": n, "limit": s.cfg.MaxBriefChars},
 			Message: fmt.Sprintf("is %d characters long; the limit is %d", n, s.cfg.MaxBriefChars)})

@@ -160,6 +160,10 @@ const BY_CODE: Record<string, Text> = {
     retryable: true,
   },
   invalid_json: { title: 'İstek anlaşılamadı', body: 'İstek geçerli değil. Sayfayı yenileyip tekrar deneyin.' },
+  invalid_utf8: {
+    title: 'Metindeki karakterler bozuk geldi',
+    body: 'İstek yanlış karakter kodlamasıyla gönderilmiş. Metni yeniden yazıp tekrar deneyin; sürerse sayfayı yenileyin.',
+  },
   body_too_large: { title: 'Metin çok uzun', body: 'Gönderilen metin sunucunun kabul ettiği boyutu aşıyor. Kısaltıp tekrar deneyin.' },
   validation_failed: { title: 'Bazı alanlar geçersiz', body: 'Aşağıdaki alanları düzeltip tekrar deneyin.' },
   acknowledgement_required: {

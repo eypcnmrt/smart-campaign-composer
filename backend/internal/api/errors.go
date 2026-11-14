@@ -62,6 +62,9 @@ type detail struct {
 const (
 	codeInvalidParam = "invalid_param" // min and max for a number, none for a flag
 	codeRequired     = "required"
+	// codeInvalidUTF8 is both the code of a request body that is not UTF-8 (400, see decode) and the code of a text field
+	// that holds U+FFFD (422, with the field's path), as the content checks name it.
+	codeInvalidUTF8 = content.CodeInvalidUTF8
 )
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

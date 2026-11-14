@@ -16,6 +16,7 @@ const SERVER_CODES = [
   'bad_response',
   'stream_incomplete',
   'invalid_json',
+  'invalid_utf8',
   'body_too_large',
   'validation_failed',
   'acknowledgement_required',

@@ -127,6 +127,22 @@ describe('BriefForm, creating a campaign', () => {
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
   })
 
+  it('shows a brief with a damaged character beside the field, and a body that was not UTF-8 in the panel', async () => {
+    const field = new ApiError({
+      status: 422,
+      code: 'validation_failed',
+      message: 'English',
+      details: [{ path: 'brief', code: 'invalid_utf8', message: 'English' }],
+    })
+    const refused = await render({ error: field })
+    expect(refused.get('#brief-problem').text()).toBe('Metinde bozuk bir karakter (�) var; yeniden yazın.')
+    expect(refused.find('[role="alert"]').exists()).toBe(false)
+
+    const body = new ApiError({ status: 400, code: 'invalid_utf8', message: 'English' })
+    const panel = await render({ error: body })
+    expect(panel.get('[role="alert"]').text()).toContain('Metindeki karakterler bozuk geldi')
+  })
+
   it('shows any other failure in the panel, with a link to the draft the server kept', async () => {
     const error = new ApiError({ status: 504, code: 'llm_timeout', message: 'English', details: { campaign_id: 12 } })
     const wrapper = await render({ error, draftId: 12 })

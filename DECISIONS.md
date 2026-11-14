@@ -613,6 +613,21 @@ here when the README is written.
   port in the web app run the same file, so the browser flags what the server would refuse and nothing else. The UI never
   translates by matching the English sentence; an unknown code shows the server's `message`.
 
+### A body that is not UTF-8 is refused (400 `invalid_utf8`); U+FFFD in a brief is a field error
+- **Decision:** the one place that decodes request bodies (`Server.decode`) reads the (size-limited) body, and answers 400
+  `invalid_utf8` when it is not valid UTF-8, before any JSON is parsed. U+FFFD that is really in the text (as the character,
+  as `�`, or as a lone surrogate escape) is valid JSON, so it passes `decode` and the field checks judge it: the brief
+  now gets `validation_failed` 422 with `{path: "brief", code: "invalid_utf8"}`, the same code content fields already had.
+  The UI has Turkish text for both (the field message beside the brief, and a panel text for the 400).
+- **Why:** `encoding/json` replaces every invalid byte with U+FFFD without an error. A brief sent in Windows-1254 (a `curl`
+  from a Windows shell) was accepted, stored as "�stanbul�daki m��terilere…" and sent to the model. Checking the raw bytes
+  is the only point where the damage can still be told from the text; after decoding the two cases look alike.
+- **Order of refusals:** too large (413), not UTF-8 (400), not JSON (400), unknown field (400). Tested with Windows-1254
+  bytes, a stray continuation byte, a cut-off sequence and an overlong form, on the brief, the content and the channels.
+- **Not done:** the existing damaged campaign (id 3 in the demo database) was not changed or deleted; there is no delete
+  endpoint and its audience is valid. A lone surrogate inside a streamed model answer still becomes U+FFFD there; that path is
+  covered by the content validator and the repair loop, not by this check.
+
 ### The content stream: reconnect-safe, cancel-safe, never blocking the model
 - **Decision:** `GET /api/campaigns/{id}/content/stream` is Server-Sent Events: `attempt`, then `delta {field, text}` (or `raw`),
   then `done {campaign}` or `error {error}`, always exactly one of the last two. The first line is `retry: 3600000`.
@@ -993,3 +1008,6 @@ Not changed, with the reasons:
   guard itself, the hooks and `--no-verify` stayed as they are), and the same commit was made with the words changed. The same
   rule is why the web documentation says "no Vite env files" instead of naming them.
 - Every web command ran in the pinned node container (`scripts/web.sh`, `scripts/test-web.sh`); no package code ran on the host.
+- **UTF-8 check: one command was stopped by the guard hook.** A `grep` over the API test files whose pattern contained the bare
+  word for the process environment was read as an attempt to dump it. It was not retried in another form; the files were read
+  with the editor's read tool instead (they hold no secrets) and the owner is told in the session report.

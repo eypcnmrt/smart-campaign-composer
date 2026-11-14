@@ -4,6 +4,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -12,6 +13,7 @@ import (
 	"log/slog"
 	"net/http"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -242,16 +244,29 @@ func (s *Server) readyz(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ready"})
 }
 
-// decode reads a JSON request body into dst: at most MaxBodyBytes, no unknown fields, exactly one JSON value.
+// decode reads a JSON request body into dst: at most MaxBodyBytes, valid UTF-8, no unknown fields, exactly one JSON value.
+//
+// The UTF-8 check runs on the raw bytes, before the decoder: encoding/json turns every invalid byte into U+FFFD without a
+// word, so a body in a single-byte encoding (Windows-1254, Latin-1) would be accepted and stored with its letters damaged.
+// Such a body is refused as a whole (400 invalid_utf8). Text that holds U+FFFD itself (as the character, or as an escape
+// that decodes to it) is valid JSON and is judged by the check of its own field (422 on that field).
 func (s *Server) decode(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, s.cfg.MaxBodyBytes)
-	dec := json.NewDecoder(r.Body)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(dst); err != nil {
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
 		if _, tooBig := errors.AsType[*http.MaxBytesError](err); tooBig {
 			return &problem{Status: http.StatusRequestEntityTooLarge, Code: "body_too_large",
 				Message: fmt.Sprintf("The request body is larger than %d bytes.", s.cfg.MaxBodyBytes)}
 		}
+		return &problem{Status: http.StatusBadRequest, Code: "invalid_json", Message: "The request body could not be read."}
+	}
+	if !utf8.Valid(body) {
+		return &problem{Status: http.StatusBadRequest, Code: codeInvalidUTF8,
+			Message: "The request body is not valid UTF-8. Send the JSON as UTF-8 (Content-Type: application/json; charset=utf-8)."}
+	}
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(dst); err != nil {
 		msg := "The request body is not valid JSON for this endpoint."
 		if errors.Is(err, io.EOF) { // an empty body (a cut-off one is io.ErrUnexpectedEOF)
 			msg = "The request body is empty; it must be a JSON object."
