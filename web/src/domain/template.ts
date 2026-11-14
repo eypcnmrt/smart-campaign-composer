@@ -17,6 +17,16 @@ for (let cp = 0x2000; cp <= 0x200a; cp++) GO_SPACE.add(cp)
 
 const REPLACEMENT = 0xfffd
 
+/** What the server does to a brief before it counts it: Go's strings.TrimSpace. */
+export function trimSpace(text: string): string {
+  const chars = Array.from(text)
+  let start = 0
+  let end = chars.length
+  while (start < end && GO_SPACE.has(chars[start]?.codePointAt(0) ?? -1)) start++
+  while (end > start && GO_SPACE.has(chars[end - 1]?.codePointAt(0) ?? -1)) end--
+  return chars.slice(start, end).join('')
+}
+
 function isBlank(text: string): boolean {
   for (const ch of text) if (!GO_SPACE.has(ch.codePointAt(0) ?? -1)) return false
   return true
