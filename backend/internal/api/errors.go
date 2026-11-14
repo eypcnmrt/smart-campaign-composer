@@ -56,10 +56,24 @@ type detail struct {
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
+	// Encode before anything is sent: a value that cannot be encoded must become a 500, not a 200 with an empty body.
+	body, err := json.Marshal(v)
+	if err != nil {
+		status = http.StatusInternalServerError
+		body, _ = json.Marshal((&problem{Code: "internal", Message: "The response could not be encoded."}).body())
+	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
-	// The status is already sent; an encoding failure can only be a broken connection.
-	_ = json.NewEncoder(w).Encode(v)
+	// A failed write here is a broken connection: there is nobody to tell.
+	_, _ = w.Write(append(body, '\n'))
+}
+
+// taskTimeout names a generation that ran into its own deadline, so it is not confused with a database timeout.
+func taskTimeout(err error) error {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return fmt.Errorf("%w: %w", errTaskTimeout, err)
+	}
+	return err
 }
 
 func writeProblem(w http.ResponseWriter, p *problem) {
@@ -86,6 +100,11 @@ var (
 // and the client gets only the id, never the text, which may contain SQL or provider details.
 func (s *Server) problemOf(err error, reqID string) *problem {
 	if p := knownProblem(err); p != nil {
+		// The client gets a generic answer for the failures that are the operator's to fix (a wrong key or model name,
+		// an unavailable provider, a full queue), so the cause must be in the log or it exists nowhere.
+		if p.Status >= http.StatusInternalServerError || strings.HasPrefix(p.Code, "llm_") {
+			s.log.Warn("request failed", "request_id", reqID, "code", p.Code, "status", p.Status, "err", err)
+		}
 		return p
 	}
 	s.log.Error("internal error", "request_id", reqID, "err", err)
@@ -116,6 +135,9 @@ func storeProblem(err error) *problem {
 			p.Details = map[string]any{"status": te.From, "action": te.Action}
 		}
 		return p
+	case errors.Is(err, campaign.ErrApprovalUnconfirmed):
+		return &problem{Status: http.StatusInternalServerError, Code: "approval_unconfirmed",
+			Message: "The approval may have been applied. Reload the campaign and check its status before approving again."}
 	case errors.Is(err, campaign.ErrStateChanged):
 		return &problem{Status: http.StatusConflict, Code: "state_changed", Message: "The campaign was changed while this request was being handled. Reload it and try again."}
 	case errors.Is(err, campaign.ErrVersionMismatch):
@@ -182,7 +204,9 @@ func llmProblem(err error) *problem {
 		return p
 	case errors.Is(err, llm.ErrMaxTokens):
 		return &problem{Status: http.StatusBadGateway, Code: "llm_output_truncated", Message: "The model's answer was cut off. Try a shorter brief."}
-	case errors.Is(err, llm.ErrTimeout), errors.Is(err, context.DeadlineExceeded), errors.Is(err, errTaskTimeout):
+	case errors.Is(err, llm.ErrTimeout), errors.Is(err, errTaskTimeout):
+		// A bare context.DeadlineExceeded is not matched on purpose: a database call that ran into its own deadline is not
+		// a slow model. The generation turns its own deadline into errTaskTimeout (see taskTimeout).
 		return &problem{Status: http.StatusGatewayTimeout, Code: "llm_timeout", Message: "The model took too long to answer. Try again."}
 	case errors.Is(err, llm.ErrUnavailable):
 		return &problem{Status: http.StatusServiceUnavailable, Code: "llm_unavailable", Message: "The model provider is not available. Try again later."}

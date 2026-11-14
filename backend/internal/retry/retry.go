@@ -20,6 +20,7 @@ import (
 	"math"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -219,12 +220,21 @@ func describe(r Result) string {
 	case r.Err != nil && isTimeout(r.Err):
 		return "timeout"
 	case r.Err != nil:
-		return "request failed: " + r.Err.Error()
+		return "request failed: " + transportReason(r.Err)
 	case r.Kind == RateLimited && r.RetryAfter > 0:
 		return fmt.Sprintf("http %d, retry after %s", r.Status, r.RetryAfter)
 	default:
 		return fmt.Sprintf("http %d", r.Status)
 	}
+}
+
+// transportReason is the cause of a failed request without the request itself. An *url.Error prints the whole URL (method,
+// query, user name), which can carry a credential, and this text is stored in last_error and shown on the dashboard.
+func transportReason(err error) string {
+	if ue, ok := errors.AsType[*url.Error](err); ok && ue.Err != nil {
+		return ue.Err.Error()
+	}
+	return err.Error()
 }
 
 func isTimeout(err error) bool {

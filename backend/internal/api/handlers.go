@@ -125,16 +125,21 @@ func (s *Server) runSegment(ctx context.Context, c campaign.Campaign, id string)
 
 	res, err := s.gen.Segment(ctx, c.Brief)
 	if err != nil {
+		err = taskTimeout(err)
 		s.metrics.ObserveLLM("segment", outcomeOf(err), time.Since(start))
 		return campaign.Campaign{}, err
 	}
 	s.metrics.ObserveLLM("segment", "ok", time.Since(start))
 
-	aud, err := s.store.CountAudience(ctx, res.Rule)
+	// The model's time is spent; counting and saving get a deadline of their own, so a generation that ended late is not
+	// lost to the budget that was meant for the model.
+	dbCtx, cancelDB := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+	defer cancelDB()
+	aud, err := s.store.CountAudience(dbCtx, res.Rule)
 	if err != nil {
 		return campaign.Campaign{}, err
 	}
-	return s.store.SetSegment(ctx, c, res.JSON, res.Rule, aud)
+	return s.store.SetSegment(dbCtx, c, res.JSON, res.Rule, aud)
 }
 
 // GET /api/campaigns
@@ -163,7 +168,18 @@ func (s *Server) getCampaign(w http.ResponseWriter, r *http.Request) error {
 
 // POST /api/campaigns/{id}/segment
 func (s *Server) regenerateSegment(w http.ResponseWriter, r *http.Request) error {
-	c, err := s.loadCampaign(r)
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	// The lock comes before the campaign is read: what is checked below must still be true when the model is asked, and a
+	// generation that finished a moment ago has already changed it.
+	unlock, ok := s.locks.tryLock(id)
+	if !ok {
+		return errGenerationInProgress
+	}
+	defer unlock()
+	c, err := s.store.Get(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -171,11 +187,6 @@ func (s *Server) regenerateSegment(w http.ResponseWriter, r *http.Request) error
 	if _, err := campaign.Next(c.Status, campaign.ActGenerateSegment); err != nil {
 		return err
 	}
-	unlock, ok := s.locks.tryLock(c.ID)
-	if !ok {
-		return errGenerationInProgress
-	}
-	defer unlock()
 	release, err := s.gate.acquire(r.Context())
 	if err != nil {
 		return err

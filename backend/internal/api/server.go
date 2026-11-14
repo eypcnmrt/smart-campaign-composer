@@ -60,6 +60,9 @@ type Config struct {
 	// stream events may wait for a slow client before the stream is cut (default 256).
 	SSEPing     time.Duration
 	EventBuffer int
+	// SSEWriteTimeout bounds one write to a stream (default 15s). A client that keeps the connection open and stops reading
+	// would otherwise hold the campaign's generation lock and a model slot for as long as it likes.
+	SSEWriteTimeout time.Duration
 }
 
 func (c Config) withDefaults() Config {
@@ -90,6 +93,9 @@ func (c Config) withDefaults() Config {
 	if c.EventBuffer == 0 {
 		c.EventBuffer = 256
 	}
+	if c.SSEWriteTimeout == 0 {
+		c.SSEWriteTimeout = 15 * time.Second
+	}
 	return c
 }
 
@@ -99,7 +105,7 @@ func (c Config) validate() error {
 		return errors.New("the body and brief limits must be positive")
 	case c.LLMConcurrency < 1:
 		return errors.New("the generation concurrency must be at least 1")
-	case c.LLMWait < 0, c.SegmentTimeout < 0, c.ContentTimeout < 0, c.WorkerStaleAfter < 0, c.SSEPing < 0:
+	case c.LLMWait < 0, c.SegmentTimeout < 0, c.ContentTimeout < 0, c.WorkerStaleAfter < 0, c.SSEPing < 0, c.SSEWriteTimeout < 0:
 		return errors.New("durations must not be negative")
 	case c.EventBuffer < 1:
 		return errors.New("the event buffer must hold at least one event")

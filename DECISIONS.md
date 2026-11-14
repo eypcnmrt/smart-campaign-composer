@@ -491,6 +491,120 @@ here when the README is written.
 - **Alternative:** keyword matching in Go (rejected above), or a channel selector in the UI only (the brief would have to be
   read twice, and "email campaign" would still open an SMS channel).
 
+### The state machine is a pure function; every change is a conditional UPDATE; the content survives a new segment
+- **Decision:** `campaign.Next(state, action)` is a table (`GenerateSegment`, `SetChannels`, `SaveContent`, `Approve`) and a
+  test walks every state against every action. A new segment is allowed in draft, audience_ready and content_ready, and keeps
+  the state it was in: a campaign with content stays `content_ready` (the text is not thrown away, but the version moves, so
+  the approval must name the new one). Channels are set from the brief when the campaign leaves draft and belong to the
+  marketer afterwards. `approved` exists only inside the approval transaction; the same transaction moves the campaign to
+  `sending` (or to `completed` when nobody is eligible), so the worker and the dashboard never see it. Every write is
+  `UPDATE ... WHERE id = $1 AND status = <read> AND version = <read>` (`ErrStateChanged` when it matches no row), and the
+  fragments that assign columns are constants of the package, never request data.
+- **Why:** the check and the write cannot be separated by a concurrent request, and an edit computed from stale data cannot
+  overwrite newer work. The API checks the state first and the values second, so an edit after approval is a 409 whatever its
+  body says.
+- **Alternative:** a trigger or a lock held while the model runs (hidden logic, or a connection per generation).
+
+### Approval: version, one transaction, a snapshot the worker reads
+- **Decision:** the approve request must send the `version` the marketer reviewed (422 without it, 409 `version_mismatch` with
+  the current version when it differs). `Store.Approve` locks the row (`FOR UPDATE`), checks the state (so the second approval
+  is a 409 `invalid_state`), checks the version, decodes and validates the stored rule and content again, counts the
+  audience at the transaction's `now()` (the instant `approved_at` gets, so the count is the audience the queue selects),
+  requires `acknowledge_warnings` when there are warnings, copies rule, content, channels and the warnings into
+  `approved_rule`, `approved_content`, `approved_channels` and `approved_warnings`, and calls `queue.EnqueueTx` for the
+  recipients. `Enqueue` and `Claim` read only the snapshot columns. Checks in the schema keep a campaign from being approved
+  without a complete snapshot.
+- **Why:** content that was reviewed is the content that is sent, even if the editable columns are changed afterwards (a test
+  changes `content` after the approval and the worker still gets the approved text). Eight concurrent approvals of one campaign
+  queue the recipients once (tested). The rule is stored as the validated model JSON; `jsonb` makes duplicate keys last-wins,
+  the same as `segment.Decode`, so the stored text and the validated value agree.
+- **Alternative:** approve by id only (a campaign edited between review and click is approved unseen), or snapshot into a
+  separate table (a second place to keep consistent).
+
+### One error shape; codes are the contract
+- **Decision:** every error response, including 404 and 405, is `{"error": {"code", "message", "details"}}`. Codes used:
+  `invalid_json` 400, `validation_failed` 422 (details: `[{path, message}]`), `acknowledgement_required` 422 (details: the
+  warnings), `not_found` 404 (also a malformed id), `invalid_state`, `state_changed`, `version_mismatch`, `content_exists`,
+  `generation_in_progress` 409, `body_too_large` 413, `llm_refused` 422, `llm_rate_limited` 429 (with `Retry-After` and
+  `details.retry_after_seconds` when the provider gave a wait), `llm_invalid_output` and `llm_output_truncated` and `llm_error`
+  502, `llm_unavailable` and `llm_busy` 503, `llm_timeout` 504, `internal` 500 (details: the request id, never the cause).
+  Errors the API does not know are logged once with the request id and answered as `internal`; provider error text and SQL never
+  reach the client. A request that fails to generate leaves its draft behind and returns `details.campaign_id`, so it can be
+  retried with `POST /api/campaigns/{id}/segment`. Limits: body 64 KiB, brief 2,000 characters (not bytes), list limit 1-200.
+- **Why:** the UI maps codes to its own wording and must not parse sentences. A draft that survives a failed generation is
+  cheaper than losing the brief the marketer typed.
+
+### The content stream: reconnect-safe, cancel-safe, never blocking the model
+- **Decision:** `GET /api/campaigns/{id}/content/stream` is Server-Sent Events: `attempt`, then `delta {field, text}` (or `raw`),
+  then `done {campaign}` or `error {error}`, always exactly one of the last two. The first line is `retry: 3600000`.
+  - A campaign that is already `content_ready` is only generated again with `?regenerate=true`; otherwise 409 `content_exists`
+    before the model is called. A browser's `EventSource` reconnects by itself when the connection drops and again after the
+    server ends a stream; without the rule that would spend credit and overwrite hand edits.
+  - The save is conditional on the version the stream started at: an edit made while the model writes wins, the stream ends with
+    `state_changed`, and the generated text is dropped. The save does not depend on the connection: a generation that finished
+    is saved even if the client left in that instant (it was paid for).
+  - The model's read loop calls an `onEvent` that only puts the event in a buffer (256). A client that does not read fills it, and
+    the generation is canceled with the cause `client_too_slow` instead of the read loop waiting on the socket.
+  - Closing the connection cancels the request context, which cancels the model request; the handler waits for the generation
+    to end before it gives back the per-campaign lock and the model slot. SIGTERM calls `BeginShutdown` first: open streams
+    end with `server_shutting_down`, then `http.Server.Shutdown` waits (15 s) for them.
+  - One generation per campaign at a time (409 `generation_in_progress`, also against `POST .../segment`), kept in memory.
+- **Why:** each rule closes a concrete failure: a reconnect storm, a lost edit, a stalled provider read, a leaked slot. The
+  per-campaign lock is per process: the api is one instance (a second would need an advisory lock like the worker's).
+- **Alternative:** WebSocket (no automatic reconnect to guard against, but more machinery), or holding the stream's events until
+  validation (gives up the live view the assignment asks for).
+
+### Generation limits close the "no deadline in compose" issue
+- **Decision:** at most `LLM_MAX_CONCURRENCY` (2) generations run at once; a request waits 5 s for a slot and then gets 503
+  `llm_busy` with `Retry-After` (and `POST /api/campaigns` takes the slot before it creates the draft, so a busy server leaves
+  none behind). A whole segment generation, repairs included, is limited to 2 minutes and a content generation to 5.
+- **Why:** with a real key every request spends credit; the repair loop can make up to nine HTTP requests per task.
+
+### Stats: one indexed query, and the worker's state next to the counts
+- **Decision:** `StatsSQL` groups `deliveries` by channel, status and `attempts > 0` for one campaign; "retrying" is a queued
+  delivery that has been tried. The index is `(campaign_id, status, channel, attempts)` (migration 0005) and the old
+  `(campaign_id, status)` index is dropped, being its prefix. The completion check (`campaign_id = c.id AND status IN
+  ('queued','sending')`) uses the prefix. `provider.state` per channel comes from `worker_channel_status`: `ok` (fresh report,
+  circuit closed), `provider_unreachable` (fresh report, circuit open or half-open, with the last error) and `worker_down` (no
+  report, or older than `WORKER_STALE_AFTER`, 10 s, which wins over what an old report says); the age is measured by the
+  database.
+- **EXPLAIN, checked in a test with 20 campaigns of 1,000 deliveries:** the stats query is a `Bitmap Index Scan` on the new index
+  and never a sequential scan; with bitmap and sequential scans switched off it is an `Index Only Scan` on the same index,
+  which shows the index covers the query. The default plan is a bitmap scan only because the visibility map of this PostgreSQL
+  17.6 container stays empty even after `VACUUM` (`relallvisible` 0, `pg_visibility` agrees); autovacuum fills it in a running
+  database and the planner then prefers the index-only scan. The completion check is a `Nested Loop Anti Join` with an index scan
+  on the new index and an index-only subplan for the failed check.
+- **Why:** the dashboard polls once a second; both queries stay off the table.
+
+### Metrics: the api counts requests and generations, the database counts deliveries, the worker exposes its own
+- **Decision:** `/metrics` of the api has `scc_http_request_duration_seconds{method,route,status}` (route pattern, never the raw
+  path), `scc_llm_calls_total{task,outcome}` with `scc_llm_call_duration_seconds` (one per generation, repairs included, outcome
+  from the error code: ok, refused, rate_limited, timeout, invalid_output, ...) and `scc_deliveries{channel,status}`, which is
+  counted by a query when the scrape arrives, so it covers every process that writes deliveries; if that query fails the scrape
+  is a 500, not a zero. The worker serves its own `/metrics` and `/healthz` on `WORKER_METRICS_ADDR` (`:9091`, inside the compose
+  network only): `scc_worker_attempts_total{channel,result}` (including `refunded`), `scc_worker_circuit_state`,
+  `scc_worker_channel_lock_held` and `scc_worker_heartbeat_errors_total`. The worker package defines an `Observer` interface and
+  does not import Prometheus; `internal/metrics` implements it.
+- **Why:** deliveries are written by the worker and read by the api, so neither process could count them alone without the other
+  seeing a partial picture. Using the route pattern keeps the number of series fixed.
+
+### Dependencies, pinned
+- `github.com/go-chi/chi/v5 v5.5.0` (released 14 October 2026): a small router with route patterns for the metrics labels and
+  the `{id}` parameter, no dependencies of its own. `github.com/prometheus/client_golang v1.25.0` (8 October 2026): the
+  standard client; it brings `client_model`, `common`, `procfs` and `protobuf`, and raises `golang.org/x/sync`, `x/text` and
+  `x/sys` by a minor version. Both are older than a month, stable releases, and exact versions in `go.mod`/`go.sum`.
+- **Alternative:** `net/http` only for routing (no route pattern for labels without writing it) and a hand-written text format
+  for the metrics (more code to get wrong).
+
+### Smaller choices made while building the API
+- The preview shows the first users of the segment who consented to at least one of the campaign's channels; a channel that is off,
+  or that the user did not consent to, is `null` in the sample. `GET /api/campaigns` returns summaries (newest first, 50 by
+  default). A malformed or zero id is a 404. A request canceled by the client is logged as 499 `client_closed` and never read.
+- `docker-compose.yml` publishes the api on `127.0.0.1:8080` only (there is no authentication and a key can spend credit); the
+  worker's metrics port is not published. Both have healthchecks (`/readyz`, `/healthz`).
+- The api reads `ANTHROPIC_API_KEY` from the compose environment (empty by default) and logs the mode, model and reason at
+  start-up, never the key.
+
 ## Docker and the test commands
 
 ### `make test` is a compose file of its own, and the hook tests skip Windows drive paths on Linux
@@ -550,6 +664,35 @@ here when the README is written.
   reason is `ErrUnavailable`, and the SDK error stays in the chain of API errors; generated text containing U+FFFD is
   rejected; `ANTHROPIC_FALLBACK` is parsed explicitly (a typo turns the fallback off instead of leaving it on).
 
+## Fixed after the second review (the API stage)
+The `silent-failure-hunter` review of the day's code found no data corruption and no double send; what it found was in error
+reporting and in the stream's write path.
+- **Known failures were never logged.** `problemOf` logged only unknown errors, so a wrong key or model name (`llm_error`, 502),
+  an unavailable provider or a rate limit left only a status line. It now logs every 5xx and every `llm_*` answer with the request
+  id and the cause; the client's answer stays generic. Expected client mistakes (404, 409, 422) are not logged.
+- **A database deadline was reported as a slow model** (`errors.Is(err, context.DeadlineExceeded)` in the LLM mapping), and the
+  segment was counted and saved under the model's own budget, so a late answer could be lost. The generation now turns only its
+  own deadline into `errTaskTimeout`, a bare deadline is no longer an LLM timeout, and counting and saving get a context of their
+  own (15 s).
+- **A reader that stopped reading held the generation lock and a model slot.** Every write to the stream now has a deadline
+  (`SSEWriteTimeout`, 15 s); a missed deadline is "the client is gone". A test opens a raw connection, never reads, and requires
+  the model request to be canceled and the campaign to be generatable again.
+- **`cause()` replaced any error** by the shutdown, slow-client or timeout cause while the context was ending. It now replaces
+  only context errors, so a real failure (a database error, `state_changed`) keeps its own face.
+- **Lost outcomes on a gone client:** what a generation produced after its client left (a failed save) is logged; a `done` event
+  that cannot be encoded is replaced by an `error` event, so a stream always ends with one of the two; the panic log has a stack.
+- **An approval could report failure after it had been applied** (a failed COMMIT reply, or a read-back that failed). Both now
+  return `ErrApprovalUnconfirmed`, answered as 500 `approval_unconfirmed` ("may have been applied, check before approving
+  again"); the read-back has a context of its own. The approval `UPDATE` checks `RowsAffected`, and the transaction is rolled
+  back unconditionally (a no-op after COMMIT), so a panic cannot leave the row lock held (also in `Enqueue`).
+- **`last_error` carried the request URL.** A transport error printed `Post "https://user@host/path?token=..."`, which went into
+  the table and out through `/stats`. Only the cause is kept (`connection refused`, `timeout`, ...); a test requires a token and
+  a user name in the URL to be absent.
+- `writeJSON` encodes before it sends (an unencodable value is a 500, not a 200 with an empty body); the segment regeneration and
+  the content stream take the per-campaign lock before they read the campaign (a stream that finished a moment ago is seen, so
+  a reconnecting client cannot spend credit in the gap); a panic after the response has started aborts the connection instead of
+  writing a JSON error into an event stream.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
@@ -557,13 +700,8 @@ silent-failure review of the overnight session; defects that were clear-cut were
 "Fixed after the review" above.)
 
 ### LLM layer (internal/llm, internal/compose)
-- **`compose.Content` emits no terminal event and calls `onEvent` inside the SDK read loop.** After a final error the text
-  already streamed stays on screen, and a blocking SSE writer stalls the provider read. The API layer must send a
-  failure/discard event and keep `onEvent` non-blocking (buffer, cancel on overflow).
-- **No task-level deadline in compose**: up to 3 repair attempts times 3 HTTP tries is 9 requests, about 12 minutes in the
-  worst case for content. Add a per-task timeout when the API calls it.
-- Duplicate JSON keys resolve to last-wins in `segment.Decode` and `content.Parse` (the preview extractor rejects them),
-  and the stored snapshot is the raw model text, not a re-encoding of the validated value.
+- Duplicate JSON keys resolve to last-wins in `segment.Decode` and `content.Parse` (the preview extractor rejects them). The
+  stored snapshot is the validated model text; `jsonb` applies the same last-wins rule, so the two agree (see "Approval").
 - The demo mock drops or inverts some criteria: an amount without a direction ("500 TL altında") produces no condition and
   no `unsupported_criteria` entry, "son 400 gün" becomes 30 days, "sepete ürün eklemeyen" selects people who did add to
   cart. The mocks also return a bare `ctx.Err()` where the real client returns `ErrTimeout`. Demo-only, low.
@@ -573,14 +711,41 @@ silent-failure review of the overnight session; defects that were clear-cut were
   `ErrUnavailable` and would be retried; a blank city renders as "Türkiye" inside prose.
 
 ### Worker, queue and operations
-- `composer api` is still a stub that exits 0, which a restart policy or healthcheck would read as a finished healthy
-  service. It should exit non-zero until implemented (nothing in compose runs it yet).
 - Low: `Finish` reports every "no row updated" as a lost lease (it may also be a deleted campaign); `seed` treats a
   conflict with an unrelated row as "already seeded"; the mock provider counts a request whose client disconnected during
   its delay in `requests` but in no outcome, and its `arrivals` slice grows without bound; the soak leaves users with
   `total_orders = 1,000,000` in the database it runs against (the compose soak project is thrown away afterwards).
 
+### Campaign API and worker (second review, design-level points)
+- **An approval that queues nothing reports success.** A rule that matches nobody, or nobody who consented to the chosen
+  channels, goes `approved` and straight to `completed` with `enqueued` of 0 and no warning, because the warnings cover only
+  "matches everyone" and unsupported criteria. An `empty_audience` warning that needs an acknowledgement would fit; it is a
+  product decision (is a zero-recipient campaign an error or a no-op?). The acknowledgement is also a plain boolean, and the
+  audience is counted again at approval, so the warnings can differ from the ones the marketer saw; the version check does not
+  cover that.
+- **`LLM_MODE=auto` without a key serves the demo mock** (by design, logged and shown in `/api/config`). A key that is blank or
+  misspelled in the compose environment looks like a working system until the badge is read; `LLM_MODE=anthropic` is the strict
+  setting.
+- **While a circuit is open the dispatcher does not touch its lock connection**, so a dead lock session is noticed at the first
+  probe, up to the cooldown (10 s) later. If another worker took the channel meanwhile, both write `worker_channel_status` for a
+  moment and the dashboard can flap; no message can be sent twice (the stale holder claims nothing). A `SELECT 1` on the lock
+  connection each poll would close the window.
+- **A result lost on the last attempt can end as `failed` although the provider accepted the message**: if the outcome of the
+  confirmation request cannot be written four times, the lease expires and recovery marks it "outcome unknown". The text hedges
+  ("may have delivered"), but "provider accepted = database sent" holds less strictly there; the same wording also covers a
+  confirmation that was claimed and never sent (a worker killed in between), where "ended without an answer" is not verified.
+- **Maintenance failures are log-only** (lease recovery, campaign completion): no counter or metric like `RecordErrors` and
+  `HeartbeatErrors`. If they fail for good, rows stay `sending` and campaigns never complete while the heartbeat still says the
+  worker is fine.
+- **A segment generation is not tied to the shutdown signal**: one that is running (up to 2 minutes) outlives the 15 s grace, and
+  its client gets a cut connection instead of `server_shutting_down`; the draft stays, as documented. Only the content stream
+  listens to the shutdown.
+
 ### Environment
+- The guard hook stopped four commands during the API stage and none was worked around: a `rm` of a temporary copy in `/tmp`
+  (outside the project; the copy was left, it is a test file without secrets), and three commands whose text contained a dotenv
+  file name or the words of the blocked compose subcommand (a directory listing filtered for the name, and two scripts that edited
+  documentation). The documentation edits were made with the editor tool instead, without the blocked wording.
 - The guard test cases with Windows drive paths run only on Windows (see "Docker and the test commands"). The guard has no
   Linux counterpart for them.
 - Nothing was blocked by a hook in a way that needs a dotenv change: the optional compose settings were added to

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -305,6 +306,19 @@ func TestDescribe_timeouts(t *testing.T) {
 	}
 	if got := describe(Result{Kind: Transient, Err: errors.New("connection refused")}); !strings.Contains(got, "connection refused") {
 		t.Errorf("describe = %q", got)
+	}
+}
+
+// last_error is shown on the dashboard: the URL of the request (it may hold a token or a user name) must not be in it.
+func TestDescribe_doesNotLeakTheRequestURL(t *testing.T) {
+	t.Parallel()
+	err := &url.Error{Op: "Post", URL: "https://user@provider.example/sms?token=SECRET", Err: errors.New("dial tcp 10.0.0.5:443: connect: connection refused")}
+	got := describe(Result{Kind: Transient, Err: err})
+	if strings.Contains(got, "SECRET") || strings.Contains(got, "user@") || strings.Contains(got, "provider.example") {
+		t.Fatalf("describe = %q leaks the request URL", got)
+	}
+	if !strings.Contains(got, "connection refused") {
+		t.Fatalf("describe = %q lost the cause", got)
 	}
 }
 

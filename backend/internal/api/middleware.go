@@ -76,6 +76,11 @@ func (s *Server) recoverer(next http.Handler) http.Handler {
 			}
 			id := middleware.GetReqID(r.Context())
 			s.log.Error("panic in a handler", "request_id", id, "panic", rec, "stack", string(debug.Stack()))
+			if sr, ok := w.(*statusRecorder); ok && sr.wroteHeader {
+				// A stream (or any answer) is already under way: a JSON error in the middle of it would only corrupt it. The
+				// connection is cut, which a client sees as a failed stream.
+				panic(http.ErrAbortHandler)
+			}
 			writeProblem(w, &problem{Status: http.StatusInternalServerError, Code: "internal", Message: "Something went wrong on the server.",
 				Details: map[string]any{"request_id": id}})
 		}()

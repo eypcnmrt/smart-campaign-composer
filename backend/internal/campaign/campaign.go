@@ -83,6 +83,9 @@ var (
 	// ErrVersionMismatch means the approval named a version other than the current one: the marketer reviewed something
 	// that is no longer what the campaign holds.
 	ErrVersionMismatch = errors.New("the campaign is at a different version than the one that was reviewed")
+	// ErrApprovalUnconfirmed means the approval may have been applied although the call failed: the COMMIT did not report back, or
+	// the campaign could not be read afterwards. Approving again is wrong; reading the campaign says what happened.
+	ErrApprovalUnconfirmed = errors.New("the approval may have been applied")
 )
 
 // VersionMismatchError carries the current version, so the client can reload and review again.

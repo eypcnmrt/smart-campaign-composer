@@ -218,11 +218,11 @@ func (s *Store) Approve(ctx context.Context, id int64, version int, acknowledge 
 	if err != nil {
 		return ApproveResult{}, fmt.Errorf("begin: %w", err)
 	}
+	// Always rolled back unless committed: after a commit Rollback only reports pgx.ErrTxClosed, and after an error or a panic it
+	// releases the row lock and the connection instead of holding them until the process ends.
 	defer func() {
-		if err != nil {
-			if rbErr := tx.Rollback(context.WithoutCancel(ctx)); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-				err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
-			}
+		if rbErr := tx.Rollback(context.WithoutCancel(ctx)); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) && err != nil {
+			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
 		}
 	}()
 
@@ -281,23 +281,35 @@ func (s *Store) Approve(ctx context.Context, id int64, version int, acknowledge 
 		return ApproveResult{}, fmt.Errorf("encoding the warnings: %w", err)
 	}
 
-	if _, err = tx.Exec(ctx,
+	if tag, uerr := tx.Exec(ctx,
 		`UPDATE campaigns SET status = 'approved', version = version + 1, approved_at = now(), updated_at = now(),
 			approved_rule = segment_rule, approved_content = content, approved_channels = channels, approved_warnings = $2::jsonb
-		 WHERE id = $1 AND status = $3 AND version = $4`, id, warningsJSON, status, current); err != nil {
+WHERE id = $1 AND status = $3 AND version = $4`, id, warningsJSON, status, current); uerr != nil {
+		err = uerr
 		return ApproveResult{}, fmt.Errorf("approving campaign %d: %w", id, err)
+	} else if tag.RowsAffected() != 1 {
+		// Cannot happen while the row is locked above; if it ever does, nothing may be queued for it.
+		err = fmt.Errorf("approving campaign %d: %w", id, ErrStateChanged)
+		return ApproveResult{}, err
 	}
 	enq, err := queue.EnqueueTx(ctx, tx, id)
 	if err != nil {
 		return ApproveResult{}, fmt.Errorf("queueing the recipients of campaign %d: %w", id, err)
 	}
 	if err = tx.Commit(ctx); err != nil {
-		return ApproveResult{}, fmt.Errorf("commit: %w", err)
+		// A failed COMMIT does not say whether the transaction was applied (the connection can drop after the server
+		// committed), so the caller must not be told "it failed, try again".
+		err = fmt.Errorf("%w: commit: %w", ErrApprovalUnconfirmed, err)
+		return ApproveResult{}, err
 	}
 
-	c, err := s.Get(ctx, id)
+	// The approval is committed. Reading it back gets a context of its own: a request that was canceled a moment ago must not
+	// turn a done approval into an error.
+	readCtx, cancelRead := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+	defer cancelRead()
+	c, err := s.Get(readCtx, id)
 	if err != nil {
-		return ApproveResult{}, fmt.Errorf("the approval of campaign %d is committed but it could not be read back: %w", id, err)
+		return ApproveResult{}, fmt.Errorf("%w: reading campaign %d back: %w", ErrApprovalUnconfirmed, id, err)
 	}
 	return ApproveResult{Campaign: c, Enqueued: enq.Created}, nil
 }

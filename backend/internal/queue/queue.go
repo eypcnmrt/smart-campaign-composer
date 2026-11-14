@@ -85,11 +85,10 @@ func (q *Queue) Enqueue(ctx context.Context, campaignID int64) (res EnqueueResul
 	if err != nil {
 		return EnqueueResult{}, fmt.Errorf("begin: %w", err)
 	}
+	// Always rolled back unless committed (a no-op after a commit), so a panic cannot leave the row lock held.
 	defer func() {
-		if err != nil {
-			if rbErr := tx.Rollback(context.WithoutCancel(ctx)); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) {
-				err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
-			}
+		if rbErr := tx.Rollback(context.WithoutCancel(ctx)); rbErr != nil && !errors.Is(rbErr, pgx.ErrTxClosed) && err != nil {
+			err = errors.Join(err, fmt.Errorf("rollback: %w", rbErr))
 		}
 	}()
 	if res, err = EnqueueTx(ctx, tx, campaignID); err != nil {

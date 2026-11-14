@@ -8,11 +8,12 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - Runtime: Docker Compose. LLM access goes through the `LLMClient` interface (Anthropic or mock).
 
 ## Commands
-- `docker compose up` - db, migrate, seed, mock-provider, worker (api and web come later); every setting has a default, no dotenv file needed
+- `docker compose up` - db, migrate, seed, mock-provider, worker and the api (127.0.0.1:8080; `LLM_MODE=mock` forces the demo model even when a key is set); the web app comes later; every setting has a default, no dotenv file needed
 - `make test` - gofmt, `go vet`, `go test -race` incl. PostgreSQL integration tests (`-tags=integration`, fail instead of skip without a database) and the hook/scanner tests, all in Docker, no API key (frontend tests come later)
-- `make soak` - 5,000 messages through the real containers with a chaos provider; checks no double send, 100/s cap, Retry-After
+- `make soak` - 5,000 messages through the real containers with a chaos provider; checks no double send, 100/s cap, Retry-After (about 3-4 minutes: the default backoff starts at 15 s)
 - Do not run `docker compose config` (the guard blocks it); verify with `docker compose up -d` and `docker compose ps -a`
-- Packages added in `backend/internal/`: `migrate`, `db`, `testdb`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `worker`, `soak`; SQL in `backend/migrations/`
+- A subset of the tests with the database: `docker compose -f docker-compose.test.yml run --rm backend sh -c "cd backend && go test -race -tags=integration -count=1 -run NAME ./internal/PKG/"` (then `docker compose -f docker-compose.test.yml down -v`)
+- Packages added in `backend/internal/`: `migrate`, `db`, `testdb`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `worker` (queue dispatcher, circuit breaker, channel lock, heartbeat), `soak`, `campaign` (state machine, store, approval, stats), `api` (chi handlers, SSE stream), `metrics` (Prometheus); SQL in `backend/migrations/`
 - `make fmt` / `make vet` / `make test-unit` - Go formatting, `go vet`, `go test ./...` (local, no Docker, no API key)
 - `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per target; `-race` runs later in Docker (needs a C compiler on Windows)
 - Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`
@@ -24,7 +25,7 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - `node --test ".claude/hooks/*.test.cjs"` - tests for the protection hook and the gofmt hook
 - Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue app will live in `web/`
 - Packages in `backend/internal/`: `segment` (rule DSL, validation, SQL, JSON schema), `content` (limits, variables, render, SMS info),
-  `streamjson` (partial JSON for streamed text), `llm` (`Client`, Anthropic + mocks, `FromEnv`), `compose` (prompts and repair loop).
+  `streamjson` (partial JSON for streamed text), `llm` (`Client`, Anthropic + mocks, `FromEnv` with `LLM_MODE`), `compose` (prompts and repair loop).
   Tests never need an API key: the Anthropic client is tested against a fake API server, the repair loop with `llm.Scripted`.
 - Tool quirk: `Write`/`Edit` turn a typed backslash-u-0-0-e-7 into the character "ç" itself (lone surrogates and a doubled backslash are left alone).
   To put a literal JSON escape in a file, type a placeholder such as `¦u00e7` and replace the `¦` with a backslash with `node` afterwards.

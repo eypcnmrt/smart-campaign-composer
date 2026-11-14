@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"runtime/debug"
 	"time"
 
 	"smartcampaign/internal/campaign"
 	"smartcampaign/internal/compose"
+	"smartcampaign/internal/llm"
 )
 
 // The content stream (GET /api/campaigns/{id}/content/stream) is Server-Sent Events:
@@ -41,25 +43,41 @@ func toSSE(e compose.Event) sseEvent {
 	}
 }
 
-// sseWriter writes events to one response and flushes after each.
+// errEncoding means an event could not be turned into JSON; unlike a failed write it is not the client's doing.
+var errEncoding = errors.New("encoding an event")
+
+// sseWriter writes events to one response and flushes after each. Every write gets a deadline: a client that keeps the
+// connection open and stops reading would otherwise block the handler in the socket for as long as it likes, holding the
+// campaign's generation lock and a model slot. A write that misses the deadline is an error, which the stream treats as
+// "the client is gone".
 type sseWriter struct {
-	w  http.ResponseWriter
-	rc *http.ResponseController
+	w       http.ResponseWriter
+	rc      *http.ResponseController
+	timeout time.Duration
+}
+
+func (s *sseWriter) arm() {
+	// Not every ResponseWriter supports deadlines (a test recorder does not); then the write is simply not bounded.
+	_ = s.rc.SetWriteDeadline(time.Now().Add(s.timeout))
 }
 
 func (s *sseWriter) event(name string, data any) error {
 	b, err := json.Marshal(data) // one line: newlines inside the text are escaped
 	if err != nil {
-		return fmt.Errorf("encoding the %s event: %w", name, err)
+		return fmt.Errorf("%w: the %s event: %w", errEncoding, name, err)
 	}
+	s.arm()
 	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", name, b); err != nil {
 		return err
 	}
 	return s.rc.Flush()
 }
 
-func (s *sseWriter) comment(text string) error {
-	if _, err := io.WriteString(s.w, ": "+text+"\n\n"); err != nil {
+func (s *sseWriter) comment(text string) error { return s.raw(": " + text + "\n\n") }
+
+func (s *sseWriter) raw(text string) error {
+	s.arm()
+	if _, err := io.WriteString(s.w, text); err != nil {
 		return err
 	}
 	return s.rc.Flush()
@@ -77,7 +95,18 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return err
 	}
-	c, err := s.loadCampaign(r)
+	id, err := parseID(r)
+	if err != nil {
+		return err
+	}
+	// The lock comes before the campaign is read: a stream that finished a moment ago has already saved its content, and the
+	// "already has content" rule below must see that, or a reconnecting client would spend credit in the gap.
+	unlock, ok := s.locks.tryLock(id)
+	if !ok {
+		return errGenerationInProgress
+	}
+	defer unlock()
+	c, err := s.store.Get(r.Context(), id)
 	if err != nil {
 		return err
 	}
@@ -92,11 +121,6 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 			Message: "The campaign already has content. Generate it again explicitly with ?regenerate=true.",
 			Details: map[string]any{"hint": "regenerate=true"}}
 	}
-	unlock, ok := s.locks.tryLock(c.ID)
-	if !ok {
-		return errGenerationInProgress
-	}
-	defer unlock()
 	release, err := s.gate.acquire(r.Context())
 	if err != nil {
 		return err
@@ -110,13 +134,9 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 	h.Set("Cache-Control", "no-cache")
 	h.Set("X-Accel-Buffering", "no") // a reverse proxy must not hold the events back
 	w.WriteHeader(http.StatusOK)
-	sse := &sseWriter{w: w, rc: rc}
-	if _, err := io.WriteString(w, "retry: 3600000\n\n"); err != nil {
-		return nil
-	}
-	if err := rc.Flush(); err != nil {
-		s.log.Warn("the stream cannot be flushed", "request_id", reqID(r), "err", err)
-		return nil
+	sse := &sseWriter{w: w, rc: rc, timeout: s.cfg.SSEWriteTimeout}
+	if err := sse.raw("retry: 3600000\n\n"); err != nil {
+		return nil // the client left before the first byte
 	}
 
 	// The generation ends when the client goes away (r.Context()), when the server shuts down, or when it takes too long.
@@ -138,9 +158,9 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 		}
 	}
 	done := make(chan genOutcome, 1)
-	id := reqID(r)
+	rid := reqID(r)
 	go func() {
-		done <- s.generate(ctx, c, onEvent, id)
+		done <- s.generate(ctx, c, onEvent, rid)
 	}()
 
 	ping := time.NewTicker(s.cfg.SSEPing)
@@ -150,13 +170,13 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 		case ev := <-events:
 			if err := sse.event(ev.name, ev.data); err != nil {
 				cancel(err) // the client is gone: stop the model and wait for the generation to end before the slot is given back
-				<-done
+				s.abandoned(<-done, rid)
 				return nil
 			}
 		case <-ping.C:
 			if err := sse.comment("ping"); err != nil {
 				cancel(err)
-				<-done
+				s.abandoned(<-done, rid)
 				return nil
 			}
 		case out := <-done:
@@ -165,13 +185,14 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 				select {
 				case ev := <-events:
 					if err := sse.event(ev.name, ev.data); err != nil {
+						s.abandoned(out, rid)
 						return nil
 					}
 				default:
 					drained = true
 				}
 			}
-			s.finishStream(sse, ctx, out, id)
+			s.finishStream(sse, ctx, out, rid)
 			return nil
 		}
 	}
@@ -183,13 +204,14 @@ func (s *Server) contentStream(w http.ResponseWriter, r *http.Request) error {
 func (s *Server) generate(ctx context.Context, c campaign.Campaign, onEvent func(compose.Event), id string) (out genOutcome) {
 	defer func() {
 		if rec := recover(); rec != nil {
-			s.log.Error("panic in a generation", "request_id", id, "panic", rec)
+			s.log.Error("panic in a generation", "request_id", id, "panic", rec, "stack", string(debug.Stack()))
 			out = genOutcome{err: errors.New("panic in the generation")}
 		}
 	}()
 	start := time.Now()
 	res, err := s.gen.Content(ctx, compose.ContentInput{Brief: c.Brief, Audience: audience(c)}, onEvent)
 	if err != nil {
+		err = taskTimeout(err)
 		s.metrics.ObserveLLM("content", outcomeOf(cause(ctx, err)), time.Since(start))
 		return genOutcome{err: err}
 	}
@@ -213,6 +235,11 @@ func audience(c campaign.Campaign) string {
 // cause prefers the reason the generation was stopped (shutdown, slow client, timeout) over the bare context error that the
 // model layer wraps.
 func cause(ctx context.Context, err error) error {
+	// Only a context error is replaced: a database error or a validation problem that happens to arrive while the context is
+	// ending is what it is, and must not be reported as a shutdown or a timeout.
+	if !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, llm.ErrTimeout) && !errors.Is(err, errTaskTimeout) {
+		return err
+	}
 	if c := context.Cause(ctx); c != nil && ctx.Err() != nil && (errors.Is(c, errShuttingDown) || errors.Is(c, errSlowClient) || errors.Is(c, errTaskTimeout)) {
 		return c
 	}
@@ -222,9 +249,24 @@ func cause(ctx context.Context, err error) error {
 // finishStream writes the last event: done with the saved campaign, or error.
 func (s *Server) finishStream(sse *sseWriter, ctx context.Context, out genOutcome, id string) {
 	if out.err == nil {
-		_ = sse.event("done", out.campaign)
-		return
+		err := sse.event("done", out.campaign)
+		if !errors.Is(err, errEncoding) {
+			return // written, or the client is gone
+		}
+		// The campaign cannot be encoded: the stream must still end with one of the two events.
+		s.log.Error("the done event could not be encoded", "request_id", id, "err", err)
+		out.err = err
 	}
 	p := s.problemOf(cause(ctx, out.err), id)
-	_ = sse.event("error", p.body())
+	if err := sse.event("error", p.body()); errors.Is(err, errEncoding) {
+		s.log.Error("the error event could not be encoded", "request_id", id, "err", err)
+	}
+}
+
+// abandoned logs what a generation produced after its client was gone: a failure here (a save that did not go through) would
+// otherwise be seen nowhere, and a success was saved without anybody watching.
+func (s *Server) abandoned(out genOutcome, id string) {
+	if out.err != nil && !errors.Is(out.err, context.Canceled) {
+		s.log.Warn("a generation ended after its client left", "request_id", id, "err", out.err)
+	}
 }
