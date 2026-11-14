@@ -23,3 +23,10 @@ export function formatDateTime(iso: string): string {
   const d = new Date(iso)
   return Number.isNaN(d.getTime()) ? iso : dateTime.format(d)
 }
+
+/** At most `max` characters (code points, so an emoji is never cut in half), with an ellipsis where text was left out. Line breaks become spaces. */
+export function truncate(text: string, max: number): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  const chars = Array.from(flat)
+  return chars.length <= max ? flat : `${chars.slice(0, max - 1).join('').trimEnd()}…`
+}
