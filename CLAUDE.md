@@ -23,6 +23,11 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
   `go test -run '^$' -fuzz '^FuzzExtractor$' -fuzztime 20s ./internal/streamjson/`; this also gives `-race` a C compiler):
   `docker run --rm -v "${PWD}:/src" -w /src/backend -v scc-gomod:/go/pkg/mod -v scc-gocache:/root/.cache/go-build -e GOFLAGS=-buildvcs=false golang:1.27 go test ./...`
 - `node --test ".claude/hooks/*.test.cjs"` - tests for the protection hook and the gofmt hook
+- `ui-ux-pro-max` search script (no Python on this machine; it runs in a pinned official image, no network, repo mounted read-only at /work).
+  From PowerShell, in the repo root (the skill's own `${CLAUDE_PLUGIN_ROOT}/...` path does not exist for a project skill, use this instead):
+  `docker run --rm --network none -v "${PWD}:/work:ro" -w /work python:3.14.10-slim-trixie python -I -B .claude/skills/ui-ux-pro-max/scripts/search.py "marketing campaign dashboard" --design-system`
+  (other modes: `"<query>" --domain ux|chart|color|typography|...`, `"<query>" --stack vue`). Only `--persist` writes, and only to `design-system/<slug>/`;
+  to allow it, mount the repo writable (`:rw` instead of `:ro`) and add `--output-dir /work`. The upstream `SKILL.md` is kept unmodified.
 - Layout: Go module `smartcampaign` in `backend/` (run Go commands as `go -C backend ...`); the Vue app will live in `web/`
 - Packages in `backend/internal/`: `segment` (rule DSL, validation, SQL, JSON schema), `content` (limits, variables, render, SMS info),
   `streamjson` (partial JSON for streamed text), `llm` (`Client`, Anthropic + mocks, `FromEnv` with `LLM_MODE`), `compose` (prompts and repair loop).
