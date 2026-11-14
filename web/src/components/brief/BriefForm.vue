@@ -239,20 +239,36 @@ function submit(): void {
   list-style: none;
 }
 
+/* A button, not a drop zone: a plain frame on a white card, a tint and the action colour under the pointer, and the focus ring
+   with the action colour on the frame. */
 .example {
   width: 100%;
   padding: var(--space-2) var(--space-3);
-  border: 1px dashed var(--border-control);
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
-  background: transparent;
+  background: var(--bg-surface);
   color: var(--text);
   font-size: var(--text-sm);
   text-align: start;
+  transition:
+    background-color var(--dur-fast) var(--ease),
+    border-color var(--dur-fast) var(--ease);
 }
 
 .example:hover:not(:disabled) {
-  border-style: solid;
+  border-color: var(--action);
   background: var(--action-tint);
+}
+
+.example:focus-visible {
+  border-color: var(--action);
+  background: var(--action-tint);
+}
+
+.example:disabled {
+  background: var(--bg-sunken);
+  border-color: var(--border);
+  color: var(--text-soft);
 }
 
 .actions {
