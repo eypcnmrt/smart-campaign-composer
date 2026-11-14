@@ -66,6 +66,11 @@ describe('ChannelProgress', () => {
     expect(wrapper.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('100')
   })
 
+  it('leaves the rate meter out when the delivery is over', () => {
+    const wrapper = mount(ChannelProgress, { props: { channel: 'sms', label: 'SMS', counts: counts({ sent: 5, total: 5 }), rate: 0, live: false } })
+    expect(wrapper.find('.meter').exists()).toBe(false)
+  })
+
   it('has its own rate meter and provider state', () => {
     const wrapper = render({ sent: 1, total: 10 }, 42)
     expect(wrapper.get('.meter__value').text()).toBe('42')

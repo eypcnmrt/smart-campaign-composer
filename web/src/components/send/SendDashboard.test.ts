@@ -91,6 +91,7 @@ describe('SendDashboard', () => {
     expect(wrapper.get('.note--success').text()).toContain('Gönderim tamamlandı')
     expect(wrapper.get('.badge').text()).toBe('Tamamlandı')
     expect(wrapper.text()).toContain('Gönderim bitti; sayılar kesindir.')
+    expect(wrapper.find('.meter').exists()).toBe(false) // the rate of a finished delivery is not shown
     const calls = api.callsTo(KEY).length
     await vi.advanceTimersByTimeAsync(10_000)
     expect(api.callsTo(KEY)).toHaveLength(calls)

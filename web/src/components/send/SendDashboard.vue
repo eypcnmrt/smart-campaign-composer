@@ -72,6 +72,7 @@ const updated = computed(() => (updatedAt.value === null ? '' : formatDateTime(n
           :label="LABELS[channel] ?? channel"
           :counts="counts"
           :rate="rates[channel] ?? null"
+          :live="!finished"
         />
       </div>
 

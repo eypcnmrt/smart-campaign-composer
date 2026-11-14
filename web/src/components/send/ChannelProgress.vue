@@ -7,7 +7,8 @@ import ProviderBadge from './ProviderBadge.vue'
 import RateMeter from './RateMeter.vue'
 
 // One channel of the delivery: how far it is, the six counts, the rate against the channel's limit and the provider's health.
-const props = defineProps<{ channel: string; label: string; counts: ChannelCounts; rate: number | null }>()
+// `live` is false once the delivery is over: a rate of a finished delivery is not a figure to show.
+const props = withDefaults(defineProps<{ channel: string; label: string; counts: ChannelCounts; rate: number | null; live?: boolean }>(), { live: true })
 
 const progress = computed(() => progressOf(props.counts))
 
@@ -59,7 +60,7 @@ const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed
       </div>
     </dl>
 
-    <RateMeter :rate="rate" :label="label" />
+    <RateMeter v-if="live" :rate="rate" :label="label" />
   </section>
 </template>
 
@@ -105,6 +106,7 @@ const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed
 }
 
 .progress__percent {
+  margin-inline-end: var(--space-2);
   font-size: var(--text-xl);
   font-weight: 650;
 }
@@ -122,6 +124,8 @@ const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed
 
 .count {
   display: grid;
+  /* The name may take two lines; the number stays at the bottom, so the numbers of a row line up. */
+  grid-template-rows: 1fr auto;
   gap: 0.125rem;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
