@@ -1145,6 +1145,16 @@ reporting and in the stream's write path.
   mid-text opens the dialog, starts nothing before the answer, does nothing on "Vazgeç", and sends `regenerate=true` on confirm. The three
   fail on the old code.
 
+### The e2e run closes an outage an earlier run left on
+- **Decision:** `e2e/support/global-setup.ts` (Playwright `globalSetup`) reads the provider's outage switch before the first test and
+  turns it off; it fails the run when the switch is not there (a stack without `MOCK_CONTROL` is not the e2e stack) instead of
+  going on. The `afterEach` of the outage scenario stays (it keeps the scenarios after it clean within one run); the global setup is for
+  the runs whose process did not live to run it: `KEEP=1` reuses the stack, and a killed run leaves the switch where it was.
+- **Checked:** the switch was turned on by hand in a stack left up with `KEEP=1`, the layout scenario was run on it, and the switch
+  read `{"outage":false}` afterwards (the layout scenario never touches the switch).
+- **Not done:** deliveries a killed run left queued stay in the database of a reused stack (`KEEP=1`); a normal run starts with a clean
+  volume, so only the deliberate reuse sees them, and the scenarios count their own campaign's deliveries.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
