@@ -139,6 +139,11 @@ const BY_CODE: Record<string, Text> = {
     body: 'Bağlantınızı ve sunucunun çalıştığını kontrol edip tekrar deneyin.',
     retryable: true,
   },
+  timeout: {
+    title: 'Sunucu zamanında yanıt vermedi',
+    body: 'İstek beklenenden uzun sürdü. Bağlantınızı kontrol edip tekrar deneyin.',
+    retryable: true,
+  },
   http_error: {
     title: 'Sunucudan beklenmeyen bir yanıt geldi',
     body: 'Sunucu ya da aradaki bağlantı bir sorun yaşıyor olabilir. Biraz sonra tekrar deneyin.',

@@ -8,9 +8,10 @@ function apiError(code: string, extra: { status?: number; details?: unknown; ret
   return new ApiError({ status: extra.status ?? 400, code, message: extra.message ?? `English ${code}`, details: extra.details, retryAfterSeconds: extra.retryAfterSeconds })
 }
 
-// The codes the backend can answer with (backend/internal/api/errors.go) plus the three made in client.ts.
+// The codes the backend can answer with (backend/internal/api/errors.go) plus the four made in client.ts.
 const SERVER_CODES = [
   'network_error',
+  'timeout',
   'http_error',
   'bad_response',
   'stream_incomplete',

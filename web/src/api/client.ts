@@ -12,7 +12,8 @@ export interface ApiErrorInit {
  * Everything that can go wrong with a request, in one shape. `code` is the contract (the UI maps it to Turkish text);
  * `message` is the server's English sentence and is for logs and the "technical details" view, not for users.
  *
- * Besides the server's own codes there are three that are made here: `network_error` (no answer, status 0),
+ * Besides the server's own codes there are four that are made here: `network_error` (no answer, status 0), `timeout` (no answer
+ * within the time the caller allowed, status 0),
  * `http_error` (an answer that is not our error envelope, for example a proxy's 502 page) and `bad_response`
  * (a success that is not what the contract says).
  */
@@ -68,6 +69,8 @@ export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT'
   body?: unknown
   signal?: AbortSignal
+  /** Gives up when the whole exchange (answer and body) takes longer. Without it a half-open connection waits for ever. */
+  timeoutMs?: number
 }
 
 /** The error of a request the caller canceled is not an ApiError: it is rethrown as it is, for the caller to ignore. */
@@ -76,17 +79,20 @@ function networkError(): ApiError {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, signal } = options
+  const { method = 'GET', body, signal, timeoutMs } = options
+  const timeout = timeoutMs === undefined ? undefined : AbortSignal.timeout(timeoutMs)
+  const effective = timeout && signal ? AbortSignal.any([signal, timeout]) : (signal ?? timeout)
   const headers: Record<string, string> = { Accept: 'application/json' }
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
   let res: Response
   let text: string
   try {
-    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal })
+    res = await fetch(path, { method, headers, body: body === undefined ? undefined : JSON.stringify(body), signal: effective })
     text = await res.text()
   } catch (err) {
     if (signal?.aborted) throw err
+    if (timeout?.aborted) throw new ApiError({ status: 0, code: 'timeout', message: `No answer within ${timeoutMs} ms.` })
     throw networkError()
   }
 
@@ -135,5 +141,5 @@ export function parseConfig(data: unknown): Config {
 }
 
 export async function getConfig(signal?: AbortSignal): Promise<Config> {
-  return parseConfig(await request<unknown>('/api/config', { signal }))
+  return parseConfig(await request<unknown>('/api/config', { signal, timeoutMs: 10_000 }))
 }

@@ -1,5 +1,6 @@
 import { onScopeDispose, shallowRef, toValue, watch, type MaybeRefOrGetter, type ShallowRef } from 'vue'
 import { getStats } from '@/api/campaigns'
+import { ApiError } from '@/api/client'
 import type { Stats } from '@/api/types'
 import { createRateWindow, isInFlight, type RateWindow } from '@/domain/delivery'
 
@@ -26,7 +27,9 @@ export interface PollingOptions {
 /**
  * The delivery numbers of one campaign, asked for again every second while it is being sent and not after it is done.
  *  - One request at a time: the next one is scheduled when the last has ended, so a slow server is not buried in requests.
- *  - A failure is kept for the screen to show, and the polling goes on: a server that restarts comes back by itself.
+ *  - A failure is kept for the screen to show, and the polling goes on: a server that restarts comes back by itself. Two
+ *    exceptions: a campaign that is not found stops it (asking again every second cannot help), and a Retry-After from the
+ *    server is waited out. A request that gets no answer within 10 s fails as `timeout` (see api/campaigns.ts) and is retried.
  *  - It stops when the answer says the campaign is no longer sending, when the scope ends (the page is left), and the request
  *    in flight is aborted then.
  *  - The rate is measured over a window of several seconds from the clock of the page (performance.now), not from times that
@@ -71,6 +74,7 @@ export function useStatsPolling(id: MaybeRefOrGetter<number>, options: PollingOp
     timer = null
     const controller = new AbortController()
     request = controller
+    let wait = intervalMs
     try {
       const next = await getStats(toValue(id), controller.signal)
       if (controller.signal.aborted || mine !== generation) return
@@ -85,10 +89,15 @@ export function useStatsPolling(id: MaybeRefOrGetter<number>, options: PollingOp
     } catch (err) {
       if (controller.signal.aborted || mine !== generation) return
       error.value = err
+      if (err instanceof ApiError && err.code === 'not_found') {
+        polling.value = false
+        return
+      }
+      wait = err instanceof ApiError && err.retryAfterSeconds !== null ? Math.max(intervalMs, err.retryAfterSeconds * 1000) : intervalMs
     } finally {
       if (request === controller) request = null
     }
-    if (mine === generation) timer = setTimeout(() => void poll(mine), intervalMs)
+    if (mine === generation) timer = setTimeout(() => void poll(mine), wait)
   }
 
   function start(): void {

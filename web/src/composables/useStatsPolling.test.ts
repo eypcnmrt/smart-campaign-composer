@@ -159,6 +159,26 @@ describe('useStatsPolling', () => {
     expect(p.stats.value?.channels.sms?.sent).toBe(200)
   })
 
+  it('stops for a campaign that does not exist: asking again every second cannot help', async () => {
+    const api = installFakeApi({ [KEY]: error(404, 'not_found') })
+    const p = polling()
+    await settle()
+    expect(p.error.value).not.toBeNull()
+    expect(p.polling.value).toBe(false)
+    await vi.advanceTimersByTimeAsync(5000)
+    expect(api.callsTo(KEY)).toHaveLength(1)
+  })
+
+  it('waits out a Retry-After before asking again', async () => {
+    const api = installFakeApi({ [KEY]: error(429, 'llm_rate_limited', null, { 'Retry-After': '4' }) })
+    polling()
+    await settle()
+    await vi.advanceTimersByTimeAsync(3000)
+    expect(api.callsTo(KEY)).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(1100)
+    expect(api.callsTo(KEY)).toHaveLength(2)
+  })
+
   it('goes on after a first request that failed', async () => {
     const api = installFakeApi({ [KEY]: () => { throw new TypeError('Failed to fetch') } })
     const p = polling()

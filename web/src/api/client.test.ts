@@ -90,6 +90,36 @@ describe('request', () => {
     expect(err.status).toBe(0)
   })
 
+  it('gives up on a request that gets no answer in time, as timeout (not network_error)', async () => {
+    // A connection that never answers: the fetch only ends when its signal aborts, as a real one would.
+    stubFetch(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    )
+    const err = await failure(request('/api/x', { timeoutMs: 20 }))
+    expect(err.code).toBe('timeout')
+    expect(err.status).toBe(0)
+  })
+
+  it('still rethrows the cancellation of the caller untouched when a timeout is set too', async () => {
+    const controller = new AbortController()
+    stubFetch(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+        }),
+    )
+    const pending = request('/api/x', { signal: controller.signal, timeoutMs: 5000 }).then(
+      () => null,
+      (e: unknown) => e,
+    )
+    controller.abort()
+    const err = await pending
+    expect(err).toBeInstanceOf(DOMException)
+  })
+
   it('does not wrap the error of a request the caller canceled', async () => {
     const controller = new AbortController()
     stubFetch(async () => {

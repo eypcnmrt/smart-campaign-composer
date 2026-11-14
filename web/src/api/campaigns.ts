@@ -113,10 +113,13 @@ function parsePreview(data: unknown): PreviewSample[] {
   return data.samples as PreviewSample[]
 }
 
+/** Reads of the page's own state: the server answers these at once, so a slow one is a broken connection. */
+const READ_TIMEOUT_MS = 10_000
+
 const base = (id: number) => `/api/campaigns/${id}`
 
 export async function listCampaigns(limit = 50, signal?: AbortSignal): Promise<CampaignSummary[]> {
-  const data = await request<unknown>(`/api/campaigns?limit=${limit}`, { signal })
+  const data = await request<unknown>(`/api/campaigns?limit=${limit}`, { signal, timeoutMs: READ_TIMEOUT_MS })
   if (!isRecord(data) || !Array.isArray(data.campaigns)) throw badResponse('campaign list')
   return data.campaigns.map(parseSummary)
 }
@@ -127,7 +130,7 @@ export async function createCampaign(brief: string, signal?: AbortSignal): Promi
 }
 
 export async function getCampaign(id: number, signal?: AbortSignal): Promise<Campaign> {
-  return parseCampaign(await request<unknown>(base(id), { signal }))
+  return parseCampaign(await request<unknown>(base(id), { signal, timeoutMs: READ_TIMEOUT_MS }))
 }
 
 /** (Re)generates the segment from the brief. */
@@ -144,7 +147,7 @@ export async function saveContent(id: number, content: Content, signal?: AbortSi
 }
 
 export async function getPreview(id: number, limit = 3, signal?: AbortSignal): Promise<PreviewSample[]> {
-  return parsePreview(await request<unknown>(`${base(id)}/preview?limit=${limit}`, { signal }))
+  return parsePreview(await request<unknown>(`${base(id)}/preview?limit=${limit}`, { signal, timeoutMs: READ_TIMEOUT_MS }))
 }
 
 /** `version` is the version the marketer reviewed, as shown on screen. */
@@ -164,5 +167,5 @@ export async function approveCampaign(
 }
 
 export async function getStats(id: number, signal?: AbortSignal): Promise<Stats> {
-  return parseStats(await request<unknown>(`${base(id)}/stats`, { signal }))
+  return parseStats(await request<unknown>(`${base(id)}/stats`, { signal, timeoutMs: READ_TIMEOUT_MS }))
 }
