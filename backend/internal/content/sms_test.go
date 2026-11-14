@@ -1,6 +1,8 @@
 package content
 
 import (
+	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -85,6 +87,49 @@ func TestAnalyzeSMS(t *testing.T) {
 			if got.Encoding != tt.encoding || got.Units != tt.units || got.Segments != tt.segments {
 				t.Errorf("AnalyzeSMS(%q) = {%s, %d units, %d segments}, want {%s, %d, %d}",
 					tt.text, got.Encoding, got.Units, got.Segments, tt.encoding, tt.units, tt.segments)
+			}
+		})
+	}
+}
+
+// The same cases run in the web app (web/src/domain/sms.test.ts): the TypeScript port of AnalyzeSMS and of the character
+// count must give the numbers the server gives, or the editor would promise one thing and the saved campaign show another.
+func TestAnalyzeSMS_sharedFixture(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("testdata/sms_cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		Cases []struct {
+			Name     string   `json:"name"`
+			Text     string   `json:"text"`
+			Parts    [][2]any `json:"parts"`
+			Runes    int      `json:"runes"`
+			Encoding Encoding `json:"encoding"`
+			Units    int      `json:"units"`
+			Segments int      `json:"segments"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatal(err)
+	}
+	if len(fx.Cases) < 40 {
+		t.Fatalf("only %d cases", len(fx.Cases))
+	}
+	for _, tc := range fx.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			text := tc.Text
+			for _, p := range tc.Parts {
+				text += strings.Repeat(p[0].(string), int(p[1].(float64)))
+			}
+			if n := utf8.RuneCountInString(text); n != tc.Runes {
+				t.Errorf("runes = %d, want %d", n, tc.Runes)
+			}
+			got := AnalyzeSMS(text)
+			if got.Encoding != tc.Encoding || got.Units != tc.Units || got.Segments != tc.Segments {
+				t.Errorf("AnalyzeSMS = {%s, %d units, %d segments}, want {%s, %d, %d}", got.Encoding, got.Units, got.Segments, tc.Encoding, tc.Units, tc.Segments)
 			}
 		})
 	}

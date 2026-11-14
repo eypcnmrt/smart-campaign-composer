@@ -1,0 +1,53 @@
+{
+  "comment": "Shared by the Go AnalyzeSMS (content/sms_test.go) and the TypeScript port (web/src/domain/sms.test.ts). The text of a case is `text`, or its `parts` joined, each part being [text, how many times]. `runes` counts code points, the unit of the content limits; units, segments and encoding are what AnalyzeSMS reports. A decomposed letter (i plus a combining dot) is two runes and a ZWJ emoji sequence counts every emoji and every joiner: nothing is counted as the eye sees it.",
+  "cases": [
+    { "name": "empty", "text": "", "runes": 0, "encoding": "GSM-7", "units": 0, "segments": 0 },
+    { "name": "short ascii", "text": "Merhaba", "runes": 7, "encoding": "GSM-7", "units": 7, "segments": 1 },
+    { "name": "160 ascii", "parts": [["a", 160]], "runes": 160, "encoding": "GSM-7", "units": 160, "segments": 1 },
+    { "name": "161 ascii", "parts": [["a", 161]], "runes": 161, "encoding": "GSM-7", "units": 161, "segments": 2 },
+    { "name": "306 ascii", "parts": [["a", 306]], "runes": 306, "encoding": "GSM-7", "units": 306, "segments": 2 },
+    { "name": "307 ascii", "parts": [["a", 307]], "runes": 307, "encoding": "GSM-7", "units": 307, "segments": 3 },
+
+    { "name": "u o C with umlaut or cedilla capitals stay GSM-7", "text": "üöÇÜÖ", "runes": 5, "encoding": "GSM-7", "units": 5, "segments": 1 },
+    { "name": "braces are extension characters", "text": "{{first_name}}", "runes": 14, "encoding": "GSM-7", "units": 18, "segments": 1 },
+    { "name": "s with cedilla", "text": "ş", "runes": 1, "encoding": "UCS-2", "units": 1, "segments": 1 },
+    { "name": "lowercase c with cedilla is not GSM-7", "text": "çiçek", "runes": 5, "encoding": "UCS-2", "units": 5, "segments": 1 },
+    { "name": "g with breve", "text": "Doğum günü", "runes": 10, "encoding": "UCS-2", "units": 10, "segments": 1 },
+    { "name": "dotless i", "text": "kış", "runes": 3, "encoding": "UCS-2", "units": 3, "segments": 1 },
+    { "name": "dotted capital I", "text": "İstanbul", "runes": 8, "encoding": "UCS-2", "units": 8, "segments": 1 },
+    { "name": "mixed text is UCS-2 as a whole", "parts": [["Merhaba Ayşe, ", 1], ["a", 50]], "runes": 64, "encoding": "UCS-2", "units": 64, "segments": 1 },
+    { "name": "70 UCS-2", "parts": [["ş", 70]], "runes": 70, "encoding": "UCS-2", "units": 70, "segments": 1 },
+    { "name": "71 UCS-2", "parts": [["ş", 71]], "runes": 71, "encoding": "UCS-2", "units": 71, "segments": 2 },
+    { "name": "134 UCS-2", "parts": [["ş", 134]], "runes": 134, "encoding": "UCS-2", "units": 134, "segments": 2 },
+    { "name": "135 UCS-2", "parts": [["ş", 135]], "runes": 135, "encoding": "UCS-2", "units": 135, "segments": 3 },
+
+    { "name": "euro is two septets", "text": "€", "runes": 1, "encoding": "GSM-7", "units": 2, "segments": 1 },
+    { "name": "80 euros fit one message", "parts": [["€", 80]], "runes": 80, "encoding": "GSM-7", "units": 160, "segments": 1 },
+    { "name": "81 euros need two", "parts": [["€", 81]], "runes": 81, "encoding": "GSM-7", "units": 162, "segments": 2 },
+    { "name": "159 a plus euro", "parts": [["a", 159], ["€", 1]], "runes": 160, "encoding": "GSM-7", "units": 161, "segments": 2 },
+
+    { "name": "emoji", "text": "😀", "runes": 1, "encoding": "UCS-2", "units": 2, "segments": 1 },
+    { "name": "emoji with ascii", "text": "Hi 😀", "runes": 4, "encoding": "UCS-2", "units": 5, "segments": 1 },
+
+    { "name": "extension character at the boundary", "parts": [["a", 152], ["€", 1], ["a", 152]], "runes": 305, "encoding": "GSM-7", "units": 306, "segments": 3 },
+    { "name": "emoji at the boundary", "parts": [["ş", 66], ["😀", 1], ["ş", 66]], "runes": 133, "encoding": "UCS-2", "units": 134, "segments": 3 },
+
+    { "name": "a decomposed i with a combining dot is two runes", "text": "i\u0307", "runes": 2, "encoding": "UCS-2", "units": 2, "segments": 1 },
+    { "name": "a precomposed capital I with dot is one rune", "text": "İ", "runes": 1, "encoding": "UCS-2", "units": 1, "segments": 1 },
+    { "name": "a capital I plus a combining dot is two runes", "text": "I\u0307", "runes": 2, "encoding": "UCS-2", "units": 2, "segments": 1 },
+    { "name": "a combining dot makes the text UCS-2 although i and I are GSM-7", "parts": [["i", 30], ["\u0307", 1]], "runes": 31, "encoding": "UCS-2", "units": 31, "segments": 1 },
+    { "name": "a combining dot on the 71st unit needs a second message", "parts": [["ş", 69], ["i\u0307", 1]], "runes": 71, "encoding": "UCS-2", "units": 71, "segments": 2 },
+    { "name": "a ZWJ family emoji is seven runes and eleven units", "text": "👨\u200d👩\u200d👧\u200d👦", "runes": 7, "encoding": "UCS-2", "units": 11, "segments": 1 },
+    { "name": "six ZWJ families fill a part of 67 units, the seventh starts the next", "parts": [["👨\u200d👩\u200d👧\u200d👦", 7]], "runes": 49, "encoding": "UCS-2", "units": 77, "segments": 2 },
+    { "name": "a skin tone modifier is its own rune", "text": "👍🏽", "runes": 2, "encoding": "UCS-2", "units": 4, "segments": 1 },
+    { "name": "a variation selector is its own rune and a BMP unit", "text": "❤\ufe0f", "runes": 2, "encoding": "UCS-2", "units": 2, "segments": 1 },
+    { "name": "a no-break space is not in GSM-7", "text": "a\u00a0b", "runes": 3, "encoding": "UCS-2", "units": 3, "segments": 1 },
+
+    { "name": "the whole GSM-7 basic alphabet", "text": "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ§¿abcdefghijklmnopqrstuvwxyzäöñüà", "runes": 127, "encoding": "GSM-7", "units": 127, "segments": 1 },
+    { "name": "the whole GSM-7 extension table", "text": "^{}\\[~]|€\f", "runes": 10, "encoding": "GSM-7", "units": 20, "segments": 1 },
+    { "name": "a tab is not in GSM-7", "text": "a\tb", "runes": 3, "encoding": "UCS-2", "units": 3, "segments": 1 },
+    { "name": "a typographic apostrophe is not in GSM-7", "text": "it’s", "runes": 4, "encoding": "UCS-2", "units": 4, "segments": 1 },
+    { "name": "Greek capitals of GSM-7 stay, lowercase Greek does not", "text": "ΔΦΓ", "runes": 3, "encoding": "GSM-7", "units": 3, "segments": 1 },
+    { "name": "lowercase Greek is UCS-2", "text": "αβγ", "runes": 3, "encoding": "UCS-2", "units": 3, "segments": 1 }
+  ]
+}

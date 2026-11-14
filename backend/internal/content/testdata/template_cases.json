@@ -7,6 +7,8 @@
     { "name": "repeated variable", "field": "sms", "text": "{{first_name}} {{city}} {{city}}", "problems": [] },
     { "name": "empty", "field": "sms", "text": "", "problems": [{ "code": "empty", "params": {} }] },
     { "name": "blank", "field": "email_subject", "text": " \n\t", "problems": [{ "code": "empty", "params": {} }] },
+    { "name": "a next-line control character is whitespace to Go", "field": "sms", "text": "\u0085 \u00a0\u3000", "problems": [{ "code": "empty", "params": {} }] },
+    { "name": "a byte order mark is not whitespace to Go", "field": "sms", "text": "\ufeff", "problems": [] },
     { "name": "replacement character", "field": "sms", "text": "Merhaba \ufffd", "problems": [{ "code": "invalid_utf8", "params": {} }] },
     { "name": "sms at the limit", "field": "sms", "repeat": { "unit": "a", "count": 160 }, "problems": [] },
     { "name": "sms over the limit", "field": "sms", "repeat": { "unit": "a", "count": 161 }, "problems": [{ "code": "too_long", "params": { "length": 161, "limit": 160 } }] },
