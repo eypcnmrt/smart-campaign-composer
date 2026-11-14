@@ -52,7 +52,16 @@ func (d *decoder) add(path, msg string) {
 
 func (d *decoder) rule(top map[string]json.RawMessage) Rule {
 	var r Rule
-	d.unknownKeys("", top, "conditions", "unsupported_criteria", "explanation")
+	d.unknownKeys("", top, "conditions", "unsupported_criteria", "explanation", "channels")
+	// channels is optional here although the schema requires it: a rule without it (stored earlier, or written by hand)
+	// means "the brief names no channel", the same as an empty array. Its values are checked by Validate.
+	if raw, ok := top["channels"]; ok {
+		if isNull(raw) {
+			d.add("channels", "must be an array of strings (use an empty array when the brief names no channel)")
+		} else {
+			d.unmarshal("channels", raw, &r.Channels, "an array of strings")
+		}
+	}
 	if raw, ok := top["conditions"]; ok {
 		for i, item := range d.items("conditions", raw) {
 			r.Conditions = append(r.Conditions, d.node(elem("conditions", i), item, false))

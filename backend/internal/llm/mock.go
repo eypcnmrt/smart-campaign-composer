@@ -176,9 +176,22 @@ func demoSegment(brief string) string {
 		}
 	}
 	if len(conds) == 0 {
+		// Nothing could be expressed, so the rule falls back to the catch-all the real prompt asks for. Unless the brief
+		// itself asks for everyone, that is reported as an unsupported criterion: the scenario the API must flag.
 		conds = []any{attr("language", "in", []any{"tr", "en"})}
-		unsupported = append(unsupported, "Demo modu bu brief'ten bir kural çıkaramadı; tüm kullanıcılar seçildi")
+		if !containsAny(b, "herkes", "tum musteri", "tum kullanici", "butun musteri") {
+			unsupported = append(unsupported, "Demo modu bu brief'ten bir kural çıkaramadı; tüm kullanıcılar seçildi")
+		}
 		parts = append(parts, "tüm")
+	}
+
+	// The channels the brief names; none named is an empty list.
+	channels := []string{}
+	if strings.Contains(b, "sms") {
+		channels = append(channels, "sms")
+	}
+	if containsAny(b, "e-posta", "eposta", "email", "mail") {
+		channels = append(channels, "email")
 	}
 
 	explanation := "Demo modu: " + strings.Join(parts, ", ") + " kullanıcılar"
@@ -186,7 +199,17 @@ func demoSegment(brief string) string {
 		"conditions":           conds,
 		"unsupported_criteria": append([]string{}, unsupported...),
 		"explanation":          explanation,
+		"channels":             channels,
 	})
+}
+
+func containsAny(s string, words ...string) bool {
+	for _, w := range words {
+		if strings.Contains(s, w) {
+			return true
+		}
+	}
+	return false
 }
 
 // demoContent repeats the three property names of content.Content instead of

@@ -81,6 +81,32 @@ func TestMock_segment(t *testing.T) {
 			brief: "",
 			want:  []string{`"op":"in"`, `Demo modu bu brief`},
 		},
+		{
+			name:  "a brief that asks for everyone is the catch-all without an unsupported criterion",
+			brief: "Tüm müşterilere yeni sezon duyurusu",
+			want:  []string{`"field":"language"`, `"op":"in"`, `"unsupported_criteria":[]`, `"channels":[]`},
+			avoid: []string{`Demo modu bu brief`},
+		},
+		{
+			name:  "no channel named",
+			brief: "İzmir'deki müşteriler",
+			want:  []string{`"channels":[]`},
+		},
+		{
+			name:  "sms only",
+			brief: "İzmir'deki müşterilere SMS gönder",
+			want:  []string{`"channels":["sms"]`},
+		},
+		{
+			name:  "email only",
+			brief: "İzmir'deki müşterilere e-posta gönder",
+			want:  []string{`"channels":["email"]`},
+		},
+		{
+			name:  "both channels named",
+			brief: "İzmir'deki müşterilere SMS ve email gönder",
+			want:  []string{`"channels":["sms","email"]`},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

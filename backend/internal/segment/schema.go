@@ -74,8 +74,13 @@ func buildSchema(fs fieldSet, evTypes, evOps []string) map[string]any {
 				"description": "Parts of the brief the rules cannot express; empty when everything is covered",
 			},
 			"explanation": obj{"type": "string", "description": "One sentence describing the segment"},
+			"channels": obj{
+				"type":        "array",
+				"items":       enumOf(channelNames),
+				"description": "Channels the brief asks for; empty when the brief names none",
+			},
 		},
-		"required":             []any{"conditions", "unsupported_criteria", "explanation"},
+		"required":             []any{"conditions", "unsupported_criteria", "explanation", "channels"},
 		"additionalProperties": false,
 		"$defs":                defs,
 	}

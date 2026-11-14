@@ -134,29 +134,89 @@ func (e *RateLimitError) Error() string {
 
 func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimited }
 
-// FromEnv picks the implementation from the environment, read through getenv
-// (pass os.Getenv). Without ANTHROPIC_API_KEY the demo mock is returned and
-// Mode() reports ModeMock; no other credential source is consulted, so a
-// machine that happens to be logged in elsewhere cannot spend money by accident.
+// Names of the environment variables FromEnv reads.
+const (
+	EnvMode     = "LLM_MODE"
+	EnvAPIKey   = "ANTHROPIC_API_KEY"
+	EnvModel    = "ANTHROPIC_MODEL"
+	EnvFallback = "ANTHROPIC_FALLBACK"
+)
+
+// Values of LLM_MODE. "auto" is the default.
+const (
+	ModeSettingAuto      = "auto"
+	ModeSettingAnthropic = "anthropic"
+	ModeSettingMock      = "mock"
+)
+
+// ErrInvalidMode means LLM_MODE is none of auto, anthropic and mock.
+var ErrInvalidMode = errors.New(EnvMode + " must be auto, anthropic or mock")
+
+// ErrNoAPIKey means LLM_MODE=anthropic was asked for but there is no API key. It is an error, not a silent switch to the
+// mock: the person who set the mode wants the real model, and a demo that looks like a working system is the worst answer.
+var ErrNoAPIKey = errors.New(EnvMode + "=anthropic needs " + EnvAPIKey)
+
+// Selection is the client FromEnv chose and why, for the start-up log.
+type Selection struct {
+	Client Client
+	// Setting is LLM_MODE as configured: auto, anthropic or mock.
+	Setting string
+	// Reason says in one sentence why this client was chosen. It never contains the key.
+	Reason string
+}
+
+// FromEnv picks the implementation from the environment, read through getenv (pass os.Getenv).
 //
-//	ANTHROPIC_API_KEY   the key; empty or unset selects the mock
+//	LLM_MODE            auto (default), anthropic or mock
+//	ANTHROPIC_API_KEY   the key
 //	ANTHROPIC_MODEL     model name, default claude-opus-5-5
 //	ANTHROPIC_FALLBACK  "off" disables the server-side refusal fallback
-func FromEnv(getenv func(string) string) Client {
-	model := strings.TrimSpace(getenv("ANTHROPIC_MODEL"))
-	if model == "" {
-		model = DefaultModel
+//
+// auto uses the real client when a key is set and the demo mock otherwise; anthropic needs the key and fails with
+// ErrNoAPIKey without it; mock never calls the real API, even when a key is set. No other credential source is
+// consulted, so a machine that happens to be logged in elsewhere cannot spend money by accident.
+func FromEnv(getenv func(string) string) (Selection, error) {
+	setting := strings.ToLower(strings.TrimSpace(getenv(EnvMode)))
+	if setting == "" {
+		setting = ModeSettingAuto
 	}
-	key := strings.TrimSpace(getenv("ANTHROPIC_API_KEY"))
-	if key == "" {
-		return NewMock(MockConfig{ChunkDelay: 15 * time.Millisecond})
+	key := strings.TrimSpace(getenv(EnvAPIKey))
+
+	sel := Selection{Setting: setting}
+	switch setting {
+	case ModeSettingAuto:
+		if key == "" {
+			sel.Reason = EnvMode + "=auto and no " + EnvAPIKey + " is set, so the demo mock is used"
+			sel.Client = newDemoMock()
+		} else {
+			sel.Reason = EnvMode + "=auto and " + EnvAPIKey + " is set"
+		}
+	case ModeSettingAnthropic:
+		if key == "" {
+			return Selection{}, ErrNoAPIKey
+		}
+		sel.Reason = EnvMode + "=anthropic"
+	case ModeSettingMock:
+		sel.Reason = EnvMode + "=mock"
+		if key != "" {
+			sel.Reason += "; the set " + EnvAPIKey + " is ignored"
+		}
+		sel.Client = newDemoMock()
+	default:
+		return Selection{}, ErrInvalidMode // the value is not echoed: a key pasted into the wrong variable must not reach a log
 	}
-	return NewAnthropic(Config{
-		APIKey:   key,
-		Model:    model,
-		Fallback: fallbackEnabled(getenv("ANTHROPIC_FALLBACK")),
-	})
+
+	if sel.Client == nil {
+		model := strings.TrimSpace(getenv(EnvModel))
+		if model == "" {
+			model = DefaultModel
+		}
+		sel.Client = NewAnthropic(Config{APIKey: key, Model: model, Fallback: fallbackEnabled(getenv(EnvFallback))})
+	}
+	return sel, nil
 }
+
+func newDemoMock() Client { return NewMock(MockConfig{ChunkDelay: 15 * time.Millisecond}) }
 
 // fallbackEnabled reads ANTHROPIC_FALLBACK. Empty and the usual spellings of "yes" keep the server-side
 // refusal fallback on (the documented default). Any other value, "off" and also a typo, turns it off: a

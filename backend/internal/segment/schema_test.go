@@ -297,7 +297,7 @@ func schemaVariants(t *testing.T, doc map[string]any) (attrs []variant, events [
 // schemaDrift lists every difference between the schema and the vocabulary,
 // in both directions: vocabulary entries missing from the schema and schema
 // entries missing from the vocabulary.
-func schemaDrift(t *testing.T, doc map[string]any, fs fieldSet, evTypes, evOps []string) []string {
+func schemaDrift(t *testing.T, doc map[string]any, fs fieldSet, evTypes, evOps, chans []string) []string {
 	t.Helper()
 	var drift []string
 	report := func(format string, args ...any) { drift = append(drift, fmt.Sprintf(format, args...)) }
@@ -317,6 +317,14 @@ func schemaDrift(t *testing.T, doc map[string]any, fs fieldSet, evTypes, evOps [
 	}
 
 	attrs, events := schemaVariants(t, doc)
+
+	// the channels a brief can name: the items of the top-level "channels" array
+	channelsProp, ok := doc["properties"].(map[string]any)["channels"].(map[string]any)
+	if !ok || channelsProp["type"] != "array" {
+		report("channels: the schema has no array property \"channels\"")
+	} else {
+		diff("channels", strs(t, channelsProp["items"].(map[string]any)["enum"]), chans)
+	}
 
 	schemaOps := map[string][]string{}
 	schemaValues := map[string][]string{}
@@ -357,7 +365,7 @@ func schemaDrift(t *testing.T, doc map[string]any, fs fieldSet, evTypes, evOps [
 
 func TestSchema_matchesVocabulary(t *testing.T) {
 	t.Parallel()
-	for _, d := range schemaDrift(t, schemaDoc(t, Schema()), defaultFields, eventTypes, eventOps) {
+	for _, d := range schemaDrift(t, schemaDoc(t, Schema()), defaultFields, eventTypes, eventOps, channelNames) {
 		t.Error(d)
 	}
 }
@@ -382,8 +390,21 @@ func TestSchemaDrift_detectsVocabularyChanges(t *testing.T) {
 		edit    func(fs fieldSet) fieldSet
 		evTypes []string
 		evOps   []string
+		chans   []string // nil: the real channel list
 		want    string
 	}{
+		{
+			name:  "channel added to the vocabulary",
+			edit:  func(fs fieldSet) fieldSet { return fs },
+			chans: []string{"sms", "email", "push"},
+			want:  `"push" is in the vocabulary but not in the schema`,
+		},
+		{
+			name:  "channel removed from the vocabulary",
+			edit:  func(fs fieldSet) fieldSet { return fs },
+			chans: []string{"sms"},
+			want:  `"email" is in the schema but not in the vocabulary`,
+		},
 		{
 			name: "field added to the vocabulary",
 			edit: func(fs fieldSet) fieldSet {
@@ -470,7 +491,11 @@ func TestSchemaDrift_detectsVocabularyChanges(t *testing.T) {
 			if evTypes == nil {
 				evTypes, evOps = eventTypes, eventOps
 			}
-			drift := schemaDrift(t, doc, tt.edit(cloneFields(defaultFields)), evTypes, evOps)
+			chans := tt.chans
+			if chans == nil {
+				chans = channelNames
+			}
+			drift := schemaDrift(t, doc, tt.edit(cloneFields(defaultFields)), evTypes, evOps, chans)
 			if !slices.ContainsFunc(drift, func(d string) bool { return strings.Contains(d, tt.want) }) {
 				t.Errorf("drift = %q\nwant a report containing %s", drift, tt.want)
 			}

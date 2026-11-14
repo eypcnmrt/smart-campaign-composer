@@ -45,6 +45,9 @@ var (
 	cities    = []string{"İstanbul", "Ankara", "İzmir", "Bursa", "Antalya", "Adana", "Konya", "Kocaeli", "Gaziantep", "Kayseri", "Eskişehir", "Samsun"}
 	languages = []string{"tr", "en"}
 
+	// channelNames are the delivery channels a brief can name. They are the channel names the queue and the provider use.
+	channelNames = []string{"sms", "email"}
+
 	eventTypes = []string{"cart_add", "purchase"}
 	eventOps   = []string{opPerformed, opNotPerformed}
 
@@ -57,6 +60,9 @@ func Cities() []string { return slices.Clone(cities) }
 
 // Languages returns the canonical language list.
 func Languages() []string { return slices.Clone(languages) }
+
+// Channels returns the delivery channels a rule can name.
+func Channels() []string { return slices.Clone(channelNames) }
 
 type kind int
 

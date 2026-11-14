@@ -2,6 +2,7 @@ package llm
 
 import (
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -67,7 +68,11 @@ func TestFromEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			c := FromEnv(func(k string) string { return tt.env[k] })
+			sel, err := FromEnv(func(k string) string { return tt.env[k] })
+			if err != nil {
+				t.Fatalf("FromEnv() error = %v", err)
+			}
+			c := sel.Client
 			if c.Mode() != tt.wantMode {
 				t.Errorf("Mode() = %q, want %q", c.Mode(), tt.wantMode)
 			}
@@ -78,6 +83,72 @@ func TestFromEnv(t *testing.T) {
 				t.Errorf("fallback = %v, want %v", a.fallback, tt.wantFallback)
 			}
 		})
+	}
+}
+
+func TestFromEnv_mode(t *testing.T) {
+	t.Parallel()
+	const key = "fake-key-for-the-mode-table" // never a real key
+	tests := []struct {
+		name        string
+		env         map[string]string
+		wantErr     error
+		wantMode    Mode
+		wantSetting string
+		wantReason  string // part of the explanation for the log
+	}{
+		{"unset is auto, no key: mock", nil, nil, ModeMock, "auto", "no ANTHROPIC_API_KEY"},
+		{"unset is auto, key: anthropic", map[string]string{EnvAPIKey: key}, nil, ModeAnthropic, "auto", "ANTHROPIC_API_KEY is set"},
+		{"auto spelled out, no key", map[string]string{EnvMode: "auto"}, nil, ModeMock, "auto", "demo mock"},
+		{"auto in capitals with spaces", map[string]string{EnvMode: " AUTO ", EnvAPIKey: key}, nil, ModeAnthropic, "auto", ""},
+		{"anthropic with a key", map[string]string{EnvMode: "anthropic", EnvAPIKey: key}, nil, ModeAnthropic, "anthropic", "LLM_MODE=anthropic"},
+		{"anthropic without a key is an error", map[string]string{EnvMode: "anthropic"}, ErrNoAPIKey, "", "", ""},
+		{"anthropic with a blank key is an error", map[string]string{EnvMode: "anthropic", EnvAPIKey: "  "}, ErrNoAPIKey, "", "", ""},
+		{"mock without a key", map[string]string{EnvMode: "mock"}, nil, ModeMock, "mock", "LLM_MODE=mock"},
+		{"mock ignores a key that is set", map[string]string{EnvMode: "mock", EnvAPIKey: key}, nil, ModeMock, "mock", "is ignored"},
+		{"unknown mode", map[string]string{EnvMode: "claude", EnvAPIKey: key}, ErrInvalidMode, "", "", ""},
+		{"a typo is not auto", map[string]string{EnvMode: "anthropik"}, ErrInvalidMode, "", "", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			sel, err := FromEnv(func(k string) string { return tt.env[k] })
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("FromEnv() error = %v, want %v", err, tt.wantErr)
+				}
+				if sel.Client != nil {
+					t.Fatal("a failed selection must not hand out a client")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("FromEnv() error = %v", err)
+			}
+			if sel.Client.Mode() != tt.wantMode || sel.Setting != tt.wantSetting {
+				t.Errorf("mode = %q, setting = %q, want %q and %q", sel.Client.Mode(), sel.Setting, tt.wantMode, tt.wantSetting)
+			}
+			if !strings.Contains(sel.Reason, tt.wantReason) {
+				t.Errorf("reason = %q, want it to contain %q", sel.Reason, tt.wantReason)
+			}
+			if strings.Contains(sel.Reason, key) {
+				t.Errorf("the reason %q contains the key", sel.Reason)
+			}
+		})
+	}
+}
+
+// A value in the wrong variable (a key pasted into LLM_MODE) must not end up in the error or in a log line.
+func TestFromEnv_invalidModeIsNotEchoed(t *testing.T) {
+	t.Parallel()
+	_, err := FromEnv(func(k string) string {
+		if k == EnvMode {
+			return "pasted-by-mistake"
+		}
+		return ""
+	})
+	if !errors.Is(err, ErrInvalidMode) || strings.Contains(err.Error(), "pasted-by-mistake") {
+		t.Fatalf("error = %v, want ErrInvalidMode without the value", err)
 	}
 }
 

@@ -64,6 +64,7 @@ type builder struct {
 
 func build(r Rule, fs fieldSet, now time.Time, firstParam int) (Fragment, ValidationErrors) {
 	b := &builder{fs: fs, now: now, next: firstParam}
+	b.channels(r.Channels)
 	parts := b.topLevel(r.Conditions)
 	if len(b.errs) > 0 {
 		return Fragment{}, b.errs
@@ -93,6 +94,21 @@ func (b *builder) count(path string, n int) int {
 		b.add(path, fmt.Sprintf("must contain at most %d conditions, got %d", maxConditions, n))
 	}
 	return min(n, maxConditions)
+}
+
+// channels checks the channel names the rule carries: known and not repeated. They do not reach the SQL.
+func (b *builder) channels(names []string) {
+	const path = "channels"
+	seen := map[string]bool{}
+	for i, name := range names {
+		switch {
+		case !slices.Contains(channelNames, name):
+			b.add(elem(path, i), fmt.Sprintf("unknown channel %s; allowed: %s", shorten(name), strings.Join(channelNames, ", ")))
+		case seen[name]:
+			b.add(elem(path, i), fmt.Sprintf("channel %s is listed twice", shorten(name)))
+		}
+		seen[name] = true
+	}
 }
 
 func (b *builder) topLevel(nodes []Node) []string {

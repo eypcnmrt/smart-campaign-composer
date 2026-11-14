@@ -37,6 +37,9 @@ type Rule struct {
 	Conditions          []Node
 	UnsupportedCriteria []string
 	Explanation         string
+	// Channels are the channels the brief asked for ("sms", "email"). Empty means the brief names none, which the
+	// campaign treats as both. It is not part of the audience: consent per channel is applied by the system.
+	Channels []string
 }
 
 // Node is an element of the top-level condition list: an Attribute, an Event

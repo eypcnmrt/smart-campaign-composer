@@ -67,7 +67,7 @@ func TestDecode_structuralErrors(t *testing.T) {
 		{
 			name: "unknown top-level property",
 			in:   `{"conditions":[` + attr + `],"limit":5}`,
-			want: []FieldError{{"limit", "unknown property; allowed: conditions, unsupported_criteria, explanation"}},
+			want: []FieldError{{"limit", "unknown property; allowed: conditions, unsupported_criteria, explanation, channels"}},
 		},
 		{
 			name: "unknown property in attribute",
@@ -155,7 +155,7 @@ func TestDecode_structuralErrors(t *testing.T) {
 			name: "all problems are collected",
 			in:   `{"conditions":[{"type":"x"},{"type":"event"},{"type":"any_of","conditions":[{"type":"any_of"}]}],"extra":1}`,
 			want: []FieldError{
-				{"extra", "unknown property; allowed: conditions, unsupported_criteria, explanation"},
+				{"extra", "unknown property; allowed: conditions, unsupported_criteria, explanation, channels"},
 				{"conditions[0].type", `unknown type "x"; allowed: attribute, event, any_of`},
 				{"conditions[1].event", "is required"},
 				{"conditions[1].op", "is required"},

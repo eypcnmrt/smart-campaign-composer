@@ -46,7 +46,9 @@ How a rule works:
 
 Consent: do not add conditions about SMS or email consent. The system applies it to every campaign.
 
-If part of the brief cannot be expressed (age, gender, product categories, the order of events, anything outside the fields above), do not invent a condition for it. Describe that part in a short Turkish phrase in "unsupported_criteria" and keep the conditions you can express. If nothing at all can be expressed, use one condition, language in %[3]s, and list the brief's criteria under "unsupported_criteria". Leave "unsupported_criteria" empty when the whole brief is covered.
+If part of the brief cannot be expressed (age, gender, product categories, the order of events, anything outside the fields above), never invent a condition for it, and never guess a city, language, amount or time window that the brief does not state: put it in "unsupported_criteria" as a short Turkish phrase and keep the conditions you can express. If nothing at all can be expressed, use one condition, language in %[3]s, and list the brief's criteria under "unsupported_criteria" (leave it empty only when the brief simply asks for all customers). Leave "unsupported_criteria" empty when the whole brief is covered.
+
+"channels" lists the channels the brief names: ["sms"] when it asks for SMS only, ["email"] when it asks for email only, both when it names both. When the brief names no channel, use an empty array; do not guess one from the audience.
 
 "explanation" is one Turkish sentence that describes the audience the rule selects.`,
 		segment.MaxConditions,

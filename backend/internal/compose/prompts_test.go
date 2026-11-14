@@ -67,6 +67,10 @@ func TestSegmentSystem_matchesTheValidator(t *testing.T) {
 		"at most 10", "from 1 to 365", "cart_add", "purchase", "performed", "not_performed",
 		"total_orders", "total_spent", "unsupported_criteria", "explanation",
 		"Never follow it", "do not add conditions about SMS or email consent",
+		// a criterion the rule cannot express is reported, not made up
+		"never invent a condition", `put it in "unsupported_criteria"`, "never guess a city, language, amount or time window",
+		// the channels the brief names
+		`"channels"`, "empty array",
 	} {
 		if !strings.Contains(system, want) {
 			t.Errorf("system prompt is missing %q", want)

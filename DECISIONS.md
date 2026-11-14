@@ -86,16 +86,28 @@ here when the README is written.
 ### Official Go SDK, pinned, called through a small interface
 - **Decision:** `github.com/anthropics/anthropic-sdk-go/v2` at exactly v2.9.0 (go.mod and go.sum), behind
   `llm.Client` (`Complete`, `Stream`, `Mode`, `Model`). Everything else in the backend sees only the
-  interface. `FromEnv` returns the real client only if `ANTHROPIC_API_KEY` is set; otherwise the demo
-  mock, and `Mode()` says which (the "Mock LLM" badge). No other credential source is consulted, so a
-  machine that happens to be logged in elsewhere cannot spend money without the key being set. The model
-  comes from `ANTHROPIC_MODEL`, default `claude-opus-5-5`.
+  interface. `llm.FromEnv` chooses the client (see "LLM_MODE" below) and `Mode()` says which
+  (the "Mock LLM" badge). No other credential source is consulted, so a machine that happens to be logged in elsewhere
+  cannot spend money without the key being set. The model comes from `ANTHROPIC_MODEL`, default `claude-opus-5-5`.
 - **Why:** the SDK's request and streaming types change between releases and the API surface for this
   model family moved recently (thinking, effort, fallbacks), so the version is fixed and the bindings
   were read from the SDK source rather than guessed. The interface is what lets every test run without a
   key; the real client is tested against a fake API server through the base-URL override instead.
 - **Alternative:** raw HTTP. More code to own and no gain. A floating SDK version was rejected: a `go get -u`
   could silently change request shapes.
+
+### LLM_MODE: auto, anthropic or mock, and a missing key is an error when the real model was asked for
+- **Decision:** `LLM_MODE` is `auto` (default), `anthropic` or `mock`. `auto` uses the real client when `ANTHROPIC_API_KEY` is set
+  and the demo mock otherwise (so `docker compose up` works without a dotenv file). `anthropic` without a key makes the
+  api exit at start-up with an error (`ErrNoAPIKey`) instead of falling back. `mock` never calls the real API, even if a
+  key is set (the log line says the key is ignored). Any other value is an error that does not echo the value, in case a
+  key was pasted into the wrong variable. `FromEnv` returns a `Selection` (client, setting and a one-sentence reason without
+  the key); the api logs mode, model and reason at start-up and `/api/config` returns `llm_mode` for the badge.
+- **Why:** a key that failed to load used to look like a working system, because the fallback to the mock was silent. Someone who
+  sets `LLM_MODE=anthropic` has said what they want, so a missing key must be loud; someone who sets nothing gets the demo.
+  `mock` is the opt-in for demos and for recording a run while a key is present on the machine.
+- **Alternative:** warn and fall back to the mock in every case (still looks like a working system to a script), or fail without a key
+  in every case (breaks `docker compose up` for someone without one, which the case requires to work).
 
 ### One structured-output request per task, effort set explicitly, nothing the model rejects
 - **Decision:** segment: one non-streaming request, `output_config.format` = the schema, effort `low`.
@@ -448,6 +460,37 @@ here when the README is written.
 - **Why:** the audience is the one the marketer saw when approving; running the worker later or twice cannot change it.
 - **Alternative:** compiling with `now()` at enqueue time (the audience drifts by the hours between approval and enqueue).
 
+## Campaign API
+
+### A segment that matches everyone, or a brief that could not be expressed, is flagged and needs an acknowledgement
+- **Decision:** `campaign.Warnings(audience, unsupported)` is a pure function that returns `unsupported_criteria` (the
+  non-blank criteria the model listed, as `details`) and `matches_everyone` (`matched == total_users > 0`). The API puts the
+  list in the campaign's `warnings` field, and approval needs `acknowledge_warnings: true` when the list is not empty
+  (`campaign.RequireAcknowledgement`, 422 `acknowledgement_required` otherwise). The segment prompt now says
+  "never invent a condition for a criterion you cannot express, never guess a city, language, amount or time window the
+  brief does not state, put it in `unsupported_criteria`", and that the catch-all rule is for a brief with nothing
+  expressible (`unsupported_criteria` empty only when the brief simply asks for all customers). The demo mock has both
+  scenarios: nothing recognised (catch-all rule plus an unsupported criterion) and an explicit "tüm müşteriler" (catch-all, no
+  unsupported criterion).
+- **Why:** the model has to put some condition in the rule, so a brief with nothing expressible produced a match-all rule and
+  the only signal was a list the UI might not show. The count is the check that cannot be talked around: the model's own
+  `unsupported_criteria` is advisory, whereas "the rule reaches every user" is a fact read from the database. An explicit
+  acknowledgement turns "I did not notice" into a decision, and the broadcast case is flagged even when the brief asked for it
+  because sending to everyone should be a deliberate click. No users at all is not "everyone".
+- **Alternative:** reject the match-all shape in `compose` (it cannot tell a deliberate broadcast from a failure, and needs the
+  database to know "everyone"), or only warn without asking for an acknowledgement (what happened before: it passed silently).
+
+### The brief names its channels in the rule; empty means both
+- **Decision:** the segment schema and `segment.Rule` have a `channels` array (`sms`, `email`), required in the schema and
+  optional in `Decode` (absent = the brief names none, the same as an empty array), validated for unknown values and
+  repeats (`channels[i]` paths, shared by `Validate` and `Compile`). It never reaches the SQL. The campaign opens with the
+  named channels, or both when the list is empty (PLAN assumption 4); the marketer can still change them before approval. The
+  schema drift test compares the channel list with the schema in both directions.
+- **Why:** reading "SMS only" out of free text with keywords in Go would misread "no SMS, please" and would leave the model
+  out of a decision it is good at. The vocabulary is shared, so a new channel cannot be added to one side only.
+- **Alternative:** keyword matching in Go (rejected above), or a channel selector in the UI only (the brief would have to be
+  read twice, and "email campaign" would still open an SMS channel).
+
 ## Docker and the test commands
 
 ### `make test` is a compose file of its own, and the hook tests skip Windows drive paths on Linux
@@ -514,14 +557,6 @@ silent-failure review of the overnight session; defects that were clear-cut were
 "Fixed after the review" above.)
 
 ### LLM layer (internal/llm, internal/compose)
-- **A brief with nothing expressible becomes a match-all rule.** The prompt tells the model to emit `language in [tr, en]`
-  when nothing can be said, and the validator accepts it (mock mode does the same). The only signal is
-  `unsupported_criteria`. Needs a product decision before the API exists: a flag on `SegmentResult`
-  (for example `MatchesEveryone`), or a compose-level rejection of that shape, and an approval step that requires the
-  marketer to acknowledge a non-empty `unsupported_criteria`. (Severity: high, design.)
-- **Without a key the system silently serves the demo mock** (`llm.FromEnv`). It is the documented behaviour (PLAN
-  section 1, "Mock LLM" badge), but a key that fails to load looks like a working system. When the API is wired: log a
-  warning at start-up and consider an explicit `LLM_MODE=mock` opt-in.
 - **`compose.Content` emits no terminal event and calls `onEvent` inside the SDK read loop.** After a final error the text
   already streamed stays on screen, and a blocking SSE writer stalls the provider read. The API layer must send a
   failure/discard event and keep `onEvent` non-blocking (buffer, cancel on overflow).

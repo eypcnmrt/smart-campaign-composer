@@ -94,6 +94,32 @@ func TestComposer_Segment_unsupportedCriteria(t *testing.T) {
 	}
 }
 
+// The channels the brief names travel with the rule; an unknown one is a problem the model is asked to fix.
+func TestComposer_Segment_channels(t *testing.T) {
+	t.Parallel()
+	rule := func(channels string) string {
+		return `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Ankara"}],"unsupported_criteria":[],"explanation":"x","channels":` + channels + `}`
+	}
+	t.Run("passed through", func(t *testing.T) {
+		t.Parallel()
+		got, err := New(llm.NewScripted(llm.Reply(rule(`["sms"]`)))).Segment(t.Context(), "Ankara, SMS ile")
+		if err != nil || !slices.Equal(got.Rule.Channels, []string{"sms"}) {
+			t.Fatalf("Segment() = %+v, %v; want the channels of the answer", got.Rule.Channels, err)
+		}
+	})
+	t.Run("an unknown channel is repaired with its path", func(t *testing.T) {
+		t.Parallel()
+		client := llm.NewScripted(llm.Reply(rule(`["push"]`)), llm.Reply(rule(`["email"]`)))
+		got, err := New(client).Segment(t.Context(), "Ankara, push bildirimi")
+		if err != nil || got.Attempts != 2 || !slices.Equal(got.Rule.Channels, []string{"email"}) {
+			t.Fatalf("Segment() = %+v, %v; want success on the second attempt", got, err)
+		}
+		if problems := problemsIn(t, client.Requests()[1].User); !anyContains(problems, "channels[0]") || !anyContains(problems, `unknown channel "push"`) {
+			t.Errorf("repair problems = %q, want the channel path and the allowed values", problems)
+		}
+	})
+}
+
 func manyConditions(n int) string {
 	cond := `{"type":"attribute","field":"city","op":"eq","value":"Ankara"}`
 	return `{"conditions":[` + strings.TrimSuffix(strings.Repeat(cond+",", n), ",") + `],"unsupported_criteria":[],"explanation":"x"}`
