@@ -24,11 +24,13 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
   127.0.0.1:5173, proxies `/api` to the host's :8080, so run `docker compose up -d` first). Only read-only queries such as `npm view` run on the host.
   Pin exact versions that are at least two weeks old and keep `npm audit` clean; there are no dotenv files for Vite (settings come from `vite.config.ts` and `/api/config`).
 - Windows Application Control may block `vet.exe` (and now and then a fresh test binary): then use `make test-unit GOTESTFLAGS=-vet=off`
-  and run vet in a container: `docker run --rm -v "$PWD/backend:/src:ro" -w /src -e GOCACHE=/tmp/gocache golang:1.27 go vet ./...`
+  and run vet in a container (from PowerShell): `docker run --rm -v "${PWD}/backend:/src:ro" -w /src -e GOCACHE=/tmp/gocache golang:1.27 go vet ./...`
 - Go commands run in a container, not on Windows (Application Control blocks new binaries). From PowerShell, with module and
   build caches in named volumes (replace the last words, e.g. `gofmt -l .`, `go vet ./...`, `go test -race ./...`,
   `go test -run '^$' -fuzz '^FuzzExtractor$' -fuzztime 20s ./internal/streamjson/`; this also gives `-race` a C compiler):
   `docker run --rm -v "${PWD}:/src" -w /src/backend -v scc-gomod:/go/pkg/mod -v scc-gocache:/root/.cache/go-build -e GOFLAGS=-buildvcs=false golang:1.27 go test ./...`
+- Every `docker run -v` line here is for PowerShell. In Git Bash the path conversion rewrites the `-v` argument and Docker then creates a junk
+  folder such as `backend;C` in the repo root; there, `export MSYS_NO_PATHCONV=1` and use `$(pwd -W)` as `scripts/web.sh` does.
 - `node --test ".claude/hooks/*.test.cjs"` - tests for the protection hook and the gofmt hook
 - `ui-ux-pro-max` search script (no Python on this machine; it runs in a pinned official image, no network, repo mounted read-only at /work).
   From PowerShell, in the repo root (the skill's own `${CLAUDE_PLUGIN_ROOT}/...` path does not exist for a project skill, use this instead):
