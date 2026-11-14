@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, useId, useTemplateRef } from 'vue'
+import { computed, nextTick, useId, useTemplateRef, watch } from 'vue'
 import { describeProblem } from '@/api/errors'
 import type { ContentField } from '@/api/types'
 import { useDebounced } from '@/composables/useDebounced'
@@ -58,18 +58,53 @@ const announcement = useDebounced(
 /** A variable as it is written in a text. */
 const token = (name: string): string => '{{' + name + '}}'
 
+// Where the caret was when the field lost focus (pressing a button takes the focus away). Text that arrives from outside (the
+// model writing, a regeneration) makes it meaningless, so it is forgotten then.
+let saved: { start: number; end: number } | null = null
+
+function remember(): void {
+  const el = control.value
+  saved = el ? { start: el.selectionStart ?? el.value.length, end: el.selectionEnd ?? el.value.length } : null
+}
+
+watch(
+  model,
+  (text) => {
+    // Runs before the DOM is patched: a value the marketer typed is already in the control, one from outside is not.
+    if (control.value && control.value.value !== text) saved = null
+  },
+  { flush: 'pre' },
+)
+
+// A variable is a word of its own: a space goes between it and a neighbouring character, unless that is a space already, or
+// punctuation that belongs next to it ("Merhaba {{first_name}}, ...").
+const NO_SPACE_AFTER = /[([\{]$/
+const NO_SPACE_BEFORE = /^[.,;:!?)\]}…]/
+
+function spaced(before: string, inserted: string, after: string): string {
+  const lead = before !== '' && !/\s$/.test(before) && !NO_SPACE_AFTER.test(before) ? ' ' : ''
+  const trail = after !== '' && !/^\s/.test(after) && !NO_SPACE_BEFORE.test(after) ? ' ' : ''
+  return lead + inserted + trail
+}
+
 async function insert(name: string): Promise<void> {
   const el = control.value
   if (!el || props.disabled) return
   const inserted = token(name)
   const text = model.value
-  const start = el.selectionStart ?? text.length
-  const end = el.selectionEnd ?? start
-  model.value = text.slice(0, start) + inserted + text.slice(end)
+  const focused = document.activeElement === el
+  const from = !focused && saved ? saved : { start: el.selectionStart ?? text.length, end: el.selectionEnd ?? el.selectionStart ?? text.length }
+  const start = Math.min(from.start, text.length)
+  const end = Math.min(Math.max(from.end, start), text.length)
+  const before = text.slice(0, start)
+  const piece = spaced(before, inserted, text.slice(end))
+  model.value = before + piece + text.slice(end)
   await nextTick()
   el.focus()
-  const caret = start + inserted.length
+  // After the variable itself, before a space that was added behind it.
+  const caret = start + piece.indexOf(inserted) + inserted.length
   el.setSelectionRange(caret, caret)
+  saved = { start: caret, end: caret }
 }
 
 function typed(event: Event): void {
@@ -93,6 +128,7 @@ function typed(event: Event): void {
       :disabled="disabled"
       :aria-invalid="invalid"
       :aria-describedby="`${id}-count ${id}-problems${hint ? ` ${id}-hint` : ''}`"
+      @blur="remember"
       @input="typed"
     />
     <input
@@ -106,6 +142,7 @@ function typed(event: Event): void {
       :disabled="disabled"
       :aria-invalid="invalid"
       :aria-describedby="`${id}-count ${id}-problems${hint ? ` ${id}-hint` : ''}`"
+      @blur="remember"
       @input="typed"
     />
 

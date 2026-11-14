@@ -155,6 +155,54 @@ describe('FieldEditor, variables', () => {
     await vi.waitFor(() => expect(el.value).toBe('Merhaba {{first_name}}'))
   })
 
+  it('puts a space between the variable and a word that touches it, but not before punctuation', async () => {
+    // Text that arrived from outside (the model wrote it): the caret is at the end, and the last word must not run into the variable.
+    let wrapper = renderBound({ modelValue: 'Siparişiniz bekliyor' })
+    let el = wrapper.get('textarea').element as HTMLTextAreaElement
+    await wrapper.get('.variable').trigger('click')
+    await vi.waitFor(() => expect(el.value).toBe('Siparişiniz bekliyor {{first_name}}'))
+
+    wrapper = renderBound({ modelValue: 'Merhaba,hoş geldin' })
+    el = wrapper.get('textarea').element as HTMLTextAreaElement
+    el.setSelectionRange(8, 8)
+    await wrapper.get('.variable').trigger('click')
+    await vi.waitFor(() => expect(el.value).toBe('Merhaba, {{first_name}} hoş geldin'))
+    // The caret is behind the variable, not behind the space that was added after it.
+    expect(el.selectionStart).toBe(9 + '{{first_name}}'.length)
+
+    wrapper = renderBound({ modelValue: '(), ' })
+    el = wrapper.get('textarea').element as HTMLTextAreaElement
+    el.setSelectionRange(1, 1)
+    await wrapper.get('.variable').trigger('click')
+    await vi.waitFor(() => expect(el.value).toBe('({{first_name}}), '))
+  })
+
+  it('inserts where the caret was when the field lost the focus, and hands the focus back', async () => {
+    const wrapper = renderBound({ modelValue: 'Merhaba , hoş geldin' })
+    const el = wrapper.get('textarea').element as HTMLTextAreaElement
+    el.focus()
+    el.setSelectionRange(8, 8)
+    el.blur()
+    // Something moved the caret while the field was out of focus (the browsers do this when the value is set).
+    el.setSelectionRange(el.value.length, el.value.length)
+    await wrapper.get('.variable').trigger('click')
+    await vi.waitFor(() => expect(el.value).toBe('Merhaba {{first_name}}, hoş geldin'))
+    expect(document.activeElement).toBe(el)
+    expect(el.selectionStart).toBe(8 + '{{first_name}}'.length)
+  })
+
+  it('forgets the remembered caret when the text is replaced from outside', async () => {
+    const wrapper = renderBound({ modelValue: 'Eski metin burada' })
+    const el = wrapper.get('textarea').element as HTMLTextAreaElement
+    el.focus()
+    el.setSelectionRange(3, 3)
+    el.blur()
+    await wrapper.setProps({ modelValue: 'Yeni metin' })
+    el.setSelectionRange(el.value.length, el.value.length)
+    await wrapper.get('.variable').trigger('click')
+    await vi.waitFor(() => expect(el.value).toBe('Yeni metin {{first_name}}'))
+  })
+
   it('does not insert while locked', async () => {
     const wrapper = renderBound({ modelValue: 'x', disabled: true })
     expect(wrapper.get('.variable').attributes('disabled')).toBeDefined()
