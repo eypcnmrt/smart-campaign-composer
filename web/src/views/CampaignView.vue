@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { generateSegment } from '@/api/campaigns'
 import AudienceCard from '@/components/audience/AudienceCard.vue'
 import BriefForm from '@/components/brief/BriefForm.vue'
+import ContentStep from '@/components/content/ContentStep.vue'
 import StepNav from '@/components/StepNav.vue'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
 import LoadingState from '@/components/ui/LoadingState.vue'
@@ -48,6 +49,18 @@ watch(step, async (now) => {
   await nextTick()
   body.value?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: false })
 })
+
+// Content generation starts only when the marketer asked for it on the audience step; opening the content step any other way
+// (a reload, a link of the rail) never calls the model.
+const startContent = shallowRef(false)
+watch(step, (_now, before) => {
+  if (before === 'content') startContent.value = false
+})
+
+function askForContent(): void {
+  startContent.value = true
+  void goTo('content')
+}
 
 function goTo(next: string): Promise<unknown> {
   return router.push({ name: 'campaign', params: { id: props.id }, query: { step: next } })
@@ -99,7 +112,15 @@ async function retrySegment(): Promise<void> {
           v-else-if="step === 'audience'"
           :campaign="campaign"
           @updated="replace"
-          @content="goTo('content')"
+          @content="askForContent"
+        />
+        <ContentStep
+          v-else-if="step === 'content'"
+          :campaign="campaign"
+          :autostart="startContent"
+          @updated="replace"
+          @reload="load"
+          @approve="goTo('approve')"
         />
         <p v-else-if="step !== 'brief'">Bu adım hazırlanıyor.</p>
         <LoadingState v-else label="Ayarlar yükleniyor…" />

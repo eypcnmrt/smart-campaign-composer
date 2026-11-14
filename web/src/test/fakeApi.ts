@@ -12,13 +12,15 @@ export interface Call {
 }
 
 export type Reply = { status?: number; body: unknown; headers?: Record<string, string> }
-export type Handler = Reply | ((call: Call) => Reply | Promise<Reply>)
+/** A ready-made Response (an event stream) is passed through as it is. */
+export type Handler = Reply | Response | ((call: Call) => Reply | Response | Promise<Reply | Response>)
 
 export function error(status: number, code: string, details: unknown = null, headers: Record<string, string> = {}): Reply {
   return { status, body: { error: { code, message: `English ${code}`, details } }, headers }
 }
 
-function toResponse(reply: Reply): Response {
+function toResponse(reply: Reply | Response): Response {
+  if (reply instanceof Response) return reply
   return new Response(JSON.stringify(reply.body), {
     status: reply.status ?? 200,
     headers: { 'Content-Type': 'application/json', ...reply.headers },
@@ -31,6 +33,34 @@ export interface FakeApi {
   callsTo: (key: string) => Call[]
   /** Replaces or adds an answer. */
   set: (key: string, handler: Handler) => void
+}
+
+/**
+ * A real fetch rejects a pending body read when the request is aborted; a Response built in a test does not know about the
+ * request. This makes an event stream behave like the real thing: aborting ends its reads with an AbortError.
+ */
+function bindAbort(res: Response, signal: AbortSignal | null | undefined): Response {
+  if (!signal || !res.body || !res.headers.get('Content-Type')?.startsWith('text/event-stream')) return res
+  const reader = res.body.getReader()
+  const aborted = new Promise<never>((_, reject) => {
+    const fail = () => reject(new DOMException('The operation was aborted.', 'AbortError'))
+    if (signal.aborted) fail()
+    else signal.addEventListener('abort', fail, { once: true })
+  })
+  aborted.catch(() => undefined)
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      try {
+        const { done, value } = await Promise.race([reader.read(), aborted])
+        if (done) controller.close()
+        else controller.enqueue(value)
+      } catch (err) {
+        controller.error(err)
+      }
+    },
+    cancel: (reason) => reader.cancel(reason),
+  })
+  return new Response(body, { status: res.status, headers: res.headers })
 }
 
 export function installFakeApi(handlers: Record<string, Handler>): FakeApi {
@@ -46,7 +76,8 @@ export function installFakeApi(handlers: Record<string, Handler>): FakeApi {
     const key = `${method} ${raw.split('?')[0]}`
     const handler = table.get(key)
     if (handler === undefined) return toResponse(error(404, 'not_found'))
-    return toResponse(typeof handler === 'function' ? await handler(call) : handler)
+    const res = toResponse(typeof handler === 'function' ? await handler(call) : handler)
+    return bindAbort(res, init?.signal)
   })
   vi.stubGlobal('fetch', fetchFn)
 
@@ -56,5 +87,40 @@ export function installFakeApi(handlers: Record<string, Handler>): FakeApi {
     set: (key, handler) => {
       table.set(key, handler)
     },
+  }
+}
+
+const encoder = new TextEncoder()
+
+/** One server-sent event as the server writes it. */
+export function sseFrame(event: string, data: unknown): string {
+  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`
+}
+
+/** An event stream that ends after the given frames (see sseFrame). */
+export function sseResponse(frames: string[]): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('retry: 3600000\n\n'))
+      for (const f of frames) controller.enqueue(encoder.encode(f))
+      controller.close()
+    },
+  })
+  return new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } })
+}
+
+/** An event stream the test feeds frame by frame, to look at the screen between them. */
+export function openSse(): { response: Response; push: (frame: string) => void; close: () => void } {
+  let controller!: ReadableStreamDefaultController<Uint8Array>
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      controller = c
+      c.enqueue(encoder.encode('retry: 3600000\n\n'))
+    },
+  })
+  return {
+    response: new Response(body, { status: 200, headers: { 'Content-Type': 'text/event-stream' } }),
+    push: (frame) => controller.enqueue(encoder.encode(frame)),
+    close: () => controller.close(),
   }
 }
