@@ -105,11 +105,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
   return data as T
 }
 
-function badResponse(what: string): ApiError {
+export function badResponse(what: string): ApiError {
   return new ApiError({ status: 200, code: 'bad_response', message: `The server's ${what} does not match the API contract.` })
 }
 
-function isStringList(value: unknown): value is string[] {
+export function isStringList(value: unknown): value is string[] {
   return Array.isArray(value) && value.every((item) => typeof item === 'string')
 }
 
