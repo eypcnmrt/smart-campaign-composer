@@ -142,8 +142,12 @@ func TestPolicy_Decide(t *testing.T) {
 		{"500 on the last attempt gives up", 5, Result{Kind: Transient, Status: 500}, Fail, 0, "gave up after 5 attempts: http 500"},
 		{"timeout on the last attempt is confirmed once more", 5, Result{Kind: Transient, Err: timeout}, Retry, 8 * time.Second, "timeout"},
 		{"connection error on the last attempt is confirmed too", 5, Result{Kind: Transient, Err: errors.New("connection reset")}, Retry, 8 * time.Second, "connection reset"},
-		{"timeout on the confirmation gives up", 6, Result{Kind: Transient, Err: timeout}, Fail, 0, "gave up after 6 attempts: timeout"},
-		{"500 on the confirmation gives up", 6, Result{Kind: Transient, Status: 500}, Fail, 0, "gave up after 6 attempts: http 500"},
+		{"timeout on the confirmation: outcome unknown", 6, Result{Kind: Transient, Err: timeout}, Fail, 0,
+			"outcome unknown: attempt 5 and the confirmation request with the same idempotency key (attempt 6) both ended without an answer (timeout); the provider may have delivered the message"},
+		{"connection error on the confirmation: outcome unknown", 6, Result{Kind: Transient, Err: errors.New("connection reset")}, Fail, 0,
+			"outcome unknown: attempt 5 and the confirmation request"},
+		{"500 on the confirmation is an answer, not unknown", 6, Result{Kind: Transient, Status: 500}, Fail, 0, "gave up after 6 attempts: http 500"},
+		{"429 on the confirmation is an answer, not unknown", 6, Result{Kind: RateLimited, Status: 429, RetryAfter: time.Second}, Fail, 0, "gave up after 6 attempts"},
 		{"permanent 4xx fails at once", 1, Result{Kind: Permanent, Status: 400}, Fail, 0, "permanent error: http 400"},
 		{"429 honours Retry-After longer than the backoff", 1, Result{Kind: RateLimited, Status: 429, RetryAfter: 7 * time.Second}, Retry, 7 * time.Second, "retry after 7s"},
 		{"429 keeps the backoff when it is longer", 4, Result{Kind: RateLimited, Status: 429, RetryAfter: time.Second}, Retry, 4 * time.Second, "retry after 1s"},
@@ -163,6 +167,29 @@ func TestPolicy_Decide(t *testing.T) {
 				t.Fatalf("reason = %q, want it to contain %q", got.Reason, tt.wantReason)
 			}
 		})
+	}
+}
+
+// A delivery that never got an answer must not be reported as an ordinary failure, and one that did get an answer
+// must not be reported as unknown.
+func TestPolicy_Decide_unknownOutcomeWording(t *testing.T) {
+	t.Parallel()
+	p := DefaultPolicy()
+	noAnswerRes := Result{Kind: Transient, Err: context.DeadlineExceeded}
+	d := p.Decide(p.MaxTotalAttempts(), noAnswerRes, 0)
+	if d.Action != Fail || !strings.HasPrefix(d.Reason, UnknownReasonPrefix) || strings.Contains(d.Reason, "gave up") {
+		t.Fatalf("no answer on the confirmation: %+v", d)
+	}
+	if !strings.Contains(d.Reason, "may have delivered") {
+		t.Fatalf("the reason must say the message may have been delivered: %q", d.Reason)
+	}
+	d = p.Decide(p.MaxTotalAttempts(), Result{Kind: Transient, Status: 503}, 0)
+	if d.Action != Fail || strings.HasPrefix(d.Reason, UnknownReasonPrefix) {
+		t.Fatalf("a 503 is an answer: %+v", d)
+	}
+	// the helper used by the queue for an expired lease on the last attempt says the same thing
+	if got := UnknownOutcomeReason(5, 6, "the lease expired"); !strings.HasPrefix(got, UnknownReasonPrefix+": attempt 5 and the confirmation request") {
+		t.Fatalf("UnknownOutcomeReason = %q", got)
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -546,6 +547,14 @@ func TestRecoverLeases(t *testing.T) {
 		if got := status(claimed[i]); got != want {
 			t.Errorf("delivery %d: status = %q, want %q", i, got, want)
 		}
+	}
+	// a lease that ran out on the last attempt says the outcome is unknown, not just "gave up"
+	var lastError string
+	if err := pool.QueryRow(ctx, `SELECT last_error FROM deliveries WHERE id = $1`, claimed[1].ID).Scan(&lastError); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(lastError, "outcome unknown: ") || !strings.Contains(lastError, "the lease expired") {
+		t.Fatalf("last_error of the failed delivery = %q, want an \"outcome unknown\" reason naming the lease", lastError)
 	}
 	// the attempt counter survives recovery, so the retry budget is not reset by a crash
 	var attempts int

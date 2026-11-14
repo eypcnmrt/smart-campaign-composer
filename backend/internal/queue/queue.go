@@ -17,6 +17,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"smartcampaign/internal/content"
+	"smartcampaign/internal/retry"
 	"smartcampaign/internal/segment"
 )
 
@@ -279,16 +280,21 @@ type RecoverResult struct {
 // RecoverLeases takes back deliveries stuck in sending past their lease (the worker died or hung).
 // They go back to queued and are due at once; one whose attempts are already used up fails instead.
 // Re-sending is safe because the provider de-duplicates by idempotency key.
+//
+// maxAttempts is the most attempts a delivery can use (retry.Policy.MaxTotalAttempts: the regular attempts plus the
+// confirmation request). A lease that expires on that last attempt leaves nothing to confirm with, so the delivery
+// fails and its last_error says the outcome is unknown.
 func (q *Queue) RecoverLeases(ctx context.Context, maxAttempts int) (RecoverResult, error) {
+	unknown := retry.UnknownOutcomeReason(maxAttempts-1, maxAttempts, "the lease expired")
 	rows, err := q.pool.Query(ctx, `
 		UPDATE deliveries
 		SET status = CASE WHEN attempts >= $1 THEN 'failed' ELSE 'queued' END,
 		    next_attempt_at = now(), lease_until = NULL,
-		    last_error = CASE WHEN attempts >= $1 THEN 'gave up: lease expired on the last attempt' ELSE 'lease expired' END
+		    last_error = CASE WHEN attempts >= $1 THEN $2::text ELSE 'lease expired' END
 		                 || CASE WHEN last_error <> '' THEN ' (previous error: ' || last_error || ')' ELSE '' END,
 		    updated_at = now()
 		WHERE status = 'sending' AND lease_until < now()
-		RETURNING status`, maxAttempts)
+		RETURNING status`, maxAttempts, unknown)
 	if err != nil {
 		return RecoverResult{}, fmt.Errorf("recovering leases: %w", err)
 	}

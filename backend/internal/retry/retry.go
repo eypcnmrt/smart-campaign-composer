@@ -6,9 +6,11 @@
 //   - 429: try again, but not before the Retry-After the provider sent.
 //   - 5xx, 408, timeouts and network errors: try again with exponential backoff and jitter.
 //   - any other 4xx: permanent failure, retrying would repeat the same mistake.
-//   - at most MaxAttempts attempts, then the delivery fails; except that a last attempt which ended without any
-//     answer (timeout, connection error) is followed by one confirmation attempt with the same key, because
-//     the message may have been delivered after all (see Policy.confirms).
+//   - at most MaxAttempts send attempts, then the delivery fails; except that a last attempt which ended without
+//     any answer (timeout, connection error) is followed by one confirmation request with the same idempotency
+//     key, because the message may have been delivered after all (see Policy.confirms). The confirmation is an
+//     ordinary claim, so it also passes the rate limiter. If it gets no answer either, the delivery fails with
+//     an "outcome unknown" reason that says so plainly.
 package retry
 
 import (
@@ -162,6 +164,11 @@ func (p Policy) Decide(attempt int, res Result, jitter float64) Decision {
 	}
 
 	if attempt >= p.MaxAttempts && !p.confirms(attempt, res) {
+		if noAnswer(res) {
+			// Only the confirmation request (or a later one) gets here with no answer. Say that the result is
+			// unknown, not that the delivery failed: the provider may have the message.
+			return Decision{Action: Fail, Reason: UnknownOutcomeReason(p.MaxAttempts, attempt, describe(res))}
+		}
 		return Decision{Action: Fail, Reason: fmt.Sprintf("gave up after %d attempts: %s", attempt, describe(res))}
 	}
 	delay := p.Backoff(attempt, jitter)
@@ -183,7 +190,20 @@ func (p Policy) MaxTotalAttempts() int { return p.MaxAttempts + 1 }
 // twice: if the provider has the message it returns the first reply, otherwise it is an ordinary last try.
 // A 5xx or 429 is an answer ("not accepted") and does not qualify.
 func (p Policy) confirms(attempt int, res Result) bool {
-	return attempt == p.MaxAttempts && res.Kind == Transient && res.Err != nil
+	return attempt == p.MaxAttempts && noAnswer(res)
+}
+
+// noAnswer reports whether the attempt ended without any reply from the provider (timeout, connection error).
+func noAnswer(res Result) bool { return res.Kind == Transient && res.Err != nil }
+
+// UnknownReasonPrefix starts the last_error of a delivery whose outcome could not be determined.
+const UnknownReasonPrefix = "outcome unknown"
+
+// UnknownOutcomeReason is the last_error of a delivery that used its send attempts and its confirmation request
+// without ever getting an answer. detail says how the last one ended.
+func UnknownOutcomeReason(maxAttempts, confirmAttempt int, detail string) string {
+	return fmt.Sprintf("%s: attempt %d and the confirmation request with the same idempotency key (attempt %d) both ended without an answer (%s); the provider may have delivered the message",
+		UnknownReasonPrefix, maxAttempts, confirmAttempt, detail)
 }
 
 // describe gives the short, secret-free text stored in last_error.

@@ -6,11 +6,13 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"net/http/httptest"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -344,8 +346,103 @@ func TestWorker_expiredLeaseOnTheConfirmationAttemptFails(t *testing.T) {
 	if got := e.provider.AcceptedKeys("sms"); slices.Contains(got, d.Key()) {
 		t.Fatal("a delivery that used up its attempts must not be sent again")
 	}
-	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE id = $1 AND status = 'failed' AND last_error <> ''`, d.ID); n != 1 {
-		t.Fatal("the failed delivery must say why")
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE id = $1 AND status = 'failed' AND last_error LIKE 'outcome unknown: %'`, d.ID); n != 1 {
+		t.Fatal("the failed delivery must say that its outcome is unknown")
+	}
+}
+
+// silentProvider reads each request and closes the connection without a reply, like a provider that dies mid-request.
+// It records the requests per idempotency key and when they arrived.
+type silentProvider struct {
+	srv      *httptest.Server
+	mu       sync.Mutex
+	keys     map[string]int
+	arrivals []time.Time
+}
+
+func newSilentProvider(t *testing.T) *silentProvider {
+	t.Helper()
+	p := &silentProvider{keys: map[string]int{}}
+	p.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		p.mu.Lock()
+		p.keys[r.Header.Get("Idempotency-Key")]++
+		p.arrivals = append(p.arrivals, time.Now())
+		p.mu.Unlock()
+		conn, _, err := w.(http.Hijacker).Hijack()
+		if err != nil {
+			t.Errorf("hijacking the connection: %v", err)
+			return
+		}
+		_ = conn.Close()
+	}))
+	t.Cleanup(p.srv.Close)
+	return p
+}
+
+// requestsPerKey copies the per-key request counts.
+func (p *silentProvider) requestsPerKey() map[string]int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return maps.Clone(p.keys)
+}
+
+// maxPerSecond is the largest number of requests that arrived in any half-open second [t, t+1s).
+func (p *silentProvider) maxPerSecond() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	best, lo := 0, 0
+	for hi, at := range p.arrivals {
+		for at.Sub(p.arrivals[lo]) >= time.Second {
+			lo++
+		}
+		best = max(best, hi-lo+1)
+	}
+	return best
+}
+
+// The fifth attempt and the confirmation request both get no answer at all: the delivery fails, its last_error says
+// that the outcome is unknown (not just "gave up"), the provider saw exactly two requests with the same key, and the
+// confirmation request went through the rate limiter like every other send.
+func TestWorker_noAnswerToTheConfirmationFailsWithUnknownOutcome(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	silent := newSilentProvider(t)
+	e.url = silent.srv.URL
+	const users = 150
+	id := e.campaign(t, users, "sms")
+	// four attempts were already used up: the next claim is the fifth, the one after it the confirmation request
+	if _, err := e.pool.Exec(context.Background(), "UPDATE deliveries SET attempts = 4"); err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, stop := e.start(t, worker.Config{RatePerSecond: 100, Retry: fastRetry(), MaintenanceInterval: 50 * time.Millisecond})
+	status := e.waitFinished(t, id, 60*time.Second)
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	if status != "completed_with_failures" {
+		t.Fatalf("campaign = %q, want completed_with_failures; %s", status, e.summary(t))
+	}
+	if n := e.count(t, `SELECT count(*) FROM deliveries WHERE status = 'failed' AND attempts = 6
+		AND last_error LIKE 'outcome unknown: attempt 5 and the confirmation request with the same idempotency key (attempt 6) both ended without an answer (%); the provider may have delivered the message'`); n != users {
+		t.Fatalf("%d deliveries failed with an \"outcome unknown\" reason after the confirmation request, want %d; %s", n, users, e.summary(t))
+	}
+	perKey := silent.requestsPerKey()
+	if len(perKey) != users {
+		t.Fatalf("the provider saw %d distinct keys, want %d", len(perKey), users)
+	}
+	for key, n := range perKey {
+		if n != 2 {
+			t.Fatalf("key %s was sent %d times, want the 5th attempt and one confirmation request", key, n)
+		}
+	}
+	// 2 x 150 requests: only a limiter that also paces the confirmation requests keeps every second at or under 100
+	if got := silent.maxPerSecond(); got > 100 {
+		t.Fatalf("%d requests arrived within one second, the cap is 100", got)
+	}
+	if took := time.Since(started); took < 2500*time.Millisecond {
+		t.Fatalf("300 requests at 100 per second took only %v", took)
 	}
 }
 

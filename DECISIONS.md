@@ -325,24 +325,32 @@ here when the README is written.
 - **Decision:** `retry.Policy.Decide(attempt, result, jitter)` returns done, retry-after-delay or fail. Backoff is
   `1s * 2^(n-1)` capped at 1 minute with "equal jitter" (half fixed, half random). A 429 waits at least its
   Retry-After (capped at 5 minutes) or the backoff, whichever is longer. 5xx, 408, timeouts and connection errors are
-  retried; every other 4xx is permanent; at most 5 attempts. `Retry-After` is read as seconds or HTTP date.
-  **One exception, found by `make soak`:** if the fifth attempt ends without any answer (timeout or connection
-  error), the delivery gets one more attempt with the same key instead of being failed, so a delivery can use
-  6 attempts, never more (`Policy.MaxTotalAttempts`, `confirms`). A lease that expires on the fifth attempt is
-  treated the same way.
+  retried; every other 4xx is permanent; at most 5 send attempts, plus the confirmation request described in the next
+  entry. `Retry-After` is read as seconds or HTTP date.
 - **Why:** with the clock and the jitter passed in, every rule is a table test with exact numbers. 408 is
   listed with the timeouts on purpose: it is a timeout, and the case says timeouts are retried.
-  The exception: the first soak run had a delivery whose fifth attempt hit a late reply. The provider had accepted the
-  message, the worker timed out, wrote `failed ("gave up after 5 attempts: timeout")` and the database disagreed with
-  the provider by one message. A timeout is not a "no", it is "unknown", and failing it is wrong whenever the message
-  was delivered. The confirmation attempt cannot deliver twice (same key): if the provider has the message it
-  replies with the first answer, otherwise it is a normal last try. A 5xx or 429 on the fifth attempt is an answer
-  ("not accepted") and still fails the delivery.
-- **Alternative:** keep the hard limit of 5 and accept that a delivery whose last attempt timed out may be recorded as
-  failed although the customer got the message (an invariant "provider accepted = database sent" that cannot hold),
-  or a separate `unknown` status. This deviates from the literal "at most 5 attempts"; it is the one place to review
-  if the stricter reading is wanted (change `confirms` to return false).
 - **Alternative:** full jitter (can retry almost at once, which defeats the backoff).
+
+### At most 5 send attempts; if the outcome is unknown, 1 confirmation request with the same idempotency key
+- **Decision:** a delivery gets at most 5 send attempts. If the fifth ends without any answer (timeout or connection
+  error), one more request is made with the same idempotency key: the confirmation request (`Policy.confirms`,
+  `MaxTotalAttempts` = 6). It is an ordinary claim, so it waits for a rate-limit token like every other send (an
+  integration test sends 300 requests through a provider that never answers and checks the busiest second). If it also
+  gets no answer, the delivery becomes `failed` and `last_error` says so: `outcome unknown: attempt 5 and the
+  confirmation request with the same idempotency key (attempt 6) both ended without an answer (timeout); the provider
+  may have delivered the message`. A lease that expires on the last attempt (a worker killed mid-send) is the same
+  case and gets the same wording (`RecoverLeases`). A 5xx or 429 on the fifth attempt is an answer ("not accepted") and
+  fails the delivery as `gave up after N attempts`, without a confirmation.
+- **Why:** found by `make soak`: a fifth attempt hit a late reply, the provider had accepted the message, the worker
+  wrote `failed ("gave up after 5 attempts: timeout")` and the database disagreed with the provider by one message. A
+  timeout is not a "no", it is "unknown", and failing it as a plain failure is wrong whenever the message was
+  delivered. The confirmation cannot deliver twice (same key): if the provider has the message it replies with the
+  first answer, otherwise it is a normal last try. When even that gets no answer there is nothing left to ask, so the
+  delivery fails and the text says plainly that the result is unknown instead of implying a clean failure.
+- **Alternative:** keep the hard limit of 5 and record such a delivery as a plain failure (the invariant "provider accepted =
+  database sent" could not hold), or a separate `unknown` status (one more state in every query and in the dashboard
+  for a rare case; the text in `last_error` carries the information). This deviates from the literal "at most 5
+  attempts" by one request that cannot send twice; `confirms` returning false restores the strict reading.
 
 ### Rate limit: x/time/rate plus a sliding-window guard, about 4 % under the cap
 - **Decision:** each channel has a `rate.Limiter` (100/s, burst 1, so sends are 10 ms apart and there is no
@@ -469,9 +477,6 @@ silent-failure review of the overnight session; defects that were clear-cut were
 - **The idempotency key is the bare delivery id.** If the database is restored or reset while a long-lived provider keeps
   its memory, ids repeat and new messages are treated as duplicates (and recorded as `sent`). Adding the campaign id to
   the key costs nothing but changes every test that expects key = id; left for a quiet moment.
-- **A lease that expires on the confirmation attempt (a worker killed mid-send) fails the delivery**, although the provider
-  may have accepted the message. Accepted: there is no further information to confirm with. The `soak` would show
-  it as a key difference.
 - **The retry window is short** (five attempts span about 7-15 s plus request time). A provider outage longer than that, or
   a wrong `PROVIDER_URL` (not validated at start-up; a URL without a scheme is classed transient), sends every delivery to
   `failed` for good. A circuit breaker that parks `queued` rows while the provider is down would be the real fix.
