@@ -271,5 +271,7 @@ func (s *Server) finishStream(sse *sseWriter, ctx context.Context, out genOutcom
 func (s *Server) abandoned(out genOutcome, id string) {
 	if out.err != nil && !errors.Is(out.err, context.Canceled) {
 		s.log.Warn("a generation ended after its client left", "request_id", id, "err", out.err)
+	} else if out.err == nil {
+		s.log.Info("a generation was saved after its client left", "request_id", id)
 	}
 }

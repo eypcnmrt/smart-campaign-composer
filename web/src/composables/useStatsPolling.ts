@@ -101,6 +101,7 @@ export function useStatsPolling(id: MaybeRefOrGetter<number>, options: PollingOp
       error.value = err
       if (err instanceof ApiError && err.code === 'not_found') {
         polling.value = false
+        retryInSeconds.value = null // no retry is coming
         return
       }
       failures++

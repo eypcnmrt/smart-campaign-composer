@@ -14,6 +14,12 @@ cd "$(dirname "$0")/.."
 
 compose="docker compose -p scc-e2e -f docker-compose.yml -f docker-compose.e2e.yml"
 cleanup() {
+	status=$?
+	if [ "$status" -ne 0 ]; then
+		# What a failed run leaves behind must not be only the last line of the reporter: the logs of the stack go before it is removed.
+		echo "== the last log lines of the stack (the run ended with status $status)"
+		$compose logs --no-color --tail=60 api worker mock-provider web 2>&1 || true
+	fi
 	if [ "${KEEP:-0}" = "1" ]; then
 		echo "== the scc-e2e project is left up (KEEP=1); remove it with: $compose down --volumes --remove-orphans"
 	else

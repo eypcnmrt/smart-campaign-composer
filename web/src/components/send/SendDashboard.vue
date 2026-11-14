@@ -23,7 +23,7 @@ const emit = defineEmits<{
   reload: []
 }>()
 
-const { stats, error, rates, updatedAt, retryInSeconds, refresh } = useStatsPolling(() => props.campaign.id)
+const { stats, error, rates, updatedAt, retryInSeconds, polling, refresh } = useStatsPolling(() => props.campaign.id)
 
 const LABELS: Record<string, string> = { sms: 'SMS', email: 'E-posta' }
 const ORDER = ['sms', 'email']
@@ -84,7 +84,8 @@ const updated = computed(() => (updatedAt.value === null ? '' : formatDateTime(n
 
       <p class="updated">
         <template v-if="finished">Gönderim bitti; sayılar kesindir.</template>
-        <template v-else>Sayılar her saniye yenilenir.</template>
+        <template v-else-if="!polling">Güncelleme durdu.</template>
+        <template v-else-if="retryInSeconds === null">Sayılar her saniye yenilenir.</template>
         <template v-if="updated"> Son güncelleme: <span class="num">{{ updated }}</span>.</template>
       </p>
     </template>

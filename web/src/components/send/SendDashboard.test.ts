@@ -196,6 +196,20 @@ describe('SendDashboard', () => {
     wrapper.unmount()
   })
 
+  it('does not claim a refresh every second while it is backing off or has stopped', async () => {
+    const api = installFakeApi({ [KEY]: { body: stats('sending', { sent: 100, queued: 900, total: 1000 }) } })
+    const wrapper = mount(SendDashboard, { props: { campaign: sending }, attachTo: document.body })
+    await settle()
+    expect(wrapper.get('.updated').text()).toContain('Sayılar her saniye yenilenir')
+    api.set(KEY, error(503, 'not_ready'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(wrapper.get('.updated').text()).not.toContain('her saniye')
+    api.set(KEY, error(404, 'not_found'))
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(wrapper.get('.updated').text()).toContain('Güncelleme durdu')
+    wrapper.unmount()
+  })
+
   it('stops asking when it is left', async () => {
     const api = installFakeApi({ [KEY]: { body: stats('sending', { queued: 5, total: 5 }) } })
     const wrapper = mount(SendDashboard, { props: { campaign: sending }, attachTo: document.body })

@@ -71,6 +71,14 @@ describe('ChannelProgress', () => {
     expect(wrapper.find('.meter').exists()).toBe(false)
   })
 
+  it('says nothing about the provider on a finished delivery with nothing waiting (the health is the worker’s, not the campaign’s)', () => {
+    const down = { ...ok, state: 'worker_down' as const }
+    const props = { channel: 'sms', label: 'SMS', rate: 0, live: false }
+    expect(mount(ChannelProgress, { props: { ...props, counts: counts({ sent: 5, total: 5, provider: down }) } }).find('[role="alert"]').exists()).toBe(false)
+    // while something still waits, a stopped worker is exactly what the person needs to hear
+    expect(mount(ChannelProgress, { props: { ...props, counts: counts({ sent: 3, queued: 2, total: 5, provider: down }) } }).text()).toContain('çalışmıyor')
+  })
+
   it('has its own rate meter and provider state', () => {
     const wrapper = render({ sent: 1, total: 10 }, 42)
     expect(wrapper.get('.meter__value').text()).toBe('42')

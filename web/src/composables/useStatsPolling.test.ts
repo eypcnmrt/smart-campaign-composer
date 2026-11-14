@@ -212,6 +212,17 @@ describe('useStatsPolling', () => {
     expect(api.callsTo(KEY)).toHaveLength(1)
   })
 
+  it('forgets the retry wait when it stops because the campaign is gone', async () => {
+    const api = installFakeApi({ [KEY]: error(503, 'not_ready') })
+    const p = polling()
+    await settle()
+    expect(p.retryInSeconds.value).toBe(1)
+    api.set(KEY, error(404, 'not_found'))
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(p.polling.value).toBe(false)
+    expect(p.retryInSeconds.value).toBeNull()
+  })
+
   it('waits out a Retry-After before asking again', async () => {
     const api = installFakeApi({ [KEY]: error(429, 'llm_rate_limited', null, { 'Retry-After': '4' }) })
     polling()

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ChannelCounts } from '@/api/types'
-import { progressOf } from '@/domain/delivery'
+import { pendingOf, progressOf } from '@/domain/delivery'
 import { formatNumber } from '@/domain/format'
 import RateChart from './RateChart.vue'
 import ProviderBadge from './ProviderBadge.vue'
@@ -13,6 +13,7 @@ import RateMeter from './RateMeter.vue'
 const props = withDefaults(defineProps<{ channel: string; label: string; counts: ChannelCounts; rate: number | null; live?: boolean }>(), { live: true })
 
 const progress = computed(() => progressOf(props.counts))
+const pending = computed(() => pendingOf(props.counts))
 
 const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed' | 'skipped'; label: string }[] = [
   { key: 'queued', label: 'Sırada' },
@@ -28,7 +29,8 @@ const ROWS: readonly { key: 'queued' | 'sending' | 'retrying' | 'sent' | 'failed
   <section class="channel" :aria-labelledby="`ch-${channel}`" :data-channel="channel">
     <div class="channel__head">
       <h3 :id="`ch-${channel}`">{{ label }}</h3>
-      <ProviderBadge :label="label" :provider="counts.provider" />
+      <!-- The health is the worker's, for the channel as a whole: on a finished campaign (nothing waits) it says nothing about this one. -->
+      <ProviderBadge v-if="live || pending > 0" :label="label" :provider="counts.provider" />
     </div>
 
     <div class="progress">

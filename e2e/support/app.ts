@@ -65,14 +65,15 @@ export async function setOutage(request: APIRequestContext, on: boolean): Promis
 
 /**
  * Scans the page with axe (WCAG 2 A and AA, and the best practices) and fails on a violation that is serious or critical. The
- * lesser ones (moderate, minor) are reported in the message of the test only when something serious is also there.
+ * lesser ones (moderate, minor) are not asserted; they are listed in the message when something serious fails the test.
  */
 export async function expectNoSeriousViolations(page: Page, where: string): Promise<void> {
   await settled(page)
   const result = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'best-practice']).analyze()
   const serious = result.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+  const lesser = result.violations.filter((v) => !serious.includes(v)).map((v) => `${v.impact} ${v.id}`)
   const report = serious.map((v) => `${v.impact} ${v.id}: ${v.help} (${v.nodes.length}) e.g. ${v.nodes[0]?.target.join(' ')} ${v.nodes[0]?.html.slice(0, 120)} | ${v.nodes[0]?.any[0]?.message ?? ''}`)
-  expect(report, `accessibility violations on ${where}`).toEqual([])
+  expect(report, `accessibility violations on ${where}` + (report.length > 0 && lesser.length > 0 ? ` (also: ${lesser.join(', ')})` : '')).toEqual([])
 }
 
 /** Saves a picture for docs/screenshots when the run was asked to (make e2e SCREENSHOTS=1). */
@@ -83,9 +84,10 @@ export async function shot(page: Page, name: string): Promise<void> {
 
 /** Presses Tab until `target` has the focus, at most `max` times (the page starts at the skip link). */
 export async function tabTo(page: Page, target: Locator, max = 60): Promise<number> {
+  await target.waitFor() // a wrong locator is its own failure, not "Tab did not reach it"
   for (let presses = 1; presses <= max; presses++) {
     await page.keyboard.press('Tab')
-    const focused = await target.evaluate((el) => el === document.activeElement).catch(() => false)
+    const focused = await target.evaluate((el) => el === document.activeElement)
     if (focused) return presses
   }
   throw new Error(`Tab did not reach the element in ${max} presses`)
@@ -97,7 +99,7 @@ export async function tabTo(page: Page, target: Locator, max = 60): Promise<numb
  */
 async function settled(page: Page): Promise<void> {
   await page.evaluate(async () => {
-    await Promise.all(document.getAnimations().map((a) => a.finished.catch(() => undefined)))
+    await Promise.all(document.getAnimations().filter((a) => Number.isFinite(a.effect?.getComputedTiming().endTime ?? 0)).map((a) => a.finished.catch(() => undefined)))
     await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())))
   })
 }

@@ -4,6 +4,7 @@ import { defineConfig, devices } from '@playwright/test'
 // name. One worker and no retries: the scenarios share one database and a retry would hide a flaw that a person would meet.
 export default defineConfig({
   testDir: './tests',
+  forbidOnly: true, // a leftover test.only must fail the run, not shrink it
   fullyParallel: false,
   workers: 1,
   retries: 0,
