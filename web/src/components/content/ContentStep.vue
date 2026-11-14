@@ -181,6 +181,14 @@ function warnBeforeUnload(event: BeforeUnloadEvent): void {
 onMounted(() => window.addEventListener('beforeunload', warnBeforeUnload))
 onBeforeUnmount(() => window.removeEventListener('beforeunload', warnBeforeUnload))
 
+// Why a button is disabled, in words beside it.
+const saveReason = computed(() => {
+  if (saving.value) return ''
+  if (!dirty.value) return 'Kaydedilecek değişiklik yok'
+  return Object.keys(localProblems.value).length > 0 ? 'Önce hataları düzeltin' : ''
+})
+const approveReason = computed(() => (dirty.value ? 'Önce değişiklikleri kaydedin' : ''))
+
 const progress = computed(() => {
   if (!streaming.value) return ''
   const n = stream.attempt.value
@@ -237,25 +245,38 @@ defineExpose({ dirty })
           </div>
 
           <div class="actions">
-            <button v-if="!streaming" type="submit" class="btn btn--primary" :disabled="!canSave">
-              {{ saving ? 'Kaydediliyor…' : 'Değişiklikleri kaydet' }}
-            </button>
+            <!-- One primary action: "Onaya geç" while nothing is unsaved, "Değişiklikleri kaydet" while something is. A disabled
+                 button says why, next to it. -->
+            <div v-if="!streaming" class="action">
+              <button
+                type="submit"
+                class="btn"
+                :class="{ 'btn--primary': dirty }"
+                :disabled="!canSave"
+                :aria-describedby="saveReason ? 'content-save-reason' : undefined"
+              >
+                {{ saving ? 'Kaydediliyor…' : 'Değişiklikleri kaydet' }}
+              </button>
+              <p v-if="saveReason" id="content-save-reason" class="reason">{{ saveReason }}</p>
+            </div>
             <button v-else type="button" class="btn" @click="stream.abort()">Üretimi durdur</button>
             <button v-if="hasContent && !streaming" type="button" class="btn" :disabled="saving" @click="generate(true)">
               İçeriği yeniden üret
             </button>
-            <button
-              v-if="hasContent && !streaming && campaign.status === 'content_ready'"
-              type="button"
-              class="btn"
-              :disabled="dirty || saving"
-              @click="emit('approve')"
-            >
-              Onaya geç
-            </button>
+            <div v-if="hasContent && !streaming && campaign.status === 'content_ready'" class="action">
+              <button
+                type="button"
+                class="btn"
+                :class="{ 'btn--primary': !dirty }"
+                :disabled="dirty || saving"
+                :aria-describedby="approveReason ? 'content-approve-reason' : undefined"
+                @click="emit('approve')"
+              >
+                Onaya geç
+              </button>
+              <p v-if="approveReason" id="content-approve-reason" class="reason">{{ approveReason }}</p>
+            </div>
           </div>
-          <p v-if="dirty && !streaming && Object.keys(localProblems).length > 0" class="reason">Kaydetmek için işaretli alanları düzeltin.</p>
-          <p v-else-if="dirty && !streaming" class="reason">Kaydedilmemiş değişiklikler var. Onaya geçmeden önce kaydedin.</p>
           <p class="visually-hidden" role="status">{{ saved ? 'İçerik kaydedildi.' : '' }}</p>
         </form>
       </template>
@@ -347,7 +368,14 @@ defineExpose({ dirty })
 .actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: var(--space-3);
+}
+
+.action {
+  display: grid;
+  gap: var(--space-1);
+  justify-items: start;
 }
 
 .reason {

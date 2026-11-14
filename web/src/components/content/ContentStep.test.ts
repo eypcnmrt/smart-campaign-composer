@@ -211,6 +211,27 @@ describe('the content step, editing', () => {
     wrapper.unmount()
   })
 
+  it('makes "Onaya geç" the primary action while nothing is unsaved, and the save while something is, with the reason of each disabled button', async () => {
+    const { wrapper } = await openContent()
+    expect(button(wrapper, 'Onaya geç').classes()).toContain('btn--primary')
+    expect(button(wrapper, 'Değişiklikleri kaydet').classes()).not.toContain('btn--primary')
+    expect(wrapper.get('#content-save-reason').text()).toBe('Kaydedilecek değişiklik yok')
+    expect(wrapper.find('#content-approve-reason').exists()).toBe(false)
+
+    await field(wrapper, 'sms').get('textarea').setValue('Yeni SMS {{first_name}}')
+    expect(button(wrapper, 'Değişiklikleri kaydet').classes()).toContain('btn--primary')
+    expect(button(wrapper, 'Onaya geç').classes()).not.toContain('btn--primary')
+    expect(button(wrapper, 'Onaya geç').attributes('disabled')).toBeDefined()
+    expect(button(wrapper, 'Onaya geç').attributes('aria-describedby')).toBe('content-approve-reason')
+    expect(wrapper.get('#content-approve-reason').text()).toBe('Önce değişiklikleri kaydedin')
+    expect(wrapper.find('#content-save-reason').exists()).toBe(false)
+
+    await field(wrapper, 'sms').get('textarea').setValue('Merhaba {{unknown}}')
+    expect(wrapper.get('#content-save-reason').text()).toBe('Önce hataları düzeltin')
+    expect(button(wrapper, 'Değişiklikleri kaydet').attributes('aria-describedby')).toBe('content-save-reason')
+    wrapper.unmount()
+  })
+
   it('saves the edited texts and shows what the server returned', async () => {
     const saved = campaign({
       ...contentReady,
@@ -221,7 +242,7 @@ describe('the content step, editing', () => {
     const { wrapper, api } = await openContent({ 'PUT /api/campaigns/7/content': { body: saved } })
     await field(wrapper, 'sms').get('textarea').setValue('Yeni SMS {{first_name}}')
     expect(button(wrapper, 'Değişiklikleri kaydet').attributes('disabled')).toBeUndefined()
-    expect(wrapper.text()).toContain('Kaydedilmemiş değişiklikler var')
+    expect(wrapper.text()).toContain('Önce değişiklikleri kaydedin')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
@@ -230,7 +251,7 @@ describe('the content step, editing', () => {
       email_subject: contentReady.content!.email_subject,
       email_body: contentReady.content!.email_body,
     })
-    expect(wrapper.text()).not.toContain('Kaydedilmemiş değişiklikler var')
+    expect(wrapper.text()).not.toContain('Önce değişiklikleri kaydedin')
     expect(wrapper.text()).toContain('İçerik kaydedildi.')
     wrapper.unmount()
   })
@@ -240,7 +261,7 @@ describe('the content step, editing', () => {
     await field(wrapper, 'sms').get('textarea').setValue('Merhaba {{unknown}}')
     expect(field(wrapper, 'sms').text()).toContain('Bilinmeyen değişken {{unknown}}')
     expect(button(wrapper, 'Değişiklikleri kaydet').attributes('disabled')).toBeDefined()
-    expect(wrapper.text()).toContain('Kaydetmek için işaretli alanları düzeltin.')
+    expect(wrapper.text()).toContain('Önce hataları düzeltin')
     await wrapper.get('form').trigger('submit')
     expect(api.callsTo('PUT /api/campaigns/7/content')).toHaveLength(0)
     wrapper.unmount()
