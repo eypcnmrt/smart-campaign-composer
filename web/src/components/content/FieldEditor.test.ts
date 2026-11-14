@@ -210,6 +210,22 @@ describe('FieldEditor, variables', () => {
   })
 })
 
+describe('FieldEditor, the single-message hint', () => {
+  it('tells an SMS that is a few units over to shorten by that many, and says nothing otherwise', async () => {
+    const wrapper = renderBound({ modelValue: 'a'.repeat(163), limit: 1000 })
+    expect(wrapper.get('.sms-hint').text()).toBe('Tek mesaja sığması için 3 birim kısaltın.')
+    await wrapper.setProps({ modelValue: 'a'.repeat(160) })
+    expect(wrapper.find('.sms-hint').exists()).toBe(false)
+    await wrapper.setProps({ modelValue: 'a'.repeat(400) })
+    expect(wrapper.find('.sms-hint').exists()).toBe(false)
+  })
+
+  it('is for the SMS only', () => {
+    const wrapper = renderBound({ field: 'email_body', label: 'E-posta gövdesi', modelValue: 'a'.repeat(163), limit: 1000 })
+    expect(wrapper.find('.sms-hint').exists()).toBe(false)
+  })
+})
+
 describe('FieldEditor, how an SMS would be sent', () => {
   it('shows the encoding, the units and the messages for the SMS, as information', () => {
     const wrapper = renderBound({ modelValue: 'Merhaba dünya' })

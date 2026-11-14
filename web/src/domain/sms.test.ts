@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import fixture from '../../../backend/internal/content/testdata/sms_cases.json'
-import { analyzeSms, GSM7_BASIC_SIZE, GSM7_EXTENSION_SIZE, runeCount } from './sms'
+import { analyzeSms, GSM7_BASIC_SIZE, GSM7_EXTENSION_SIZE, runeCount, SHORTEN_HINT_MAX, unitsOverSingle } from './sms'
 
 interface Case {
   name: string
@@ -61,5 +61,19 @@ describe('runeCount', () => {
     expect(runeCount('ı')).toBe(1)
     expect(runeCount('i'.toLocaleUpperCase('tr-TR'))).toBe(1)
     expect('i'.toLocaleUpperCase('tr-TR')).toBe('İ')
+  })
+})
+
+describe('unitsOverSingle', () => {
+  it('says how many units a text that just spills into a second message must lose', () => {
+    expect(unitsOverSingle(analyzeSms('a'.repeat(163)))).toBe(3)
+    expect(unitsOverSingle(analyzeSms('ş'.repeat(75)))).toBe(5)
+    expect(unitsOverSingle(analyzeSms('a'.repeat(160 + SHORTEN_HINT_MAX)))).toBe(SHORTEN_HINT_MAX)
+  })
+
+  it('has nothing to say for a text that fits, or one that is far over', () => {
+    expect(unitsOverSingle(analyzeSms('a'.repeat(160)))).toBeNull()
+    expect(unitsOverSingle(analyzeSms(''))).toBeNull()
+    expect(unitsOverSingle(analyzeSms('a'.repeat(161 + SHORTEN_HINT_MAX)))).toBeNull()
   })
 })

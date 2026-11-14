@@ -4,7 +4,7 @@ import { describeProblem } from '@/api/errors'
 import type { ContentField } from '@/api/types'
 import { useDebounced } from '@/composables/useDebounced'
 import { formatNumber } from '@/domain/format'
-import { analyzeSms, runeCount } from '@/domain/sms'
+import { analyzeSms, runeCount, unitsOverSingle } from '@/domain/sms'
 import { validateField } from '@/domain/template'
 
 // One text of the campaign: SMS, e-mail subject or e-mail body. The editor
@@ -47,6 +47,7 @@ const problems = computed(() => {
 const invalid = computed(() => problems.value.length > 0)
 
 const sms = computed(() => (props.field === 'sms' ? analyzeSms(model.value) : null))
+const shorten = computed(() => (sms.value ? unitsOverSingle(sms.value) : null))
 
 // A screen reader hears the counter only when the limit is close or passed, and only after typing has paused.
 const near = computed(() => length.value >= props.limit * 0.9)
@@ -181,6 +182,8 @@ function typed(event: Event): void {
       </span>
     </p>
 
+    <p v-if="shorten !== null" class="sms-hint">Tek mesaja sığması için {{ formatNumber(shorten) }} birim kısaltın.</p>
+
     <p class="visually-hidden" role="status">{{ announcement }}</p>
   </div>
 </template>
@@ -277,7 +280,8 @@ textarea.editor__control {
   font-weight: 600;
 }
 
-.sms-info {
+.sms-info,
+.sms-hint {
   color: var(--text-soft);
   font-size: var(--text-sm);
 }

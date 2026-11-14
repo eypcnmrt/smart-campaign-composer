@@ -71,3 +71,15 @@ export function analyzeSms(text: string): SmsInfo {
   }
   return { encoding, units, segments, single, multi }
 }
+
+/** How far over the single-message limit a text may be and still get the "shorten it by N" hint: a few units, not a rewrite. */
+export const SHORTEN_HINT_MAX = 10
+
+/**
+ * How many units a text that just spills into a second message must lose to fit in one, or null when it fits already or is too
+ * far over for a hint to be useful. Information only: it is never a limit, and for a template it is an estimate.
+ */
+export function unitsOverSingle(info: SmsInfo): number | null {
+  const over = info.units - info.single
+  return over >= 1 && over <= SHORTEN_HINT_MAX ? over : null
+}
