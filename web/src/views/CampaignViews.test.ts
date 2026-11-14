@@ -171,6 +171,33 @@ describe('the campaign page', () => {
     wrapper.unmount()
   })
 
+  describe('the audience step', () => {
+    it('shows the new state of the campaign after a channel was closed', async () => {
+      const { wrapper } = await open('/campaigns/7', {
+        'GET /api/campaigns/7': { body: audienceReady },
+        'PUT /api/campaigns/7/channels': {
+          body: campaign({ channels: ['email'], version: 3, warnings: [{ code: 'matches_everyone', message: 'English' }] }),
+        },
+      })
+      expect(wrapper.find('[data-warning]').exists()).toBe(false)
+      await wrapper.findAll('input[type="checkbox"]')[0]?.setValue(false)
+      await flushPromises()
+      expect(wrapper.find('[data-warning="matches_everyone"]').exists()).toBe(true)
+      expect(wrapper.findAll('input[type="checkbox"]').map((b) => (b.element as HTMLInputElement).checked)).toEqual([false, true])
+      wrapper.unmount()
+    })
+
+    it('goes to the content step when asked, without calling the model', async () => {
+      const { wrapper, router, api } = await open('/campaigns/7', { 'GET /api/campaigns/7': { body: audienceReady } })
+      await wrapper.get('main button.btn--primary').trigger('click')
+      await vi.waitFor(() => expect(router.currentRoute.value.query.step).toBe('content'))
+      await flushPromises()
+      expect(step(wrapper)).toBe('İçerik')
+      expect(api.calls.filter((c) => c.method !== 'GET')).toHaveLength(0)
+      wrapper.unmount()
+    })
+  })
+
   describe('a draft, whose audience could not be made', () => {
     it('opens at the brief with a retry', async () => {
       const { wrapper, router } = await open('/campaigns/7', { 'GET /api/campaigns/7': { body: draft } })

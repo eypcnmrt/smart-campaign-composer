@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { generateSegment } from '@/api/campaigns'
+import AudienceCard from '@/components/audience/AudienceCard.vue'
 import BriefForm from '@/components/brief/BriefForm.vue'
 import StepNav from '@/components/StepNav.vue'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
@@ -48,6 +49,10 @@ watch(step, async (now) => {
   body.value?.querySelector<HTMLElement>('h2')?.focus({ preventScroll: false })
 })
 
+function goTo(next: string): Promise<unknown> {
+  return router.push({ name: 'campaign', params: { id: props.id }, query: { step: next } })
+}
+
 // The audience of a draft (its generation failed) is made again from here.
 const retrying = shallowRef(false)
 const retryError = shallowRef<unknown>(null)
@@ -89,6 +94,12 @@ async function retrySegment(): Promise<void> {
           :busy="retrying"
           :error="retryError"
           @retry="retrySegment"
+        />
+        <AudienceCard
+          v-else-if="step === 'audience'"
+          :campaign="campaign"
+          @updated="replace"
+          @content="goTo('content')"
         />
         <p v-else-if="step !== 'brief'">Bu adım hazırlanıyor.</p>
         <LoadingState v-else label="Ayarlar yükleniyor…" />
