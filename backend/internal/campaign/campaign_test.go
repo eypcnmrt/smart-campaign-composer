@@ -18,16 +18,17 @@ func TestValidateChannels(t *testing.T) {
 		want     []string
 		wantPath string
 		wantMsg  string
+		wantCode string
 	}{
 		{name: "one channel", in: []string{"sms"}, want: []string{"sms"}},
 		{name: "both", in: []string{"sms", "email"}, want: []string{"sms", "email"}},
 		{name: "canonical order", in: []string{"email", "sms"}, want: []string{"sms", "email"}},
-		{name: "none", in: nil, wantPath: "channels", wantMsg: "at least one"},
-		{name: "empty", in: []string{}, wantPath: "channels", wantMsg: "at least one"},
-		{name: "unknown", in: []string{"sms", "fax"}, wantPath: "channels[1]", wantMsg: `unknown channel "fax"`},
-		{name: "case matters", in: []string{"SMS"}, wantPath: "channels[0]", wantMsg: "unknown channel"},
-		{name: "repeated", in: []string{"email", "email"}, wantPath: "channels[1]", wantMsg: "listed twice"},
-		{name: "a long name is cut in the message", in: []string{strings.Repeat("x", 500)}, wantPath: "channels[0]", wantMsg: "…"},
+		{name: "none", in: nil, wantPath: "channels", wantMsg: "at least one", wantCode: "empty"},
+		{name: "empty", in: []string{}, wantPath: "channels", wantMsg: "at least one", wantCode: "empty"},
+		{name: "unknown", in: []string{"sms", "fax"}, wantPath: "channels[1]", wantMsg: `unknown channel "fax"`, wantCode: "unknown_channel"},
+		{name: "case matters", in: []string{"SMS"}, wantPath: "channels[0]", wantMsg: "unknown channel", wantCode: "unknown_channel"},
+		{name: "repeated", in: []string{"email", "email"}, wantPath: "channels[1]", wantMsg: "listed twice", wantCode: "duplicate_channel"},
+		{name: "a long name is cut in the message", in: []string{strings.Repeat("x", 500)}, wantPath: "channels[0]", wantMsg: "…", wantCode: "unknown_channel"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,6 +43,12 @@ func TestValidateChannels(t *testing.T) {
 			verrs, ok := err.(ValidationErrors)
 			if !ok || len(verrs) != 1 || verrs[0].Path != tt.wantPath || !strings.Contains(verrs[0].Msg, tt.wantMsg) {
 				t.Fatalf("ValidateChannels(%v) error = %v, want one at %s containing %q", tt.in, err, tt.wantPath, tt.wantMsg)
+			}
+			if verrs[0].Code != tt.wantCode {
+				t.Fatalf("code = %q, want %q", verrs[0].Code, tt.wantCode)
+			}
+			if v, has := verrs[0].Params["value"].(string); has && len([]rune(v)) > 41 {
+				t.Fatalf("the params echo %d characters of untrusted input", len([]rune(v)))
 			}
 			if len(verrs[0].Msg) > 200 {
 				t.Fatalf("the message echoes %d characters of untrusted input", len(verrs[0].Msg))

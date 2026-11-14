@@ -1,7 +1,10 @@
 package content
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -103,6 +106,71 @@ func TestValidate(t *testing.T) {
 			for i, want := range tt.want {
 				if !strings.Contains(verrs[i].Error(), want) {
 					t.Errorf("problem %d = %q, want it to contain %q", i, verrs[i], want)
+				}
+			}
+		})
+	}
+}
+
+// The same cases run in the web app (web/src/domain/template.test.ts): the TypeScript port of the validator must report
+// the same codes and params as this one, so the browser flags what the server would refuse and nothing else.
+func TestValidate_sharedFixture(t *testing.T) {
+	t.Parallel()
+	raw, err := os.ReadFile("testdata/template_cases.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fx struct {
+		Limits map[string]int `json:"limits"`
+		Cases  []struct {
+			Name   string `json:"name"`
+			Field  string `json:"field"`
+			Text   string `json:"text"`
+			Repeat *struct {
+				Unit  string `json:"unit"`
+				Count int    `json:"count"`
+			} `json:"repeat"`
+			Problems []struct {
+				Code   string         `json:"code"`
+				Params map[string]any `json:"params"`
+			} `json:"problems"`
+		} `json:"cases"`
+	}
+	if err := json.Unmarshal(raw, &fx); err != nil {
+		t.Fatal(err)
+	}
+	if fx.Limits[FieldSMS] != MaxSMS || fx.Limits[FieldEmailSubject] != MaxEmailSubject || fx.Limits[FieldEmailBody] != MaxEmailBody {
+		t.Fatalf("the fixture's limits %v differ from the code's", fx.Limits)
+	}
+	if len(fx.Cases) < 20 {
+		t.Fatalf("only %d cases", len(fx.Cases))
+	}
+	for _, tc := range fx.Cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			t.Parallel()
+			text := tc.Text
+			if tc.Repeat != nil {
+				text = strings.Repeat(tc.Repeat.Unit, tc.Repeat.Count)
+			}
+			got := checkField(tc.Field, text, fx.Limits[tc.Field])
+			if len(got) != len(tc.Problems) {
+				t.Fatalf("got %d problems %q, want %d", len(got), got, len(tc.Problems))
+			}
+			for i, want := range tc.Problems {
+				if got[i].Path != tc.Field || got[i].Code != want.Code || got[i].Msg == "" {
+					t.Errorf("problem %d = %+v, want code %q at %s with a message", i, got[i], want.Code, tc.Field)
+				}
+				// Compared as JSON, the way a client sees them: numbers are float64 on both sides.
+				gotJSON, _ := json.Marshal(got[i].Params)
+				wantJSON, _ := json.Marshal(want.Params)
+				var g, w any
+				_ = json.Unmarshal(gotJSON, &g)
+				_ = json.Unmarshal(wantJSON, &w)
+				if g == nil {
+					g = map[string]any{}
+				}
+				if !reflect.DeepEqual(g, w) {
+					t.Errorf("problem %d params = %s, want %s", i, gotJSON, wantJSON)
 				}
 			}
 		})

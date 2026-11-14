@@ -35,7 +35,8 @@ func intParam(r *http.Request, name string, def, lo, hi int) (int, error) {
 	}
 	n, err := strconv.Atoi(raw)
 	if err != nil || n < lo || n > hi {
-		return 0, validationProblem(detail{Path: name, Message: fmt.Sprintf("must be a whole number from %d to %d", lo, hi)})
+		return 0, validationProblem(detail{Path: name, Code: codeInvalidParam, Params: map[string]any{"min": lo, "max": hi},
+			Message: fmt.Sprintf("must be a whole number from %d to %d", lo, hi)})
 	}
 	return n, nil
 }
@@ -48,7 +49,7 @@ func boolParam(r *http.Request, name string) (bool, error) {
 	case "true":
 		return true, nil
 	default:
-		return false, validationProblem(detail{Path: name, Message: "must be true or false"})
+		return false, validationProblem(detail{Path: name, Code: codeInvalidParam, Message: "must be true or false"})
 	}
 }
 
@@ -71,9 +72,10 @@ func (s *Server) createCampaign(w http.ResponseWriter, r *http.Request) error {
 	brief := strings.TrimSpace(req.Brief)
 	switch n := utf8.RuneCountInString(brief); {
 	case n == 0:
-		return validationProblem(detail{Path: "brief", Message: "must not be empty"})
+		return validationProblem(detail{Path: "brief", Code: content.CodeEmpty, Message: "must not be empty"})
 	case n > s.cfg.MaxBriefChars:
-		return validationProblem(detail{Path: "brief", Message: fmt.Sprintf("is %d characters long; the limit is %d", n, s.cfg.MaxBriefChars)})
+		return validationProblem(detail{Path: "brief", Code: content.CodeTooLong, Params: map[string]any{"length": n, "limit": s.cfg.MaxBriefChars},
+			Message: fmt.Sprintf("is %d characters long; the limit is %d", n, s.cfg.MaxBriefChars)})
 	}
 
 	// The slot first: a busy server must not leave an empty draft behind for every refused request.
@@ -297,7 +299,7 @@ func (s *Server) approve(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 	if req.Version == nil {
-		return validationProblem(detail{Path: "version", Message: "is required: the version of the campaign that was reviewed"})
+		return validationProblem(detail{Path: "version", Code: codeRequired, Message: "is required: the version of the campaign that was reviewed"})
 	}
 	res, err := s.store.Approve(r.Context(), id, *req.Version, req.AcknowledgeWarnings)
 	if err != nil {

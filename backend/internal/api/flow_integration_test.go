@@ -405,21 +405,43 @@ func TestAPI_requestValidation(t *testing.T) {
 		if !slices.Equal(paths, []string{"email_body", "email_subject", "sms"}) {
 			t.Fatalf("paths = %v, want every invalid field", paths)
 		}
+		// Every problem carries a code and params, so the UI can translate it without reading the English message.
+		want := map[string]string{"sms": "too_long", "email_subject": "unknown_variable", "email_body": "empty"}
+		for _, d := range details.([]any) {
+			p := field(t, d, "path").(string)
+			if field(t, d, "code") != want[p] || field(t, d, "message") == "" {
+				t.Errorf("%s: problem = %v, want code %q", p, d, want[p])
+			}
+			if p == "sms" && (field(t, d, "params", "length") != 161.0 || field(t, d, "params", "limit") != 160.0) {
+				t.Errorf("sms params = %v", d)
+			}
+			if p == "email_subject" && (field(t, d, "params", "name") != "unknown" || field(t, d, "params", "char") != 9.0) {
+				t.Errorf("email_subject params = %v", d)
+			}
+		}
 		if got := e.expect("GET", path(id, ""), nil, http.StatusOK, "").json(t); got["content"] != nil || got["version"] != 2.0 {
 			t.Fatalf("invalid content was stored: %v", got)
 		}
 		e.expect("PUT", path(id, "/content"), `{"sms":"a","email_subject":"b","email_body":"c","html":"x"}`, http.StatusBadRequest, "invalid_json")
 	})
 	t.Run("channel problems come back with their paths", func(t *testing.T) {
-		for body, wantPath := range map[string]string{`{"channels":[]}`: "channels", `{"channels":["sms","fax"]}`: "channels[1]", `{"channels":["sms","sms"]}`: "channels[1]"} {
+		for body, want := range map[string][2]string{
+			`{"channels":[]}`:            {"channels", "empty"},
+			`{"channels":["sms","fax"]}`: {"channels[1]", "unknown_channel"},
+			`{"channels":["sms","sms"]}`: {"channels[1]", "duplicate_channel"},
+		} {
 			_, details := e.expect("PUT", path(id, "/channels"), body, http.StatusUnprocessableEntity, "validation_failed").errorOf(t)
-			if list := details.([]any); len(list) != 1 || field(t, list[0], "path") != wantPath {
-				t.Fatalf("%s: details = %v, want %s", body, details, wantPath)
+			if list := details.([]any); len(list) != 1 || field(t, list[0], "path") != want[0] || field(t, list[0], "code") != want[1] {
+				t.Fatalf("%s: details = %v, want %s with code %s", body, details, want[0], want[1])
 			}
 		}
 	})
 	t.Run("a preview limit out of range", func(t *testing.T) {
-		e.expect("GET", path(id, "/preview?limit=11"), nil, http.StatusUnprocessableEntity, "validation_failed")
+		_, details := e.expect("GET", path(id, "/preview?limit=11"), nil, http.StatusUnprocessableEntity, "validation_failed").errorOf(t)
+		d := details.([]any)[0]
+		if field(t, d, "code") != "invalid_param" || field(t, d, "params", "min") != 1.0 || field(t, d, "params", "max") != 10.0 {
+			t.Fatalf("detail = %v", d)
+		}
 	})
 }
 

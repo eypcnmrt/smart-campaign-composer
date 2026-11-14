@@ -117,10 +117,19 @@ func (e *AcknowledgementRequiredError) Is(target error) bool {
 	return target == ErrAcknowledgementRequired
 }
 
+// Codes of FieldError.Code; clients translate Code and Params, Msg is English text for logs.
+const (
+	CodeEmptyChannels    = "empty"             // no params
+	CodeUnknownChannel   = "unknown_channel"   // value (clipped)
+	CodeDuplicateChannel = "duplicate_channel" // value
+)
+
 // FieldError is a problem with one field of a request; Path names it (channels[1]).
 type FieldError struct {
-	Path string
-	Msg  string
+	Path   string
+	Msg    string
+	Code   string
+	Params map[string]any
 }
 
 func (e FieldError) Error() string { return e.Path + ": " + e.Msg }
@@ -144,7 +153,7 @@ func DefaultChannels() []string { return segment.Channels() }
 func ValidateChannels(in []string) ([]string, error) {
 	var errs ValidationErrors
 	if len(in) == 0 {
-		errs = append(errs, FieldError{"channels", "must contain at least one channel"})
+		errs = append(errs, FieldError{Path: "channels", Code: CodeEmptyChannels, Msg: "must contain at least one channel"})
 	}
 	known := segment.Channels()
 	seen := map[string]bool{}
@@ -152,9 +161,11 @@ func ValidateChannels(in []string) ([]string, error) {
 		path := fmt.Sprintf("channels[%d]", i)
 		switch {
 		case !slices.Contains(known, ch):
-			errs = append(errs, FieldError{path, fmt.Sprintf("unknown channel %q; allowed: %v", clip(ch), known)})
+			errs = append(errs, FieldError{Path: path, Code: CodeUnknownChannel, Params: map[string]any{"value": clip(ch)},
+				Msg: fmt.Sprintf("unknown channel %q; allowed: %v", clip(ch), known)})
 		case seen[ch]:
-			errs = append(errs, FieldError{path, fmt.Sprintf("channel %q is listed twice", ch)})
+			errs = append(errs, FieldError{Path: path, Code: CodeDuplicateChannel, Params: map[string]any{"value": ch},
+				Msg: fmt.Sprintf("channel %q is listed twice", ch)})
 		}
 		seen[ch] = true
 	}

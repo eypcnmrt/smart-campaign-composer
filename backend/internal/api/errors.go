@@ -49,11 +49,20 @@ func (p *problem) body() errorBody {
 	return errorBody{Error: errorPayload{Code: p.Code, Message: p.Message, Details: p.Details}}
 }
 
-// detail names one invalid field.
+// detail names one invalid field. Code and Params are what a client translates (message is English text for people and
+// logs, and may change); Params holds the values the sentence needs (a limit, a length, a name).
 type detail struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
+	Path    string         `json:"path"`
+	Code    string         `json:"code"`
+	Message string         `json:"message"`
+	Params  map[string]any `json:"params,omitempty"`
 }
+
+// Codes of the fields the handlers check themselves; the others come from content and campaign.
+const (
+	codeInvalidParam = "invalid_param" // min and max for a number, none for a flag
+	codeRequired     = "required"
+)
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	// Encode before anything is sent: a value that cannot be encoded must become a 500, not a 200 with an empty body.
@@ -164,14 +173,14 @@ func storeProblem(err error) *problem {
 	if v, ok := errors.AsType[campaign.ValidationErrors](err); ok {
 		details := make([]detail, len(v))
 		for i, e := range v {
-			details[i] = detail{Path: e.Path, Message: e.Msg}
+			details[i] = detail{Path: e.Path, Code: e.Code, Message: e.Msg, Params: e.Params}
 		}
 		return validationProblem(details...)
 	}
 	if v, ok := errors.AsType[content.ValidationErrors](err); ok {
 		details := make([]detail, len(v))
 		for i, e := range v {
-			details[i] = detail{Path: e.Path, Message: e.Msg}
+			details[i] = detail{Path: e.Path, Code: e.Code, Message: e.Msg, Params: e.Params}
 		}
 		return validationProblem(details...)
 	}

@@ -604,6 +604,14 @@ here when the README is written.
   retried with `POST /api/campaigns/{id}/segment`. Limits: body 64 KiB, brief 2,000 characters (not bytes), list limit 1-200.
 - **Why:** the UI maps codes to its own wording and must not parse sentences. A draft that survives a failed generation is
   cheaper than losing the brief the marketer typed.
+- **Field problems carry a code too:** each `validation_failed` detail is `{path, code, message, params?}`. `message` stays
+  English (logs, the model's repair prompt) and may change; `code` and `params` are the contract the UI translates:
+  `empty`, `invalid_utf8`, `too_long {length, limit}`, `unknown_variable {name, char}`, `unbalanced_brace {brace, char}`,
+  `unclosed_variable {char}`, `malformed_variable {char}` (content and brief), `unknown_channel {value}`,
+  `duplicate_channel {value}`, `required`, `invalid_param {min, max}`. `char` is the 1-based character number, counted in
+  runes. `content/testdata/template_cases.json` lists the expected codes and params; the Go validator and the TypeScript
+  port in the web app run the same file, so the browser flags what the server would refuse and nothing else. The UI never
+  translates by matching the English sentence; an unknown code shows the server's `message`.
 
 ### The content stream: reconnect-safe, cancel-safe, never blocking the model
 - **Decision:** `GET /api/campaigns/{id}/content/stream` is Server-Sent Events: `attempt`, then `delta {field, text}` (or `raw`),

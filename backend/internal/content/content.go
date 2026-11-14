@@ -43,10 +43,28 @@ const (
 // Fields lists the JSON properties of Content in order.
 var Fields = []string{FieldSMS, FieldEmailSubject, FieldEmailBody}
 
+// Codes of FieldError.Code. Msg is English text for logs and for the model's repair prompt; Code and Params are what a
+// client translates, so no client has to parse Msg. Params are JSON values (numbers, strings) and always include
+// "char" (the 1-based character number) for the template problems.
+const (
+	CodeEmpty             = "empty"              // no params
+	CodeInvalidUTF8       = "invalid_utf8"       // no params: the text holds U+FFFD
+	CodeTooLong           = "too_long"           // length, limit
+	CodeUnknownVariable   = "unknown_variable"   // name (clipped to 40 characters), char
+	CodeUnbalancedBrace   = "unbalanced_brace"   // brace ("{" or "}"), char
+	CodeUnclosedVariable  = "unclosed_variable"  // char
+	CodeMalformedVariable = "malformed_variable" // char
+	CodeUnknownProperty   = "unknown_property"   // no params (Parse only)
+	CodeRequired          = "required"           // no params (Parse only)
+	CodeNotAString        = "not_a_string"       // no params (Parse only)
+)
+
 // FieldError is one problem with the content. Path is the JSON property.
 type FieldError struct {
-	Path string
-	Msg  string
+	Path   string
+	Msg    string
+	Code   string
+	Params map[string]any
 }
 
 func (e FieldError) Error() string { return e.Path + ": " + e.Msg }
@@ -110,19 +128,19 @@ func Parse(data []byte) (Content, error) {
 	var errs ValidationErrors
 	for _, key := range slices.Sorted(maps.Keys(top)) {
 		if !slices.Contains(Fields, key) {
-			errs = append(errs, FieldError{Path: clip(key), Msg: "unknown property; allowed: " + strings.Join(Fields, ", ")})
+			errs = append(errs, FieldError{Path: clip(key), Code: CodeUnknownProperty, Msg: "unknown property; allowed: " + strings.Join(Fields, ", ")})
 		}
 	}
 	var c Content
 	for field, dst := range map[string]*string{FieldSMS: &c.SMS, FieldEmailSubject: &c.EmailSubject, FieldEmailBody: &c.EmailBody} {
 		raw, ok := top[field]
 		if !ok {
-			errs = append(errs, FieldError{Path: field, Msg: "is required"})
+			errs = append(errs, FieldError{Path: field, Code: CodeRequired, Msg: "is required"})
 			continue
 		}
 		// null unmarshals into a string without error, so it is checked first.
 		if bytes.Equal(bytes.TrimSpace(raw), []byte("null")) || json.Unmarshal(raw, dst) != nil {
-			errs = append(errs, FieldError{Path: field, Msg: "must be a string"})
+			errs = append(errs, FieldError{Path: field, Code: CodeNotAString, Msg: "must be a string"})
 		}
 	}
 	if len(errs) > 0 {

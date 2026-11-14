@@ -38,14 +38,15 @@ func Validate(c Content) error {
 
 func checkField(path, text string, limit int) []FieldError {
 	if strings.TrimSpace(text) == "" {
-		return []FieldError{{Path: path, Msg: "must not be empty"}}
+		return []FieldError{{Path: path, Code: CodeEmpty, Msg: "must not be empty"}}
 	}
 	var errs []FieldError
 	if strings.ContainsRune(text, utf8.RuneError) {
-		errs = append(errs, FieldError{Path: path, Msg: "contains a replacement character (U+FFFD), the text was damaged; write it again without it"})
+		errs = append(errs, FieldError{Path: path, Code: CodeInvalidUTF8, Msg: "contains a replacement character (U+FFFD), the text was damaged; write it again without it"})
 	}
 	if n := utf8.RuneCountInString(text); n > limit {
-		errs = append(errs, FieldError{Path: path, Msg: fmt.Sprintf("is %d characters long; the limit is %d", n, limit)})
+		errs = append(errs, FieldError{Path: path, Code: CodeTooLong, Params: map[string]any{"length": n, "limit": limit},
+			Msg: fmt.Sprintf("is %d characters long; the limit is %d", n, limit)})
 	}
 	return append(errs, templateProblems(path, text)...)
 }
@@ -54,9 +55,14 @@ func checkField(path, text string, limit int) []FieldError {
 // part of a well-formed {{name}}.
 func templateProblems(path, s string) []FieldError {
 	var errs []FieldError
-	add := func(at int, format string, args ...any) {
+	add := func(at int, code string, params map[string]any, format string, args ...any) {
 		// Character numbers are 1-based and count runes, matching the limits.
-		errs = append(errs, FieldError{Path: path, Msg: fmt.Sprintf(format, args...) + fmt.Sprintf(" (character %d)", utf8.RuneCountInString(s[:at])+1)})
+		char := utf8.RuneCountInString(s[:at]) + 1
+		if params == nil {
+			params = map[string]any{}
+		}
+		params["char"] = char
+		errs = append(errs, FieldError{Path: path, Code: code, Params: params, Msg: fmt.Sprintf(format, args...) + fmt.Sprintf(" (character %d)", char)})
 	}
 	allowed := "{{" + strings.Join(variables, "}}, {{") + "}}"
 
@@ -64,25 +70,25 @@ func templateProblems(path, s string) []FieldError {
 		switch s[i] {
 		case '{':
 			if !strings.HasPrefix(s[i:], "{{") {
-				add(i, `single "{" is not allowed; write a variable as {{first_name}} and avoid other braces`)
+				add(i, CodeUnbalancedBrace, map[string]any{"brace": "{"}, `single "{" is not allowed; write a variable as {{first_name}} and avoid other braces`)
 				i++
 				continue
 			}
 			end := strings.Index(s[i+2:], "}}")
 			if end < 0 {
-				add(i, `"{{" is never closed with "}}"`)
+				add(i, CodeUnclosedVariable, nil, `"{{" is never closed with "}}"`)
 				return errs
 			}
 			name := s[i+2 : i+2+end]
 			switch {
 			case strings.ContainsAny(name, "{}"):
-				add(i, "malformed variable %s", strconv.Quote(clip(s[i:i+2+end+2])))
+				add(i, CodeMalformedVariable, nil, "malformed variable %s", strconv.Quote(clip(s[i:i+2+end+2])))
 			case !slices.Contains(variables, name):
-				add(i, "unknown variable {{%s}}; allowed: %s", clip(name), allowed)
+				add(i, CodeUnknownVariable, map[string]any{"name": clip(name)}, "unknown variable {{%s}}; allowed: %s", clip(name), allowed)
 			}
 			i += 2 + end + 2
 		case '}':
-			add(i, `single "}" is not allowed; a variable must be closed with "}}" after its name`)
+			add(i, CodeUnbalancedBrace, map[string]any{"brace": "}"}, `single "}" is not allowed; a variable must be closed with "}}" after its name`)
 			i++
 		default:
 			i++
