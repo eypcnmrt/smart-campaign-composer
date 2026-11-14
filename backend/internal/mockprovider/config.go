@@ -45,6 +45,11 @@ type Config struct {
 	// retries with the same key must not get a second delivery.
 	LateRate  float64
 	LateDelay time.Duration
+
+	// Control turns on the outage switch (POST /control/outage/on and /off): while an outage is on, every message request is
+	// answered with 503 and nothing is accepted. It is off by default: the provider is reachable by whoever can reach its port, and
+	// a switch that stops all deliveries must be asked for (MOCK_CONTROL=1), as the browser tests do inside their own network.
+	Control bool
 }
 
 // Validate reports a configuration that cannot work.
@@ -78,6 +83,7 @@ const (
 	EnvRateLimit    = "MOCK_RATE_LIMIT"
 	EnvLateRate     = "MOCK_LATE_RATE"
 	EnvLateDelay    = "MOCK_LATE_DELAY"
+	EnvControl      = "MOCK_CONTROL"
 )
 
 // ConfigFromEnv reads the configuration through getenv (os.Getenv in main). Unset variables keep
@@ -107,6 +113,7 @@ func ConfigFromEnv(getenv func(string) string) (Config, error) {
 	read(EnvRateLimit, func(v string) (err error) { c.RateLimit, err = strconv.Atoi(v); return })
 	read(EnvLateRate, rate(&c.LateRate))
 	read(EnvLateDelay, dur(&c.LateDelay))
+	read(EnvControl, func(v string) (err error) { c.Control, err = strconv.ParseBool(v); return })
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}

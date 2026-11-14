@@ -27,13 +27,13 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Parallel()
 		c, err := ConfigFromEnv(env(map[string]string{
 			EnvSeed: "42", EnvDelayMin: "1ms", EnvDelayMax: "9ms", EnvErrorRate: "0.1", EnvThrottleRate: "0.2",
-			EnvRetryAfter: "2s", EnvRateLimit: "120", EnvLateRate: "0.05", EnvLateDelay: "4s",
+			EnvRetryAfter: "2s", EnvRateLimit: "120", EnvLateRate: "0.05", EnvLateDelay: "4s", EnvControl: "1",
 		}))
 		if err != nil {
 			t.Fatal(err)
 		}
 		want := Config{Seed: 42, DelayMin: time.Millisecond, DelayMax: 9 * time.Millisecond, ErrorRate: 0.1, ThrottleRate: 0.2,
-			RetryAfter: 2 * time.Second, RateLimit: 120, LateRate: 0.05, LateDelay: 4 * time.Second}
+			RetryAfter: 2 * time.Second, RateLimit: 120, LateRate: 0.05, LateDelay: 4 * time.Second, Control: true}
 		if c != want {
 			t.Fatalf("config = %+v, want %+v", c, want)
 		}
@@ -44,6 +44,7 @@ func TestConfigFromEnv(t *testing.T) {
 		want string
 	}{
 		{"not a number", map[string]string{EnvErrorRate: "lots"}, EnvErrorRate},
+		{"not a switch", map[string]string{EnvControl: "maybe"}, EnvControl},
 		{"not a duration", map[string]string{EnvRetryAfter: "soon"}, EnvRetryAfter},
 		{"rate above one", map[string]string{EnvThrottleRate: "1.5"}, "throttle rate"},
 		{"negative rate", map[string]string{EnvLateRate: "-0.1"}, "late rate"},

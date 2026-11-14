@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -25,6 +26,9 @@ type Server struct {
 	cfg Config
 	log *slog.Logger
 	now func() time.Time
+
+	// outage is the state of the switch of Config.Control: while it is on, no message request is served.
+	outage atomic.Bool
 
 	mu       sync.Mutex
 	channels map[string]*channelState
@@ -61,6 +65,8 @@ type ChannelStats struct {
 	DuplicateKeys int `json:"duplicate_keys"`
 	Throttled429  int `json:"throttled_429"`
 	Errors500     int `json:"errors_500"`
+	// Unavailable503 counts requests answered 503 during an outage (Config.Control); they accepted nothing.
+	Unavailable503 int `json:"unavailable_503"`
 	// LateResponses counts accepted messages whose reply was deliberately held back.
 	LateResponses int `json:"late_responses"`
 	BadRequests   int `json:"bad_requests"`
@@ -97,7 +103,8 @@ func New(cfg Config, log *slog.Logger) (*Server, error) {
 	return s, nil
 }
 
-// Handler returns the routes: POST /sms, POST /email, GET /stats, GET /healthz.
+// Handler returns the routes: POST /sms, POST /email, GET /stats, GET /accepted/{channel}, GET /healthz, and, with Config.Control,
+// GET /control/outage and POST /control/outage/{on|off}.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /sms", s.send(ChannelSMS))
@@ -105,7 +112,31 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /stats", s.stats)
 	mux.HandleFunc("GET /accepted/{channel}", s.accepted)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+	if s.cfg.Control {
+		mux.HandleFunc("GET /control/outage", s.outageState)
+		mux.HandleFunc("POST /control/outage/{state}", s.setOutage)
+	}
 	return mux
+}
+
+// outageState is GET /control/outage: {"outage": true|false}.
+func (s *Server) outageState(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]bool{"outage": s.outage.Load()})
+}
+
+// setOutage is POST /control/outage/on and /off. Anything else is a 404, so a typo cannot be taken for "off".
+func (s *Server) setOutage(w http.ResponseWriter, r *http.Request) {
+	switch r.PathValue("state") {
+	case "on":
+		s.outage.Store(true)
+	case "off":
+		s.outage.Store(false)
+	default:
+		writeError(w, http.StatusNotFound, "the state is on or off")
+		return
+	}
+	s.log.Info("outage switch", "outage", s.outage.Load())
+	writeJSON(w, http.StatusOK, map[string]bool{"outage": s.outage.Load()})
 }
 
 // ServeHTTP lets the Server be used directly as an http.Handler.
@@ -204,6 +235,11 @@ func (s *Server) decide(channel, key string, nth int) decision {
 // send serves one channel.
 func (s *Server) send(channel string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
+		if s.outage.Load() {
+			s.count(channel, func(st *ChannelStats) { st.Unavailable503++ })
+			writeError(w, http.StatusServiceUnavailable, "simulated outage")
+			return
+		}
 		key := r.Header.Get(HeaderIdempotencyKey)
 		if key == "" {
 			s.count(channel, func(st *ChannelStats) { st.BadRequests++ })

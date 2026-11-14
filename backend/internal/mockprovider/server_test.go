@@ -398,3 +398,80 @@ func TestAcceptedEndpoint(t *testing.T) {
 		t.Fatalf("unknown channel: status %d, want 404", status)
 	}
 }
+
+func TestOutageSwitch(t *testing.T) {
+	t.Parallel()
+	post503 := func(base string) int { return post(t, base, "/sms", "k", smsBody).status }
+
+	t.Run("is not there unless asked for", func(t *testing.T) {
+		t.Parallel()
+		_, ts := newServer(t, Config{})
+		resp, err := http.Post(ts.URL+"/control/outage/on", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("POST /control/outage/on without Control = %d, want it not to exist", resp.StatusCode)
+		}
+		if got := post503(ts.URL); got != http.StatusOK {
+			t.Fatalf("send = %d, want 200: the switch must not have worked", got)
+		}
+	})
+
+	t.Run("answers 503 on every channel while on, accepts nothing, and recovers when off", func(t *testing.T) {
+		t.Parallel()
+		s, ts := newServer(t, Config{Control: true})
+		switchTo := func(state string) (int, bool) {
+			resp, err := http.Post(ts.URL+"/control/outage/"+state, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer resp.Body.Close()
+			var out map[string]bool
+			_ = json.NewDecoder(resp.Body).Decode(&out)
+			return resp.StatusCode, out["outage"]
+		}
+		if code, on := switchTo("on"); code != http.StatusOK || !on {
+			t.Fatalf("on = %d, %v", code, on)
+		}
+		for _, path := range []string{"/sms", "/email"} {
+			body := smsBody
+			if path == "/email" {
+				body = emailBody
+			}
+			if got := post(t, ts.URL, path, "during", body).status; got != http.StatusServiceUnavailable {
+				t.Fatalf("POST %s during an outage = %d, want 503", path, got)
+			}
+		}
+		st := s.Stats()
+		if st.SMS.UniqueAccepted != 0 || st.Email.UniqueAccepted != 0 || st.SMS.Unavailable503 != 1 || st.Email.Unavailable503 != 1 {
+			t.Fatalf("stats during the outage = %+v, want nothing accepted and one 503 each", st)
+		}
+		if code, _ := switchTo("sideways"); code != http.StatusNotFound {
+			t.Fatalf("a state that is neither on nor off = %d, want 404", code)
+		}
+		if got := post(t, ts.URL, "/sms", "still", smsBody).status; got != http.StatusServiceUnavailable {
+			t.Fatalf("send after a bad state = %d, want the outage left on (503)", got)
+		}
+		if code, on := switchTo("off"); code != http.StatusOK || on {
+			t.Fatalf("off = %d, %v", code, on)
+		}
+		// the same key as during the outage is now accepted once: the outage left no memory of it
+		if got := post(t, ts.URL, "/sms", "during", smsBody).status; got != http.StatusOK {
+			t.Fatalf("send after the outage = %d, want 200", got)
+		}
+		if s.Stats().SMS.UniqueAccepted != 1 {
+			t.Fatalf("accepted = %d, want 1", s.Stats().SMS.UniqueAccepted)
+		}
+		resp, err := http.Get(ts.URL + "/control/outage")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		var out map[string]bool
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out["outage"] {
+			t.Fatalf("GET /control/outage = %v, %v, want outage false", out, err)
+		}
+	})
+}
