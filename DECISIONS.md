@@ -1003,6 +1003,51 @@ reporting and in the stream's write path.
   "Yeniden deneniyor (N sn)" (N is the wait that was scheduled, not a countdown: a countdown would re-render every second for
   nothing while the server is in trouble); `not_found` still stops the polling.
 
+### Browser tests (`make e2e`)
+- **Decision:** `e2e/` is a project of its own (own `package.json`, lock file, `.npmrc`): `@playwright/test` 1.64.1 and
+  `@axe-core/playwright` 4.14.0, exact versions, `playwright-core` pinned through `overrides` to the same version, installed with
+  `--ignore-scripts` into the volume `scc-e2e-node-modules` by `scripts/e2e-npm.sh` (npm only in a container, as for `web/`;
+  `npm audit --audit-level=high` runs in every `make e2e`). The browser is not downloaded: the tests run in
+  `mcr.microsoft.com/playwright:v1.64.1-noble`, which has the browsers built in, so the image tag and the package version must
+  move together.
+- **Isolation:** `docker-compose.e2e.yml` is an overlay used with the compose project name `scc-e2e`: its own network, its own
+  database volume (always a clean database, then the seed), nothing published on the host (`ports: !reset []`), so the dev
+  stack on 3000/8080 can run beside it. The network is `internal`, so the test container cannot reach the internet or the
+  host; it reaches the app as `http://web:8080`. The model is the demo mock (`LLM_MODE=mock`, no key passed in). The project
+  (containers, network, volume) is removed when `scripts/e2e.sh` ends, whether the tests passed or not (`KEEP=1` leaves it up
+  while writing tests). It is **not** part of `make test`: it builds images and drives a browser.
+- **Outage switch:** the mock provider has `POST /control/outage/on|off` and `GET /control/outage`, and only when `MOCK_CONTROL=1`
+  (off by default; only the e2e overlay sets it). While it is on, every message request is a 503 and nothing is accepted
+  or remembered, so the retry after the outage is accepted once. *Why not something else:* the scenario needs a provider that
+  fails exactly while the test says so, and a chaos rate cannot do that. The switch is unauthenticated on purpose: it exists only
+  on the provider's port, which is not published, and only when asked for; a provider that anybody can switch off must never be
+  started with `MOCK_CONTROL`. Unit-tested, including "the switch is not there unless asked for".
+- **Scenarios (8 tests, about one minute of test time, 91 s for the whole `make e2e` with the images in the cache):**
+  brief to a finished delivery (rule text, counts that agree, the content seen in at least two partly written states, an unknown
+  variable that blocks saving, the fix, approval, the sent counts equal the audience counts, a chart per channel and the summary
+  line); a rule that matches everybody (warning, the send button needs the acknowledgement); a regenerated segment (hint on both
+  steps, cleared by saving; regenerating over edited text asks first, "Vazgeç" keeps the text); an outage of the SMS provider (the
+  badge shows, then the delivery completes with nothing failed after the switch is turned off); axe on the list and on every step;
+  390 px (no sideways scroll, axe); keyboard only from the brief to the audience; the side margin of the list page at 1170 px.
+- **Accessibility threshold:** axe with WCAG 2 A/AA, 2.1 A/AA and best practices; the test fails on *serious* and *critical*
+  only; the report names the element. Moderate and minor findings are not asserted.
+- **A finding that was a measurement problem:** the first axe run reported a contrast failure (1.19:1) on "Onayla ve gönder". The
+  button had just become enabled and axe read the colour in the middle of its 0.01 ms transition (white text on the colour of the
+  disabled state). The scan now waits until `document.getAnimations()` have finished and two frames were drawn
+  (`settled()` in `e2e/support/app.ts`). Nothing in the page was changed for it.
+- **Focus after the brief step:** the keyboard test expected the focus on the audience step's heading; it is on `<main>`. A route
+  change (the brief becomes a campaign: `/campaigns/new` to `/campaigns/:id`) focuses the main area (`App.vue`), and only a step
+  change inside a campaign moves it to the step's heading. *Choice:* keep it: the next Tab starts inside the page either way, and
+  the test now says what is true.
+- **1.5 measured:** at a 1170 px window the list page keeps 25 px from the left edge and from the right (the gutter is 1.5 rem from
+  768 px up); the test asserts at least 16 px and one "Yeni kampanya" link. No change was needed to the layout.
+- **Screenshots:** `make e2e SCREENSHOTS=1` writes `docs/screenshots/*.png` (eight pictures, full page, from the test run: the
+  data is the seeded fake users and the demo model's text, no real data). A normal run does not touch them. They are
+  not byte-stable between runs (timestamps, counts of the campaigns made by earlier tests are in some of them).
+- **No retries, one worker:** the scenarios share one database, and a retry would hide a flaw a person would meet.
+- **Not done:** no test for the "Yeniden deneniyor" line in the browser (the polling is covered by vitest with fake timers; stopping
+  the API container would need a second switch); no Firefox/WebKit project (one engine keeps `make e2e` at about a minute and a half).
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
