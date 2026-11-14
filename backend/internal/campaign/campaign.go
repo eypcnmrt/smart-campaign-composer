@@ -27,6 +27,12 @@ type AudienceCount struct {
 	CountedAt time.Time `json:"counted_at"`
 }
 
+// Who wrote a campaign's content (Campaign.ContentOrigin).
+const (
+	OriginGenerated = "generated"
+	OriginEdited    = "edited"
+)
+
 // Campaign is a campaign as the API returns it. Nothing in it is secret: the brief is the marketer's own text.
 type Campaign struct {
 	ID       int64    `json:"id"`
@@ -38,13 +44,18 @@ type Campaign struct {
 	Segment  *Segment       `json:"segment"`
 	Audience *AudienceCount `json:"audience"`
 	// Warnings are what the marketer must acknowledge to approve. After approval they are the ones that were acknowledged.
-	Warnings    []Warning        `json:"warnings"`
-	Content     *content.Content `json:"content"`
-	SMS         *content.SMSInfo `json:"sms_info"`
-	ApprovedAt  *time.Time       `json:"approved_at"`
-	CompletedAt *time.Time       `json:"completed_at"`
-	CreatedAt   time.Time        `json:"created_at"`
-	UpdatedAt   time.Time        `json:"updated_at"`
+	Warnings []Warning        `json:"warnings"`
+	Content  *content.Content `json:"content"`
+	SMS      *content.SMSInfo `json:"sms_info"`
+	// ContentOrigin says who wrote the content: OriginGenerated (the model) or OriginEdited (saved by the marketer); nil
+	// without content. SegmentChangedAfterContent is true when the segment was regenerated after the content was last
+	// saved, i.e. the text was written for an audience that is gone.
+	ContentOrigin              *string    `json:"content_origin"`
+	SegmentChangedAfterContent bool       `json:"segment_changed_after_content"`
+	ApprovedAt                 *time.Time `json:"approved_at"`
+	CompletedAt                *time.Time `json:"completed_at"`
+	CreatedAt                  time.Time  `json:"created_at"`
+	UpdatedAt                  time.Time  `json:"updated_at"`
 
 	// ruleJSON is the stored rule as it is in the database, for the operations that need the rule itself (the preview).
 	ruleJSON []byte

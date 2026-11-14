@@ -108,6 +108,9 @@ func TestAPI_theWholeFlow(t *testing.T) {
 		field(t, c, "sms_info", "encoding") != "GSM-7" || field(t, c, "sms_info", "segments") != 1.0 {
 		t.Fatalf("after the edit: %v", c)
 	}
+	if c["content_origin"] != "edited" || c["segment_changed_after_content"] != false {
+		t.Fatalf("a hand edit is reported as edited, with no segment hint: origin=%v hint=%v", c["content_origin"], c["segment_changed_after_content"])
+	}
 
 	// personalised preview, only for the channel that is on
 	samples := e.expect("GET", path(id, "/preview?limit=2"), nil, http.StatusOK, "").json(t)["samples"].([]any)

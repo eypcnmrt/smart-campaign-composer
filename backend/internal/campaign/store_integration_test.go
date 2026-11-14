@@ -100,11 +100,59 @@ func (e *env) setSegment(t *testing.T, c campaign.Campaign, ruleJSON string) cam
 
 func (e *env) withContent(t *testing.T, c campaign.Campaign) campaign.Campaign {
 	t.Helper()
-	c, err := e.store.SaveContent(context.Background(), c, goodContent)
+	c, err := e.store.SaveContent(context.Background(), c, goodContent, campaign.OriginGenerated)
 	if err != nil {
 		t.Fatalf("SaveContent: %v", err)
 	}
 	return c
+}
+
+func TestContentOriginAndSegmentChange(t *testing.T) {
+	e := newEnv(t)
+	ctx := context.Background()
+
+	c := e.withSegment(t, ankaraRule)
+	if c.ContentOrigin != nil || c.SegmentChangedAfterContent {
+		t.Fatalf("no content yet, but origin=%v changed=%v", c.ContentOrigin, c.SegmentChangedAfterContent)
+	}
+
+	c = e.withContent(t, c) // generated
+	if c.ContentOrigin == nil || *c.ContentOrigin != campaign.OriginGenerated || c.SegmentChangedAfterContent {
+		t.Fatalf("after generation: origin=%v changed=%v", c.ContentOrigin, c.SegmentChangedAfterContent)
+	}
+
+	// Regenerating the segment after the content: the text was written for another audience.
+	c = e.setSegment(t, c, everyoneRule)
+	if !c.SegmentChangedAfterContent {
+		t.Fatal("a segment newer than the content must be reported")
+	}
+	if c.ContentOrigin == nil || *c.ContentOrigin != campaign.OriginGenerated {
+		t.Fatalf("the origin follows the content, not the segment: %v", c.ContentOrigin)
+	}
+
+	// Saving the content again, by hand, clears the hint and marks the text as edited.
+	c, err := e.store.SaveContent(ctx, c, goodContent, campaign.OriginEdited)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.ContentOrigin == nil || *c.ContentOrigin != campaign.OriginEdited || c.SegmentChangedAfterContent {
+		t.Fatalf("after an edit: origin=%v changed=%v", c.ContentOrigin, c.SegmentChangedAfterContent)
+	}
+
+	// Unknown origins are refused before anything is written.
+	if _, err := e.store.SaveContent(ctx, c, goodContent, "typed"); err == nil {
+		t.Fatal("an unknown origin must be refused")
+	}
+
+	// Content written without an origin (old rows, fixtures) reads as generated and never shows the hint.
+	e.exec(t, `UPDATE campaigns SET content_origin = NULL, content_updated_at = NULL WHERE id = $1`, c.ID)
+	got, err := e.store.Get(ctx, c.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ContentOrigin == nil || *got.ContentOrigin != campaign.OriginGenerated || got.SegmentChangedAfterContent {
+		t.Fatalf("without stored origin: origin=%v changed=%v", got.ContentOrigin, got.SegmentChangedAfterContent)
+	}
 }
 
 func (e *env) exec(t *testing.T, sql string, args ...any) {
@@ -265,7 +313,10 @@ func TestStore_nothingCanBeEditedAfterApproval(t *testing.T) {
 			return err
 		},
 		"channels": func() error { _, err := e.store.SetChannels(ctx, approved, []string{"sms"}); return err },
-		"content":  func() error { _, err := e.store.SaveContent(ctx, approved, goodContent); return err },
+		"content": func() error {
+			_, err := e.store.SaveContent(ctx, approved, goodContent, campaign.OriginEdited)
+			return err
+		},
 	}
 	for name, change := range changes {
 		if err := change(); !errors.Is(err, campaign.ErrInvalidTransition) {
@@ -287,7 +338,7 @@ func TestStore_aChangeComputedFromStaleDataIsRefused(t *testing.T) {
 	if _, err := e.store.SetChannels(ctx, c, []string{"sms"}); err != nil { // somebody else was faster
 		t.Fatal(err)
 	}
-	_, err := e.store.SaveContent(ctx, c, goodContent) // computed from the version before
+	_, err := e.store.SaveContent(ctx, c, goodContent, campaign.OriginEdited) // computed from the version before
 	if !errors.Is(err, campaign.ErrStateChanged) {
 		t.Fatalf("error = %v, want ErrStateChanged", err)
 	}
@@ -301,7 +352,7 @@ func TestStore_invalidContentIsNotSaved(t *testing.T) {
 	e := newEnv(t)
 	c := e.withSegment(t, ankaraRule)
 	bad := content.Content{SMS: strings.Repeat("x", 161), EmailSubject: "s {{unknown}}", EmailBody: "b"}
-	_, err := e.store.SaveContent(context.Background(), c, bad)
+	_, err := e.store.SaveContent(context.Background(), c, bad, campaign.OriginEdited)
 	verrs, ok := errors.AsType[content.ValidationErrors](err)
 	if !ok || len(verrs) != 2 || verrs[0].Path != "sms" || verrs[1].Path != "email_subject" {
 		t.Fatalf("error = %v, want the problems of sms and email_subject with their paths", err)

@@ -29,7 +29,8 @@ func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool, now: time.N
 
 const columns = `id, brief, status, version, channels, segment_rule, content,
 	audience_matched, audience_sms, audience_email, audience_total_users, audience_counted_at,
-	approved_warnings, approved_at, completed_at, created_at, updated_at`
+	approved_warnings, approved_at, completed_at, created_at, updated_at,
+	content_origin, segment_updated_at, content_updated_at`
 
 type scanner interface{ Scan(dest ...any) error }
 
@@ -49,9 +50,12 @@ func scan(row scanner) (Campaign, error) {
 		rule, ct, warnings            []byte
 		matched, sms, email, totalUsr *int
 		counted                       *time.Time
+		origin                        *string
+		segmentAt, contentAt          *time.Time
 	)
 	if err := row.Scan(&c.ID, &c.Brief, &status, &c.Version, &c.Channels, &rule, &ct,
-		&matched, &sms, &email, &totalUsr, &counted, &warnings, &c.ApprovedAt, &c.CompletedAt, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		&matched, &sms, &email, &totalUsr, &counted, &warnings, &c.ApprovedAt, &c.CompletedAt, &c.CreatedAt, &c.UpdatedAt,
+		&origin, &segmentAt, &contentAt); err != nil {
 		return Campaign{}, err
 	}
 	c.Status = State(status)
@@ -74,6 +78,13 @@ func scan(row scanner) (Campaign, error) {
 		}
 		info := content.AnalyzeSMS(cc.SMS)
 		c.Content, c.SMS = &cc, &info
+		// Content that was written without an origin (older rows, fixtures) was not typed in through the API.
+		o := OriginGenerated
+		if origin != nil {
+			o = *origin
+		}
+		c.ContentOrigin = &o
+		c.SegmentChangedAfterContent = segmentAt != nil && contentAt != nil && segmentAt.After(*contentAt)
 	}
 	if counted != nil && matched != nil && sms != nil && email != nil && totalUsr != nil {
 		c.Audience = &AudienceCount{Audience: Audience{Matched: *matched, SMS: *sms, Email: *email, TotalUsers: *totalUsr}, CountedAt: *counted}
@@ -175,7 +186,7 @@ func (s *Store) SetSegment(ctx context.Context, c Campaign, ruleJSON string, rul
 	}
 	return s.apply(ctx, c, ActGenerateSegment,
 		`segment_rule = $5::jsonb, audience_matched = $6, audience_sms = $7, audience_email = $8, audience_total_users = $9,
-		 audience_counted_at = now(), channels = CASE WHEN $2::text = 'draft' THEN $10::text[] ELSE channels END`,
+		 audience_counted_at = now(), segment_updated_at = now(), channels = CASE WHEN $2::text = 'draft' THEN $10::text[] ELSE channels END`,
 		ruleJSON, a.Matched, a.SMS, a.Email, a.TotalUsers, channels)
 }
 
@@ -189,8 +200,11 @@ func (s *Store) SetChannels(ctx context.Context, c Campaign, channels []string) 
 }
 
 // SaveContent stores content that passed content.Validate (checked again here). It is the one write for both generated
-// and hand-edited content, so both come through the same validator.
-func (s *Store) SaveContent(ctx context.Context, c Campaign, ct content.Content) (Campaign, error) {
+// and hand-edited content, so both come through the same validator. origin is OriginGenerated or OriginEdited.
+func (s *Store) SaveContent(ctx context.Context, c Campaign, ct content.Content, origin string) (Campaign, error) {
+	if origin != OriginGenerated && origin != OriginEdited {
+		return Campaign{}, fmt.Errorf("saving the content of campaign %d: unknown origin %q", c.ID, origin)
+	}
 	if err := content.Validate(ct); err != nil {
 		return Campaign{}, err
 	}
@@ -198,7 +212,7 @@ func (s *Store) SaveContent(ctx context.Context, c Campaign, ct content.Content)
 	if err != nil {
 		return Campaign{}, fmt.Errorf("encoding the content of campaign %d: %w", c.ID, err)
 	}
-	return s.apply(ctx, c, ActSaveContent, `content = $5::jsonb`, data)
+	return s.apply(ctx, c, ActSaveContent, `content = $5::jsonb, content_origin = $6, content_updated_at = now()`, data, origin)
 }
 
 // ApproveResult is what an approval produced.

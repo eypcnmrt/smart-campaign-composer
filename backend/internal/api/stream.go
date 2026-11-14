@@ -217,7 +217,7 @@ func (s *Server) generate(ctx context.Context, c campaign.Campaign, onEvent func
 	}
 	saveCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
 	defer cancel()
-	saved, err := s.store.SaveContent(saveCtx, c, res.Content)
+	saved, err := s.store.SaveContent(saveCtx, c, res.Content, campaign.OriginGenerated)
 	s.metrics.ObserveLLM("content", outcomeOf(err), time.Since(start))
 	if err != nil {
 		return genOutcome{err: err}

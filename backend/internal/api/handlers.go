@@ -256,7 +256,7 @@ func (s *Server) putContent(w http.ResponseWriter, r *http.Request) error {
 	if err := content.Validate(req); err != nil {
 		return err
 	}
-	c, err = s.store.SaveContent(r.Context(), c, req)
+	c, err = s.store.SaveContent(r.Context(), c, req, campaign.OriginEdited)
 	if err != nil {
 		return err
 	}

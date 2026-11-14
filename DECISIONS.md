@@ -563,6 +563,18 @@ here when the README is written.
   body says.
 - **Alternative:** a trigger or a lock held while the model runs (hidden logic, or a connection per generation).
 
+### The campaign says who wrote the content and whether the segment moved on (migration 0006)
+- **Decision:** `campaigns` gets `content_origin` (`generated` | `edited`), `segment_updated_at` and `content_updated_at`.
+  `SaveContent` takes the origin (the stream writes `generated`, `PUT /content` writes `edited`), `SetSegment` stamps the
+  segment time. The campaign JSON shows `content_origin` (null without content; a row without a stored origin reads as
+  `generated`) and `segment_changed_after_content`, true while the segment is newer than the last content save. Saving the
+  content in any way clears it. No CHECK ties the new columns to `content`/`segment_rule`: fixtures and old rows write
+  content without them, and a missing time means "unknown", which never shows the hint.
+- **Why:** the screen must ask before regenerating text the marketer edited, and offer to regenerate when the audience changed
+  under existing text. The browser cannot know either: a reload or a second tab would lose a client-side flag.
+- **Alternative:** a flag kept in the browser (lost on reload, wrong in a second tab) or comparing `updated_at` (moves on
+  every channel change).
+
 ### Approval: version, one transaction, a snapshot the worker reads
 - **Decision:** the approve request must send the `version` the marketer reviewed (422 without it, 409 `version_mismatch` with
   the current version when it differs). `Store.Approve` locks the row (`FOR UPDATE`), checks the state (so the second approval
