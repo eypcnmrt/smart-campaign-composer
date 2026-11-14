@@ -6,6 +6,7 @@ import ApproveStep from '@/components/approve/ApproveStep.vue'
 import AudienceCard from '@/components/audience/AudienceCard.vue'
 import BriefForm from '@/components/brief/BriefForm.vue'
 import ContentStep from '@/components/content/ContentStep.vue'
+import SendDashboard from '@/components/send/SendDashboard.vue'
 import StepNav from '@/components/StepNav.vue'
 import ErrorPanel from '@/components/ui/ErrorPanel.vue'
 import LoadingState from '@/components/ui/LoadingState.vue'
@@ -124,7 +125,7 @@ async function retrySegment(): Promise<void> {
           @approve="goTo('approve')"
         />
         <ApproveStep v-else-if="step === 'approve'" :campaign="campaign" @updated="replace" @reload="load" />
-        <p v-else-if="step !== 'brief'">Bu adım hazırlanıyor.</p>
+        <SendDashboard v-else-if="step === 'send'" :campaign="campaign" @reload="load" />
         <LoadingState v-else label="Ayarlar yükleniyor…" />
       </div>
     </template>
