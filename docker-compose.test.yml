@@ -3,6 +3,7 @@
 #
 #   docker compose -f docker-compose.test.yml run --rm backend
 #   docker compose -f docker-compose.test.yml run --rm hooks
+#   docker compose -f docker-compose.test.yml run --rm web
 
 name: scc-test
 
@@ -45,6 +46,21 @@ services:
     volumes:
       - .:/src:ro
 
+  # The web app: npm ci from the lock file, npm audit, vue-tsc and vitest, in the same pinned node image as scripts/web.sh.
+  # The checkout is read-only; scripts/test-web.sh works on a copy. The npm cache is the volume that scripts/web.sh uses too
+  # (external, so `down --volumes` leaves it alone and the packages are not downloaded again on every run).
+  web:
+    image: node:24.14.0-alpine
+    command: ["sh", "/src/scripts/test-web.sh"]
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - .:/src:ro
+      - npm-cache:/root/.npm
+
 volumes:
   gomod:
   gocache:
+  npm-cache:
+    external: true
+    name: scc-npm-cache

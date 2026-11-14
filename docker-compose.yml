@@ -1,5 +1,5 @@
-# The stack: database, migrations, seed data, mock provider, worker and the api (port 8080 on this machine).
-# The web app is added with its component.
+# The stack: database, migrations, seed data, mock provider, worker, the api (port 8080 on this machine) and the web app
+# (http://127.0.0.1:3000, which also forwards /api to the api).
 #
 # Every setting has a default, so `docker compose up` works without a .env file. The values below
 # are for local development only (the database is not published outside the compose network).
@@ -121,6 +121,32 @@ services:
       start_period: 5s
     # Time to finish the sends in flight after SIGTERM (the request timeout is 5s).
     stop_grace_period: 20s
+    restart: unless-stopped
+
+  # The app and the only address a browser needs: static files, and /api forwarded to the api with the event stream unbuffered.
+  # nginx runs as an unprivileged user on 8080 with a read-only file system (it writes only to /tmp). Like the api it has no
+  # authentication to hide behind, so it is reachable from this machine only.
+  web:
+    build:
+      context: ./web
+    image: smart-campaign-composer/web:dev
+    ports:
+      - "127.0.0.1:3000:8080"
+    depends_on:
+      api:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
     restart: unless-stopped
 
 volumes:

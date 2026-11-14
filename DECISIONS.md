@@ -743,6 +743,130 @@ here when the README is written.
   start-up order. A separate project means `make soak` never touches the normal database.
 - **Alternative:** a Go test with a build tag. Easier, but it would not test the shipped binaries.
 
+## Web app
+
+### Design direction: a quiet working tool, with one colour that means "not final"
+- **Decision:** light only, a pale green-grey page, white panels, one teal action colour and nothing else that looks like a
+  button. Minimalism and Swiss-style layout (left-aligned, two column widths: 760 px for reading and forms, 1120 px for the list and
+  the delivery dashboard), Schibsted Grotesk for headings and Source Sans 3 for text, both self-hosted (`@fontsource-variable`,
+  Latin and Latin Extended only, so Turkish letters are covered and no CDN is involved). Highlighter yellow is reserved for
+  "this is not final text": personalization variables, the live caret while the model writes, and the "Mock LLM" badge.
+  State colours (success leaf green, warning amber-orange, danger red) each have their own hue, a tint, a border and an icon of
+  their own shape, and are never the only sign of a state: the text says it, and `StatusNote` adds a hidden word ("Uyarı:") for
+  screen readers. Success green is never used on a control. `design-system/MASTER.md` has the tokens and the reasons, and
+  `tokens.test.ts` fails when a text pair drops under 4.5:1, a control border under 3:1 or two state hues move close together.
+- **Why:** the user is a marketer who checks what a model produced before money is spent; the screen has to be calm and the few
+  things that are not final or not safe have to stand out. A generic dashboard look (cards with gradients, an accent on every
+  heading) would hide that.
+- **Numbers that change** (counters, audience counts, the dashboard) use the `.num` class: Source Sans 3, tabular figures.
+  Measured in a browser: Source Sans 3 is tabular by default; Schibsted Grotesk switches to tabular digits with `tnum` but then
+  gives the thousands separator a full digit cell ("3 . 412"), so figures are never set in the heading font, whatever the size.
+
+### No UI library and no state library; the server's state is the page's state
+- **Decision:** Vue 3.5 with `<script setup>`, vue-router, no Pinia, no component library. A campaign is read from the server and
+  every action returns the whole campaign, which replaces the one on screen (`useCampaign`). The step of a campaign is derived
+  from its `status` (`domain/steps.ts`); `?step=` only chooses among the steps that status allows and is corrected with
+  `router.replace` when it names a closed one. A reload or a shared link therefore opens where the campaign stands.
+- **Why:** the screens are few and the state is small; a store would be a second copy of what the server already holds, and a
+  second copy is where "the screen said it was approved" bugs come from.
+
+### The content stream is read with `fetch`, not `EventSource`
+- **Decision:** `api/sse.ts` has an incremental parser (LF, CR and CRLF, a line or an event split anywhere, multi-byte UTF-8 split
+  between chunks, comments, `retry:`) and `streamContent` that resolves with the saved campaign. A refusal before the stream is an
+  ordinary JSON error and becomes an `ApiError`; a stream that ends without `done` or `error` is `stream_incomplete`; an abort is
+  passed through untouched. A new `attempt` event clears the text shown so far ("Model çıktıyı düzeltiyor (deneme N)"), the first
+  `raw` event replaces the field view with the raw text and the next ones add to it.
+- **Why:** `EventSource` reconnects by itself, and a reconnect would start another generation that spends credit (the server
+  sends `retry: 3600000` for the same reason); it cannot send a custom header or be aborted from code; and it cannot show a JSON
+  error body. With `fetch` a generation starts only when the marketer asks, and leaving the page aborts it (the server cancels the
+  model call when the connection closes).
+- **Mock visibility:** the demo mock writes in pieces of 6 characters with 15 ms between them, so the text is visibly written
+  (about 2.3 s for the demo content through nginx). Checked with `curl -N` through nginx: the first line arrives after about 45 ms and
+  the lines of the stream keep arriving until `done` at 2.35 s, so nothing buffers it.
+
+### Polling, not a second stream, for the delivery
+- **Decision:** `useStatsPolling` asks `/stats` once a second while the campaign is `approved` or `sending`, scheduling the next
+  request when the last one has ended (a slow server is not buried in requests), keeps the last numbers when a request fails
+  (and says so in a line), and stops when the campaign is no longer sending or the page is left (the request in flight is aborted).
+- **Rate:** the rate per channel is the change of the `sent` count between the oldest and the newest measurement inside a window
+  of 5 s, from `performance.now()`, and nothing is shown before the window spans 2 s, so one slow answer or one burst moves the
+  figure only by its share. It is labelled "kabul edilen mesaj/s" (accepted messages per second): the API does not say how many
+  attempts reached the provider, only how many were accepted. The limit is per channel in the worker (each channel has its own
+  limiter), so every channel bar has its own 100/s line and there is no line on the total. The 100 is the worker's default; the
+  API does not report the configured value, so a deployment with another `WORKER_RATE` would draw a wrong line (a known limit).
+- **Why polling:** one request a second against an indexed query (see "Stats") is cheap, needs no new endpoint and no connection
+  state to recover after a restart, and the numbers are the database's, not a sum of events a client could miss.
+
+### Shared fixtures keep Go and TypeScript honest
+- **Decision:** `backend/internal/content/testdata/sms_cases.json` and `template_cases.json` and
+  `backend/internal/segment/testdata/vocab.json` are run by Go tests and by Vitest. The SMS cases include a decomposed "i" with a
+  combining dot (two characters, UCS-2), a ZWJ emoji family (5 code points, 8 UTF-16 units), `€` and `{` (two septets), and
+  every segment boundary. The vocabulary file is checked against `vocab.go` by a Go test (it fails when they differ) and the web test
+  asks for a Turkish wording of every entry, so adding a field without one fails a test. The JSON escapes in these files are written with a placeholder and converted by a script, because
+  the editor tool turns a typed `ç` into the character itself.
+- **Why:** the port of `AnalyzeSMS` and of the template validator must not drift from the server: a text that passes in the
+  editor must not be refused on save, and the other way round.
+- **Mounting:** `scripts/web.sh` and `scripts/test-web.sh` put the fixture folders at the same relative place as in the
+  repository (read-only), because the tests import them by a relative path.
+
+### Backend fields the screens needed
+- **`content_origin`** (`generated` or `edited`; a missing stored value reads as `generated`) and **`segment_changed_after_content`**
+  (migration 0006, see "The campaign says who wrote the content and whether the segment moved on"): the editor asks before
+  replacing text a person wrote, and the audience step says that a new segment makes the old text stale.
+- **Validation problems carry a machine-readable `code` and `params`** (`too_long {length, limit}`, `unknown_variable {name,
+  char}`, `unbalanced_brace {brace, char}` and so on; see "One error shape; codes are the contract"). The UI chooses the Turkish
+  sentence by code; it never matches the English message, and an unknown code shows the server's message, so a new server-side
+  check is never silent.
+
+### Text limits count characters, and no field has `maxlength`
+- **Decision:** counters count code points after the same trimming the server does (`runeCount`, `trimSpace`: Go's
+  `strings.TrimSpace`, not JavaScript's `trim`). A text over the limit is shown as over (counter, message, `aria-invalid`) and
+  cannot be sent or saved; it is never cut. `index.html` has `lang="tr"`, so `text-transform` and `toLocaleUpperCase` follow
+  Turkish rules for i and İ.
+- **Why:** `maxlength` counts UTF-16 units: it would cut an emoji in half, count a flag as four, and stop someone typing the 160th
+  character of a text that the server accepts.
+
+### Raw text is never markup
+- **Decision:** briefs, model text, edited text and the provider's error text are shown with `{{ }}` only; there is no `v-html`
+  anywhere. Line breaks are kept with `white-space: pre-wrap`. The tests put `<img onerror>`, `<script>` and a `javascript:`
+  link in each place that shows such text and check that no element is made.
+- **Why:** the content is written by a model from a brief that is untrusted input, and then edited by a person.
+
+### The security headers live in one file that every location includes
+- **Decision:** the web container is `nginxinc/nginx-unprivileged:1.30.6-alpine` (UID 101, port 8080), read-only with `/tmp` as a
+  tmpfs, all capabilities dropped, published on `127.0.0.1:3000` only. `/api/` is forwarded to the api with `proxy_buffering off`,
+  `proxy_cache off`, `proxy_request_buffering off` and a 10-minute read timeout (the event stream); the upstream name is resolved
+  at run time through Docker's resolver, so a recreated api container is found again. `web/nginx/security-headers.conf` sets
+  `Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data:;
+  connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'`,
+  `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`, and every location includes it, because a location that
+  has an `add_header` of its own (the cache headers) silently drops the ones of the level above. Checked with `curl` on `/`, a
+  built asset, a route of the single page, a missing file, `/healthz` and a real `GET /api/config`: every one carries the three.
+- **No `unsafe-inline`, no `unsafe-eval`, and the build did not need either:** Vite writes the CSS to a file, the fonts are files
+  (`assetsInlineLimit: 0`, so none becomes a `data:` URL), the app sets no `style` attribute (the bars are SVG attributes), and Vue's
+  production runtime does not use `eval`. `ConfirmDialog` is a native `<dialog>`.
+- **Alternative:** `EventSource` and a cross-origin API with CORS. Rejected: it would need a CORS policy on an API that has no
+  authentication, and `connect-src 'self'` is a stronger statement than a list of origins.
+
+### The toolchain runs only in a pinned container
+- **Decision:** `npm`, `vite`, `vitest` and `vue-tsc` never run on the host (third-party package code stays off the machine, and
+  Windows Application Control blocks fresh binaries): `scripts/web.sh` runs them in `node:24.14.0-alpine` with only `web/` (and the
+  fixtures, read-only) mounted, `node_modules` and the npm cache in named volumes and install scripts off
+  (`npm_config_ignore_scripts`, `web/.npmrc`). Only read-only queries such as `npm view` run on the host. Versions are pinned exactly,
+  at least two weeks old, with the lock file committed; `npm audit --audit-level=high` is part of `make test`.
+- **`@vue/test-utils` 2.4.11, not 2.5.1:** `npm audit` reported moderate findings in `glob` and `minimatch`, reached through `js-beautify`, which
+  `@vue/test-utils` has depended on since 2.5.0 (dev only: nothing of it is in the build). Going back to 2.4.11 did not remove them
+  (it still pulls `js-beautify`), so the pin is not what fixed the audit: the `overrides` below are. The pin is kept because the
+  tests were written and pass against it; moving to 2.5.1 with the overrides is untested.
+- **`overrides` for `glob` and `minimatch`:** lift the dev-only `js-beautify` chain to patched versions (glob 14.0.3, minimatch 11.0.3);
+  `npm audit` is clean. They can be dropped when `@vue/test-utils` stops depending on `js-beautify`.
+- **TypeScript 6.0.3, not 7.0.2:** a choice of caution, not a measured incompatibility. `vue-tsc` 3.3.14 declares `typescript >=5.0.0`, so 7 is
+  allowed by its peer range, but 7 is the native port and was not tried with the Vue language tooling here. Moving to it later is a
+  one-line change plus a run of `vue-tsc` and the tests.
+- **`make test`** runs `scripts/test-web.sh` in the same image on a copy of `web/` plus the fixtures: `npm ci`, `npm audit`,
+  `vue-tsc` and `vitest run`. The npm cache is the external volume `scc-npm-cache` (shared with `scripts/web.sh`), so the packages
+  are not downloaded on every run. The image build (`web/Dockerfile`) only builds; checks that need the fixtures run in `make test`.
+
 ## Fixed after the review
 - **Redirects were followed by the HTTP sender** (a redirected POST becomes a GET, and its final 200 would have been
   recorded as `sent`): redirects are no longer followed and a 3xx is a permanent error.
@@ -839,3 +963,9 @@ everyone".
   heredoc that appended the scan results to `docs/ai-tooling.md`, probably because the text names commands such as `rm -rf`: the
   same text was written with the editor tool, with those words described instead of spelled. Also, a first scan of the install set
   with AgentShield reported "0 files scanned" for skills (it does not read skill folders), which `docs/ai-tooling.md` says plainly.
+- **Web app stage: one commit was stopped by the guard hook, by its wording.** The message of the scaffold commit contained a
+  literal dotenv file name (it said the app has no such files for Vite), and the guard reads any command that spells one as an
+  attempt to read secrets. It was not worked around: the session told the owner, the owner allowed rewording the message (the
+  guard itself, the hooks and `--no-verify` stayed as they are), and the same commit was made with the words changed. The same
+  rule is why the web documentation says "no Vite env files" instead of naming them.
+- Every web command ran in the pinned node container (`scripts/web.sh`, `scripts/test-web.sh`); no package code ran on the host.

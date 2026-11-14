@@ -8,8 +8,8 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - Runtime: Docker Compose. LLM access goes through the `LLMClient` interface (Anthropic or mock).
 
 ## Commands
-- `docker compose up` - db, migrate, seed, mock-provider, worker and the api (127.0.0.1:8080; `LLM_MODE=mock` forces the demo model even when a key is set); the web app comes later; every setting has a default, no dotenv file needed
-- `make test` - gofmt, `go vet`, `go test -race` incl. PostgreSQL integration tests (`-tags=integration`, fail instead of skip without a database) and the hook/scanner tests, all in Docker, no API key (frontend tests come later)
+- `docker compose up` - db, migrate, seed, mock-provider, worker and the api (127.0.0.1:8080; `LLM_MODE=mock` forces the demo model even when a key is set) and the web app (http://127.0.0.1:3000: nginx, unprivileged, read-only, serves the build and forwards `/api` with the event stream unbuffered; security headers come from `web/nginx/security-headers.conf`); every setting has a default, no dotenv file needed
+- `make test` - gofmt, `go vet`, `go test -race` incl. PostgreSQL integration tests (`-tags=integration`, fail instead of skip without a database) the hook/scanner tests and the web checks (`npm ci`, `npm audit --audit-level=high`, vue-tsc, vitest, via `scripts/test-web.sh`; the npm cache is the external volume `scc-npm-cache`), all in Docker, no API key
 - `make soak` - 5,000 messages through the real containers with a chaos provider; checks no double send, 100/s cap, Retry-After (about 3-4 minutes: the default backoff starts at 15 s)
 - Do not run `docker compose config` (the guard blocks it); verify with `docker compose up -d` and `docker compose ps -a`
 - A subset of the tests with the database: `docker compose -f docker-compose.test.yml run --rm backend sh -c "cd backend && go test -race -tags=integration -count=1 -run NAME ./internal/PKG/"` (then `docker compose -f docker-compose.test.yml down -v`)
