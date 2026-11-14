@@ -29,6 +29,9 @@ type Server struct {
 
 	// outage is the state of the switch of Config.Control: while it is on, no message request is served.
 	outage atomic.Bool
+	// throttleNext is how many of the next admitted messages are answered 429 whatever the configuration says (the same switch):
+	// a deterministic way to make exactly that many messages need a retry.
+	throttleNext atomic.Int64
 
 	mu       sync.Mutex
 	channels map[string]*channelState
@@ -104,7 +107,7 @@ func New(cfg Config, log *slog.Logger) (*Server, error) {
 }
 
 // Handler returns the routes: POST /sms, POST /email, GET /stats, GET /accepted/{channel}, GET /healthz, and, with Config.Control,
-// GET /control/outage and POST /control/outage/{on|off}.
+// GET /control/outage, POST /control/outage/{on|off}, GET /control/throttle-next and POST /control/throttle-next/{count}.
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /sms", s.send(ChannelSMS))
@@ -115,6 +118,8 @@ func (s *Server) Handler() http.Handler {
 	if s.cfg.Control {
 		mux.HandleFunc("GET /control/outage", s.outageState)
 		mux.HandleFunc("POST /control/outage/{state}", s.setOutage)
+		mux.HandleFunc("GET /control/throttle-next", s.throttleNextState)
+		mux.HandleFunc("POST /control/throttle-next/{count}", s.setThrottleNext)
 	}
 	return mux
 }
@@ -137,6 +142,38 @@ func (s *Server) setOutage(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("outage switch", "outage", s.outage.Load())
 	writeJSON(w, http.StatusOK, map[string]bool{"outage": s.outage.Load()})
+}
+
+// throttleNextState is GET /control/throttle-next: {"throttle_next": n}, the messages that will still be answered 429.
+func (s *Server) throttleNextState(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]int64{"throttle_next": s.throttleNext.Load()})
+}
+
+// setThrottleNext is POST /control/throttle-next/{count}: the next count admitted messages (never one that was accepted already)
+// are answered 429 with the Retry-After of the configuration, and nothing is accepted for them. The worker retries each of them, so
+// exactly count messages end up with a second attempt. 0 clears it. A count that is not a number from 0 to 100000 is a 404.
+func (s *Server) setThrottleNext(w http.ResponseWriter, r *http.Request) {
+	n, err := strconv.ParseInt(r.PathValue("count"), 10, 64)
+	if err != nil || n < 0 || n > 100000 {
+		writeError(w, http.StatusNotFound, "the count is a number from 0 to 100000")
+		return
+	}
+	s.throttleNext.Store(n)
+	s.log.Info("throttle-next switch", "count", n)
+	writeJSON(w, http.StatusOK, map[string]int64{"throttle_next": n})
+}
+
+// takeThrottle uses up one of the forced throttles, if any is left.
+func (s *Server) takeThrottle() bool {
+	for {
+		n := s.throttleNext.Load()
+		if n <= 0 {
+			return false
+		}
+		if s.throttleNext.CompareAndSwap(n, n-1) {
+			return true
+		}
+	}
 }
 
 // ServeHTTP lets the Server be used directly as an http.Handler.
@@ -330,7 +367,7 @@ func (s *Server) admit(channel, key string) outcome {
 			ch.admitted = append(ch.admitted, now)
 		}
 	}
-	if limited || d.throttle {
+	if limited || d.throttle || (s.cfg.Control && s.takeThrottle()) {
 		ch.stats.Throttled429++
 		ch.lastWait[key] = lastThrottle{at: now, after: time.Duration(retryAfterSeconds(s.cfg.RetryAfter)) * time.Second}
 		return outcome{kind: outcomeThrottled}

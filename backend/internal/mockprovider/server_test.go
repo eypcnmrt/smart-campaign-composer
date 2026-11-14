@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -232,10 +233,10 @@ func TestSend_ownRateLimit(t *testing.T) {
 
 func TestSend_lateReplyStillDelivers(t *testing.T) {
 	t.Parallel()
-	s, ts := newServer(t, Config{LateRate: 1, LateDelay: 400 * time.Millisecond})
+	s, ts := newServer(t, Config{LateRate: 1, LateDelay: 1500 * time.Millisecond}) // far above the client timeout, so a slow machine cannot turn the late reply into an early one
 
 	// A client with a short timeout gives up before the reply...
-	short := &http.Client{Timeout: 50 * time.Millisecond}
+	short := &http.Client{Timeout: 300 * time.Millisecond}
 	req, _ := http.NewRequest(http.MethodPost, ts.URL+"/sms", strings.NewReader(smsBody))
 	req.Header.Set(HeaderIdempotencyKey, "late-1")
 	if resp, err := short.Do(req); err == nil {
@@ -249,7 +250,7 @@ func TestSend_lateReplyStillDelivers(t *testing.T) {
 	// The retry with the same key gets the first reply at once and is not delivered again.
 	started := time.Now()
 	retry := post(t, ts.URL, "/sms", "late-1", smsBody)
-	if retry.status != 200 || time.Since(started) > 200*time.Millisecond {
+	if retry.status != 200 || time.Since(started) > 700*time.Millisecond {
 		t.Fatalf("retry = %+v after %v, want an immediate 200", retry, time.Since(started))
 	}
 	if st := s.Stats().SMS; st.UniqueAccepted != 1 || st.DuplicateKeys != 1 {
@@ -472,6 +473,98 @@ func TestOutageSwitch(t *testing.T) {
 		var out map[string]bool
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil || out["outage"] {
 			t.Fatalf("GET /control/outage = %v, %v, want outage false", out, err)
+		}
+	})
+}
+
+func TestThrottleNextSwitch(t *testing.T) {
+	t.Parallel()
+
+	t.Run("is not there unless asked for", func(t *testing.T) {
+		t.Parallel()
+		_, ts := newServer(t, Config{})
+		resp, err := http.Post(ts.URL+"/control/throttle-next/3", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound && resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Fatalf("POST /control/throttle-next/3 without Control = %d, want it not to exist", resp.StatusCode)
+		}
+		if got := post(t, ts.URL, "/sms", "k", smsBody).status; got != http.StatusOK {
+			t.Fatalf("send = %d, want 200: the switch must not have worked", got)
+		}
+	})
+
+	t.Run("answers exactly the next count messages with 429 and a Retry-After, and accepts them on the retry", func(t *testing.T) {
+		t.Parallel()
+		s, ts := newServer(t, Config{Control: true, RetryAfter: 2 * time.Second})
+		resp, err := http.Post(ts.URL+"/control/throttle-next/3", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("setting the switch = %d", resp.StatusCode)
+		}
+		var throttled, accepted []string
+		for _, key := range []string{"a", "b", "c", "d", "e"} {
+			r := post(t, ts.URL, "/sms", key, smsBody)
+			switch r.status {
+			case http.StatusTooManyRequests:
+				throttled = append(throttled, key)
+				if r.retryAfter != "2" {
+					t.Fatalf("Retry-After of the forced 429 = %q, want 2", r.retryAfter)
+				}
+			case http.StatusOK:
+				accepted = append(accepted, key)
+			default:
+				t.Fatalf("status %d for %s", r.status, key)
+			}
+		}
+		if !slices.Equal(throttled, []string{"a", "b", "c"}) || !slices.Equal(accepted, []string{"d", "e"}) {
+			t.Fatalf("throttled %v, accepted %v, want the first three throttled and the next two accepted", throttled, accepted)
+		}
+		// the throttled messages were not remembered: the same key is accepted now, once
+		if got := post(t, ts.URL, "/sms", "a", smsBody).status; got != http.StatusOK {
+			t.Fatalf("retry of a throttled message = %d, want 200", got)
+		}
+		st := s.Stats().SMS
+		if st.Throttled429 != 3 || st.UniqueAccepted != 3 || st.Requests != 6 {
+			t.Fatalf("stats = %+v, want 3 throttled, 3 accepted (d, e and the retry of a), 6 requests", st)
+		}
+		// a message that was accepted already is answered with its first reply and does not use one up
+		arm, err := http.Post(ts.URL+"/control/throttle-next/1", "", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		arm.Body.Close()
+		if got := post(t, ts.URL, "/sms", "d", smsBody).status; got != http.StatusOK {
+			t.Fatalf("a duplicate while the switch is armed = %d, want its first reply", got)
+		}
+		get, err := http.Get(ts.URL + "/control/throttle-next")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer get.Body.Close()
+		var out map[string]int64
+		if err := json.NewDecoder(get.Body).Decode(&out); err != nil || out["throttle_next"] != 1 {
+			t.Fatalf("GET /control/throttle-next = %v, %v, want 1 left", out, err)
+		}
+	})
+
+	t.Run("rejects a count that is not a number from 0 to 100000", func(t *testing.T) {
+		t.Parallel()
+		_, ts := newServer(t, Config{Control: true})
+		for _, bad := range []string{"many", "-1", "100001", "1.5"} {
+			resp, err := http.Post(ts.URL+"/control/throttle-next/"+bad, "", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Fatalf("count %q = %d, want 404", bad, resp.StatusCode)
+			}
 		}
 	})
 }

@@ -48,6 +48,9 @@ services:
         condition: service_completed_successfully
     restart: "no"
 
+  # The provider misbehaves a little by default (5 % 500, 5 % 429 with Retry-After, 20 to 200 ms of latency) so that a send in the demo
+  # shows retries on the dashboard. The tests, the soak and the browser tests set their own, deterministic values (see
+  # docker-compose.soak.yml and docker-compose.e2e.yml); set the three rates to 0 here for a provider that never fails.
   mock-provider:
     build:
       context: ./backend
@@ -55,10 +58,10 @@ services:
     image: smart-campaign-composer/mock-provider:dev
     environment:
       MOCK_SEED: ${MOCK_SEED:-1}
-      MOCK_DELAY_MIN: ${MOCK_DELAY_MIN:-5ms}
-      MOCK_DELAY_MAX: ${MOCK_DELAY_MAX:-25ms}
-      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0}
-      MOCK_THROTTLE_RATE: ${MOCK_THROTTLE_RATE:-0}
+      MOCK_DELAY_MIN: ${MOCK_DELAY_MIN:-20ms}
+      MOCK_DELAY_MAX: ${MOCK_DELAY_MAX:-200ms}
+      MOCK_ERROR_RATE: ${MOCK_ERROR_RATE:-0.05}
+      MOCK_THROTTLE_RATE: ${MOCK_THROTTLE_RATE:-0.05}
       MOCK_RETRY_AFTER: ${MOCK_RETRY_AFTER:-1s}
       MOCK_RATE_LIMIT: ${MOCK_RATE_LIMIT:-0}
       MOCK_LATE_RATE: ${MOCK_LATE_RATE:-0}

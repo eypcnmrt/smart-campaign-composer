@@ -10,8 +10,8 @@
 #    8080 can run at the same time. The network is `internal`: nothing in it, the test container included, can reach the
 #    internet or the host.
 #  * The model is the demo mock (LLM_MODE=mock) and no key is passed in, whatever the host has set.
-#  * The mock provider has its outage switch on (MOCK_CONTROL); the tests flip it over the project's network. In the dev stack the
-#    switch does not exist.
+#  * The mock provider has its control switches on (MOCK_CONTROL: the outage, and "the next N messages get a 429"); the tests flip
+#    them over the project's network. In the dev stack they do not exist. Its failure rates are 0 here, whatever the dev stack uses.
 #  * The test container is the official Playwright image of the same version as @playwright/test (e2e/package.json), browsers
 #    included, so nothing is downloaded while the tests run. The packages come from the volume scc-e2e-node-modules, which
 #    scripts/e2e-npm.sh fills from the lock file.
@@ -20,6 +20,15 @@ services:
   mock-provider:
     environment:
       MOCK_CONTROL: "1"
+      # The browser tests do not take the demo defaults of docker-compose.yml (5 % failures, 5 % 429, up to 200 ms): a scenario must
+      # not wait for a retry it did not ask for. The scenario that wants retries asks the provider for an exact number of 429s
+      # (POST /control/throttle-next/N), and the one that wants an outage switches it on.
+      MOCK_DELAY_MIN: 5ms
+      MOCK_DELAY_MAX: 25ms
+      MOCK_ERROR_RATE: "0"
+      MOCK_THROTTLE_RATE: "0"
+      MOCK_RETRY_AFTER: 1s
+      MOCK_LATE_RATE: "0"
 
   api:
     ports: !reset []

@@ -1155,6 +1155,32 @@ reporting and in the stream's write path.
 - **Not done:** deliveries a killed run left queued stay in the database of a reused stack (`KEEP=1`); a normal run starts with a clean
   volume, so only the deliberate reuse sees them, and the scenarios count their own campaign's deliveries.
 
+### The demo provider fails a little by default, so a send shows retries
+- **Problem:** the last two sends had no retry at all (total attempts equal to the number of messages): `docker-compose.yml` started the
+  mock provider with `MOCK_ERROR_RATE=0`, `MOCK_THROTTLE_RATE=0` and 5 to 25 ms of latency, so the part of the product that is about
+  retries could not be seen on the dashboard.
+- **Decision:** the compose defaults are now 5 % 500 (`MOCK_ERROR_RATE=0.05`), 5 % 429 with `Retry-After: 1` (`MOCK_THROTTLE_RATE=0.05`,
+  `MOCK_RETRY_AFTER=1s`) and 20 to 200 ms of latency. Each is still overridable (`MOCK_*` in the shell or a dotenv file; `.env.example`
+  lists the new values), and 0 gives the old, never-failing provider. **Unchanged on purpose:** the package defaults of
+  `mockprovider.ConfigFromEnv` (no failures; its tests rely on them), the Go tests (each sets its own `Config`), `make soak`
+  (`docker-compose.soak.yml` sets every variable itself: 10 % 500, 8 % 429, 3 % late) and `make e2e`, whose overlay now pins the old
+  deterministic values (0 % and 0 %, 5 to 25 ms) so a scenario never waits for a retry it did not ask for.
+- **Shown, in the dev stack with the new defaults** (a brief for İstanbul and Ankara, both channels, 3,420 messages): about 10 % of the
+  first attempts failed, the dashboard showed "Yeniden denenecek" between 30 and 169 per channel while it ran, the send took 78 s
+  (the default backoff starts at 15 s and doubles, so the tail is the retries of the retries), nothing failed, and the stats summary
+  read `{"duration_seconds":78.4,"retried_messages":347,"total_attempts":3797}`: 347 messages needed more than one attempt.
+  *Choice:* the long tail is left as it is. It is the retry policy working (a message that fails three times waits about a minute),
+  and a shorter default backoff would hide it.
+- **A switch for exactly N retries (`MOCK_CONTROL=1` only):** `POST /control/throttle-next/{count}` makes the next `count` admitted
+  messages answer 429 with the configured Retry-After and accepts nothing for them (`GET /control/throttle-next` reads what is left; a
+  count that is not 0 to 100000 is a 404; a message that was accepted already is answered with its first reply and does not use one up).
+  The worker retries each of them, so exactly `count` messages end with a second attempt. The browser tests need this for the
+  screenshot of a send with retries: random rates cannot promise a number, and 429 does not feed the circuit breaker (only 5xx and
+  silence do), so a few of them cannot open it. Unit-tested, including "the switch is not there unless asked for".
+- **A flaky test hardened on the way:** `TestSend_lateReplyStillDelivers` gave a request 50 ms to reach the server before the client's
+  timeout; on a loaded machine (a full `make test` next to a build) it did not arrive (`Requests:0`). The late delay is now 1.5 s and the
+  client's timeout 300 ms; what the test asserts is unchanged.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
