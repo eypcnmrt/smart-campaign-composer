@@ -146,6 +146,10 @@ func TestWorker_heartbeatReportsTheChannelsAndStopsWithTheWorker(t *testing.T) {
 			s, ok := e.status(t, channel)
 			return ok && s.Circuit == queue.CircuitClosed && s.LastError == ""
 		})
+		// the configured cap (the default here) is part of the report, for the dashboard's limit line
+		if s, _ := e.status(t, channel); s.RatePerSecond != 100 {
+			t.Fatalf("%s: reported rate = %v, want the configured 100", channel, s.RatePerSecond)
+		}
 	}
 	first, _ := e.status(t, "sms")
 	eventually(t, 5*time.Second, "the heartbeat does not move", func() bool {

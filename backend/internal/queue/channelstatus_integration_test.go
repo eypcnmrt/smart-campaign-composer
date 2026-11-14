@@ -21,10 +21,10 @@ func TestChannelStatus_roundTripAndAge(t *testing.T) {
 	if got, err := q.ChannelStatuses(ctx); err != nil || len(got) != 0 {
 		t.Fatalf("statuses of a worker that never reported = %v, %v, want none", got, err)
 	}
-	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, "http 503"); err != nil {
+	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, "http 503", 0); err != nil {
 		t.Fatal(err)
 	}
-	if err := q.SetChannelStatus(ctx, "email", queue.CircuitClosed, ""); err != nil {
+	if err := q.SetChannelStatus(ctx, "email", queue.CircuitClosed, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	got, err := q.ChannelStatuses(ctx)
@@ -42,7 +42,7 @@ func TestChannelStatus_roundTripAndAge(t *testing.T) {
 		t.Fatalf("age of an unchanged row = %v after 300ms", old["email"].Age)
 	}
 	// a new report replaces the row (one row per channel) and resets the age
-	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitClosed, ""); err != nil {
+	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitClosed, "", 0); err != nil {
 		t.Fatal(err)
 	}
 	fresh, _ := q.ChannelStatuses(ctx)
@@ -50,17 +50,30 @@ func TestChannelStatus_roundTripAndAge(t *testing.T) {
 		t.Fatalf("after the update: %+v (before: %+v)", fresh["sms"], old["sms"])
 	}
 
-	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, strings.Repeat("x", 2000)); err != nil {
+	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, strings.Repeat("x", 2000), 0); err != nil {
 		t.Fatal(err)
 	}
 	long, _ := q.ChannelStatuses(ctx)
 	if n := len([]rune(long["sms"].LastError)); n != 500 {
 		t.Fatalf("stored error is %d characters, want it cut to 500", n)
 	}
-	if err := q.SetChannelStatus(ctx, "fax", queue.CircuitClosed, ""); err == nil {
+	// the rate cap travels with the report; zero (or less) is "not reported", not a limit of zero
+	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitClosed, "", 100); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := q.ChannelStatuses(ctx); s["sms"].RatePerSecond != 100 {
+		t.Fatalf("rate after reporting 100 = %v", s["sms"].RatePerSecond)
+	}
+	if err := q.SetChannelStatus(ctx, "sms", queue.CircuitClosed, "", 0); err != nil {
+		t.Fatal(err)
+	}
+	if s, _ := q.ChannelStatuses(ctx); s["sms"].RatePerSecond != 0 {
+		t.Fatalf("rate after reporting none = %v, want 0 (unknown)", s["sms"].RatePerSecond)
+	}
+	if err := q.SetChannelStatus(ctx, "fax", queue.CircuitClosed, "", 0); err == nil {
 		t.Fatal("unknown channel accepted")
 	}
-	if err := q.SetChannelStatus(ctx, "sms", "ajar", ""); err == nil {
+	if err := q.SetChannelStatus(ctx, "sms", "ajar", "", 0); err == nil {
 		t.Fatal("unknown circuit state accepted")
 	}
 }

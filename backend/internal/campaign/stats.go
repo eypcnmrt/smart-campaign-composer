@@ -30,6 +30,9 @@ type ChannelCounts struct {
 	Total    int `json:"total"`
 	// Provider tells "the provider is unreachable, waiting" from "the worker is not running".
 	Provider ProviderInfo `json:"provider"`
+	// RateLimit is the cap the worker works under for this channel, in messages per second, as it reported it; null when it
+	// never did (the screen then draws no limit line).
+	RateLimit *float64 `json:"rate_limit"`
 }
 
 // Stats is what the dashboard polls.
@@ -146,6 +149,10 @@ func (s *Store) Stats(ctx context.Context, q *queue.Queue, id int64, staleAfter 
 		c := out.Channels[ch]
 		report, ok := reports[ch]
 		c.Provider = ProviderStatus(report, ok, staleAfter)
+		if ok && report.RatePerSecond > 0 {
+			rate := report.RatePerSecond
+			c.RateLimit = &rate
+		}
 		out.Channels[ch] = c
 	}
 	return out, nil

@@ -363,7 +363,7 @@ func (w *Worker) heartbeat(ctx context.Context, ch *channelState) {
 		state, lastError := ch.br.Snapshot()
 		w.cfg.Observer.Circuit(ch.name, state.String())
 		writeCtx, cancel := context.WithTimeout(ctx, dbTimeout)
-		err := w.q.SetChannelStatus(writeCtx, ch.name, state.String(), lastError)
+		err := w.q.SetChannelStatus(writeCtx, ch.name, state.String(), lastError, w.cfg.RatePerSecond)
 		cancel()
 		switch {
 		case err != nil && ctx.Err() == nil:

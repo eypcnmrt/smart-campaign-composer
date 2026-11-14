@@ -514,7 +514,7 @@ func TestAPI_statsShowTheProviderStateTheWorkerReports(t *testing.T) {
 	}
 	set := func(channel, circuit, lastError string) {
 		t.Helper()
-		if err := e.q.SetChannelStatus(t.Context(), channel, circuit, lastError); err != nil {
+		if err := e.q.SetChannelStatus(t.Context(), channel, circuit, lastError, 0); err != nil {
 			t.Fatal(err)
 		}
 	}

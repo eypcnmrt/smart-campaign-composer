@@ -699,7 +699,7 @@ func TestStore_stats(t *testing.T) {
 	set(ids[5], "queued", 2) // a retry
 	// ids[6] and ids[7] stay queued with no attempt
 
-	if err := e.q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, "http 503"); err != nil {
+	if err := e.q.SetChannelStatus(ctx, "sms", queue.CircuitOpen, "http 503", 100); err != nil {
 		t.Fatal(err)
 	}
 	stats, err := e.store.Stats(ctx, e.q, c.ID, time.Minute)
@@ -710,6 +710,10 @@ func TestStore_stats(t *testing.T) {
 	want := campaign.ChannelCounts{Queued: 2, Sending: 1, Retrying: 1, Sent: 2, Failed: 1, Skipped: 1, Total: 8}
 	got := sms
 	got.Provider = campaign.ProviderInfo{}
+	if sms.RateLimit == nil || *sms.RateLimit != 100 {
+		t.Fatalf("sms rate limit = %v, want the 100 the worker reported", sms.RateLimit)
+	}
+	got.RateLimit = nil
 	if got != want {
 		t.Fatalf("sms counts = %+v, want %+v", got, want)
 	}
@@ -718,6 +722,9 @@ func TestStore_stats(t *testing.T) {
 	}
 	// the e-mail channel never got a report from the worker
 	email := stats.Channels["email"]
+	if email.RateLimit != nil {
+		t.Fatalf("email rate limit = %v, want none: the worker never reported", *email.RateLimit)
+	}
 	if email.Total != 12 || email.Queued != 12 || email.Provider.State != campaign.ProviderWorkerDown {
 		t.Fatalf("email = %+v, want 12 queued and a worker that never reported", email)
 	}
