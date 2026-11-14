@@ -768,7 +768,7 @@ func TestWorker_serverErrorOnTheLastAttemptFailsWithoutConfirmation(t *testing.T
 func TestWorker_unusableContentFailsWithItsCause(t *testing.T) {
 	e := newEnv(t, mockprovider.Config{})
 	id := e.campaign(t, 4, "sms")
-	if _, err := e.pool.Exec(context.Background(), `UPDATE campaigns SET content = '[1, 2]'::jsonb WHERE id = $1`, id); err != nil {
+	if _, err := e.pool.Exec(context.Background(), `UPDATE campaigns SET approved_content = '[1, 2]'::jsonb WHERE id = $1`, id); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()

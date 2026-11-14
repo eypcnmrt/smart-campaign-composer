@@ -42,8 +42,10 @@ func AddUsers(t testing.TB, pool *pgxpool.Pool, n int) {
 func AddApprovedCampaign(t testing.TB, pool *pgxpool.Pool, channels ...string) int64 {
 	t.Helper()
 	var id int64
-	err := pool.QueryRow(context.Background(), `INSERT INTO campaigns (brief, status, channels, segment_rule, content, approved_at)
-		VALUES ('brief', 'approved', $1, $2::jsonb, $3::jsonb, $4) RETURNING id`,
+	// The editable columns and the approval snapshot hold the same values, as they do right after an approval.
+	err := pool.QueryRow(context.Background(), `INSERT INTO campaigns
+		(brief, status, channels, segment_rule, content, approved_at, approved_channels, approved_rule, approved_content)
+		VALUES ('brief', 'approved', $1, $2::jsonb, $3::jsonb, $4, $1, $2::jsonb, $3::jsonb) RETURNING id`,
 		channels, AllUsersRule, ContentJSON, time.Now()).Scan(&id)
 	if err != nil {
 		t.Fatalf("inserting campaign: %v", err)

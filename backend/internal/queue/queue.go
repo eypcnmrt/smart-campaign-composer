@@ -78,7 +78,8 @@ func (r EnqueueResult) Total() (n int) {
 // compiled segment predicate and the channel's consent, ON CONFLICT DO NOTHING so a second call adds
 // nothing. The campaign moves from approved to sending in the same transaction (or straight to
 // completed when nobody is eligible). Event windows count back from approved_at, so the audience
-// does not depend on when the worker happens to run.
+// does not depend on when the worker happens to run. The rule and the channels come from the approval
+// snapshot (approved_rule, approved_channels), never from the editable columns.
 func (q *Queue) Enqueue(ctx context.Context, campaignID int64) (res EnqueueResult, err error) {
 	tx, err := q.pool.Begin(ctx)
 	if err != nil {
@@ -91,15 +92,28 @@ func (q *Queue) Enqueue(ctx context.Context, campaignID int64) (res EnqueueResul
 			}
 		}
 	}()
+	if res, err = EnqueueTx(ctx, tx, campaignID); err != nil {
+		return EnqueueResult{}, err
+	}
+	if err = tx.Commit(ctx); err != nil {
+		return EnqueueResult{}, fmt.Errorf("commit: %w", err)
+	}
+	return res, nil
+}
 
+// EnqueueTx is Enqueue inside the caller's transaction, which the caller commits or rolls back. The approval uses it
+// to write the snapshot and the recipient list atomically: either both exist or neither does.
+func EnqueueTx(ctx context.Context, tx pgx.Tx, campaignID int64) (EnqueueResult, error) {
 	var (
+		res        EnqueueResult
+		err        error
 		status     string
 		channels   []string
 		ruleJSON   []byte
 		approvedAt *time.Time
 	)
 	err = tx.QueryRow(ctx,
-		`SELECT status, channels, segment_rule, approved_at FROM campaigns WHERE id = $1 FOR UPDATE`, campaignID,
+		`SELECT status, approved_channels, approved_rule, approved_at FROM campaigns WHERE id = $1 FOR UPDATE`, campaignID,
 	).Scan(&status, &channels, &ruleJSON, &approvedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return EnqueueResult{}, ErrCampaignNotFound
@@ -153,9 +167,6 @@ func (q *Queue) Enqueue(ctx context.Context, campaignID int64) (res EnqueueResul
 		 WHERE id = $1`,
 		campaignID, next); err != nil {
 		return EnqueueResult{}, fmt.Errorf("updating campaign %d: %w", campaignID, err)
-	}
-	if err = tx.Commit(ctx); err != nil {
-		return EnqueueResult{}, fmt.Errorf("commit: %w", err)
 	}
 	return res, nil
 }
@@ -215,7 +226,7 @@ SELECT c.id, c.campaign_id, c.user_id, c.channel, c.attempts, c.idempotency_key:
        CASE c.channel WHEN 'sms' THEN u.phone ELSE u.email END,
        u.first_name, u.city,
        CASE c.channel WHEN 'sms' THEN u.sms_consent ELSE u.email_consent END,
-       camp.content
+       camp.approved_content
 FROM claimed c
 JOIN users u ON u.id = c.user_id
 JOIN campaigns camp ON camp.id = c.campaign_id`
@@ -338,16 +349,20 @@ func (q *Queue) RecoverLeases(ctx context.Context, maxAttempts int) (RecoverResu
 	return res, nil
 }
 
-// CompleteFinished finishes every sending campaign that has no queued or sending delivery left:
-// completed_with_failures if any delivery failed, completed otherwise. It returns how many it finished.
-func (q *Queue) CompleteFinished(ctx context.Context) (int, error) {
-	tag, err := q.pool.Exec(ctx, `
+// CompleteFinishedSQL is the statement CompleteFinished runs every second. It probes deliveries by (campaign_id, status),
+// which deliveries_campaign_status_channel_idx serves; a test checks the plan.
+const CompleteFinishedSQL = `
 		UPDATE campaigns c
 		SET status = CASE WHEN EXISTS (SELECT 1 FROM deliveries d WHERE d.campaign_id = c.id AND d.status = 'failed')
 		                  THEN 'completed_with_failures' ELSE 'completed' END,
 		    completed_at = now(), updated_at = now()
 		WHERE c.status = 'sending'
-		  AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.campaign_id = c.id AND d.status IN ('queued', 'sending'))`)
+		  AND NOT EXISTS (SELECT 1 FROM deliveries d WHERE d.campaign_id = c.id AND d.status IN ('queued', 'sending'))`
+
+// CompleteFinished finishes every sending campaign that has no queued or sending delivery left:
+// completed_with_failures if any delivery failed, completed otherwise. It returns how many it finished.
+func (q *Queue) CompleteFinished(ctx context.Context) (int, error) {
+	tag, err := q.pool.Exec(ctx, CompleteFinishedSQL)
 	if err != nil {
 		return 0, fmt.Errorf("completing campaigns: %w", err)
 	}

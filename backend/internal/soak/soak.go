@@ -217,8 +217,10 @@ func prepare(ctx context.Context, pool *pgxpool.Pool, users int) (int64, error) 
 		return 0, fmt.Errorf("inserting soak users: %w", err)
 	}
 	var id int64
-	err := pool.QueryRow(ctx, `INSERT INTO campaigns (brief, status, channels, segment_rule, content, approved_at)
-		VALUES ('soak', 'approved', ARRAY['sms','email'], $1::jsonb, $2::jsonb, now()) RETURNING id`,
+	err := pool.QueryRow(ctx, `INSERT INTO campaigns
+		(brief, status, channels, segment_rule, content, approved_at, approved_channels, approved_rule, approved_content)
+		VALUES ('soak', 'approved', ARRAY['sms','email'], $1::jsonb, $2::jsonb, now(), ARRAY['sms','email'], $1::jsonb, $2::jsonb)
+		RETURNING id`,
 		soakRule, soakContent).Scan(&id)
 	if err != nil {
 		return 0, fmt.Errorf("inserting the soak campaign: %w", err)

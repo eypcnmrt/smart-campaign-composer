@@ -33,7 +33,20 @@ func TestSchema_constraints(t *testing.T) {
 		{"audience_ready needs a rule", `INSERT INTO campaigns (brief, status) VALUES ('b', 'audience_ready')`},
 		{"content_ready needs content", `INSERT INTO campaigns (brief, status, segment_rule) VALUES ('b', 'content_ready', '{}')`},
 		{"approved needs approved_at", `INSERT INTO campaigns (brief, status, segment_rule, content) VALUES ('b', 'approved', '{}', '{}')`},
-		{"completed needs completed_at", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at) VALUES ('b', 'completed', '{}', '{}', now())`},
+		{"approved needs the snapshot", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at) VALUES ('b', 'approved', '{}', '{}', now())`},
+		{"the snapshot needs its channels", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, approved_rule, approved_content) VALUES ('b', 'sending', '{}', '{}', now(), '{}', '{}')`},
+		{"completed needs completed_at", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, approved_rule, approved_content, approved_channels)
+			VALUES ('b', 'completed', '{}', '{}', now(), '{}', '{}', '{sms}')`},
+		{"unknown channel in the snapshot", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, approved_rule, approved_content, approved_channels)
+			VALUES ('b', 'sending', '{}', '{}', now(), '{}', '{}', '{sms,fax}')`},
+		{"empty channel list in the snapshot", `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, approved_rule, approved_content, approved_channels)
+			VALUES ('b', 'sending', '{}', '{}', now(), '{}', '{}', '{}')`},
+		{"version below one", `INSERT INTO campaigns (brief, version) VALUES ('b', 0)`},
+		{"half of the audience counts", `INSERT INTO campaigns (brief, audience_matched) VALUES ('b', 5)`},
+		{"negative audience count", `INSERT INTO campaigns (brief, audience_matched, audience_sms, audience_email, audience_total_users, audience_counted_at)
+			VALUES ('b', -1, 0, 0, 0, now())`},
+		{"two deliveries with the same idempotency key", `INSERT INTO deliveries (campaign_id, user_id, channel, idempotency_key) VALUES
+			(1, 1, 'sms', '00000000-0000-4000-8000-000000000001'), (1, 1, 'email', '00000000-0000-4000-8000-000000000001')`},
 		{"empty channel list", `INSERT INTO campaigns (brief, channels) VALUES ('b', '{}')`},
 		{"unknown channel in campaign", `INSERT INTO campaigns (brief, channels) VALUES ('b', '{sms,fax}')`},
 		{"user without city", `INSERT INTO users (first_name, email, phone, city, language, sms_consent, email_consent) VALUES ('A', 'b@example.com', '+900000000002', NULL, 'tr', true, true)`},
@@ -64,7 +77,9 @@ func TestSchema_constraints(t *testing.T) {
 	})
 
 	t.Run("a valid full life cycle is accepted", func(t *testing.T) {
-		mustExec(t, `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, completed_at)
-			VALUES ('b', 'completed_with_failures', '{}', '{}', now(), now())`)
+		mustExec(t, `INSERT INTO campaigns (brief, status, segment_rule, content, approved_at, completed_at,
+				approved_rule, approved_content, approved_channels, approved_warnings, audience_matched, audience_sms,
+				audience_email, audience_total_users, audience_counted_at)
+			VALUES ('b', 'completed_with_failures', '{}', '{}', now(), now(), '{}', '{}', '{sms,email}', '[]', 3, 2, 1, 10, now())`)
 	})
 }

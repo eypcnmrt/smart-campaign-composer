@@ -22,11 +22,11 @@ const (
 // SMSInfo describes how a text would be sent. It is information for the
 // marketer, not a limit: the content limit is MaxSMS characters.
 type SMSInfo struct {
-	Encoding Encoding
-	Units    int // septets (GSM-7) or UTF-16 code units (UCS-2)
-	Segments int // messages needed; 0 for an empty text
-	Single   int // capacity of a one-part message
-	Multi    int // capacity of each part of a longer message
+	Encoding Encoding `json:"encoding"`
+	Units    int      `json:"units"`    // septets (GSM-7) or UTF-16 code units (UCS-2)
+	Segments int      `json:"segments"` // messages needed; 0 for an empty text
+	Single   int      `json:"single"`   // capacity of a one-part message
+	Multi    int      `json:"multi"`    // capacity of each part of a longer message
 }
 
 // gsm7Basic is the GSM 03.38 default alphabet (one septet per character) and
