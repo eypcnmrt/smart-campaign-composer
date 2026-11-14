@@ -931,6 +931,78 @@ reporting and in the stream's write path.
   a reconnecting client cannot spend credit in the gap); a panic after the response has started aborts the connection instead of
   writing a JSON error into an event stream.
 
+## The overnight session after the browser round
+
+(Written while working unattended: where something was unclear a reasonable choice was made and is recorded here.)
+
+### The brief stays in view above the steps that are judged against it
+- **Decision:** `BriefSummary` shows the brief, read-only, above the audience, content and approval steps (not on the brief
+  step, where it is the page, and not on the delivery). It is cut to two lines with "Tamamını göster" / "Daha az göster"
+  (`aria-expanded`, `aria-controls`). Whether it is cut is **measured** (`scrollHeight > clientHeight`, again when the width
+  changes through a `ResizeObserver`), so a short brief has no button and a three-line one on a phone has.
+- **Why:** the marketer compares the rule, the texts and the counts with what they wrote. Its label is a paragraph, not a heading:
+  after a step change focus goes to the step's own `h2`, and a second `h2` above it would take that.
+- **Also changed in the same round:** the variable buttons insert at the **remembered caret** (saved when the field loses focus,
+  forgotten when the text is replaced from outside, e.g. a regeneration) and put a space between the variable and a word that
+  touches it. *Choice:* no space before `. , ; : ! ? ) ] } …` and none after `( [ {`, so "Merhaba {{first_name}}, ..." stays
+  as written (the literal rule "a space unless the neighbour is a space" would have produced "{{first_name}} ,"). The step has
+  one primary button ("Onaya geç" while nothing is unsaved, "Değişiklikleri kaydet" while something is) and a reason beside every
+  disabled one. The list page has one "Yeni kampanya" button, the one in the header; *choice:* the empty state's own button was
+  removed too (it said the same thing a second time) and its text points to the header. Example briefs are plain framed
+  buttons with hover and focus states. The SMS editor says "Tek mesaja sığması için N birim kısaltın" when a text is 1 to 10 units
+  over the single-message limit (information only; for a template the variables change the real length).
+
+### The demo mock streams for three to four seconds
+- **Decision:** `llm.DemoChunkDelay` is 75 ms between the pieces (about 47 pieces: 3.5 s). Only `newDemoMock` (no key, or
+  `LLM_MODE=mock`) waits; every mock the tests build has a zero delay. A test pins the product of piece count and delay.
+
+### The content stream is a POST, and a HEAD is answered by the GET routes
+- **Decision:** `POST /api/campaigns/{id}/content/stream[?regenerate=true]`; a GET (and a HEAD) of it is a 405 `method_not_allowed`.
+  The client already used `fetch`, so only its method changed. The rule that a campaign with content needs `regenerate=true`
+  stays (a retrying client must not spend credit twice).
+- **Checked, no GET writes anything:** `GET /api/config`, `/api/campaigns`, `/api/campaigns/{id}`, `/preview`, `/stats`, `/healthz`,
+  `/readyz`, `/metrics`. In `campaign.Store` only `Create`, the conditional update and `Approve` write.
+- **HEAD:** chi's `middleware.GetHead` was tried first and does **not** work here: it asks the router whether a HEAD handler
+  exists, and a mounted sub-router (every route under `/api`) answers that for any method, so those HEADs stayed 405. The same
+  effect is a ten-line middleware (`headAsGet`) that routes a HEAD through the GET routes; it is safe for the reason above, and a
+  HEAD for the stream stays 405 because there is no GET to fall back to. Tested on every GET route (same status as the GET, no body).
+- **Test that was wrong, found by the change:** "goes to the content step when asked, without calling the model" counted only
+  non-GET calls, and the old stream was a GET, so it never saw the generation it claimed not to start. It now expects exactly
+  one POST of the stream (the click was on "İçeriği üret").
+
+### Send evidence: the cap, a timeline per second, a summary
+- **Rate cap:** the worker writes its configured `RatePerSecond` into `worker_channel_status.rate_per_second` with each heartbeat
+  (migration 0007; NULL = not reported); stats return it as `rate_limit` per channel and the dashboard draws that value. When it is
+  missing there is no line and no caption (the page no longer has a number of its own). Standby workers report nothing, as before.
+- **Timeline:** `channels.<ch>.timeline = {start, bucket_seconds, accepted[]}`: messages whose delivery was recorded as sent in each
+  bucket, from the second of the approval to the last message (or to now while sending, by the database clock). **At most 600
+  buckets**: a campaign longer than that is counted in the narrowest of 2, 5, 10, 30 s ... buckets that fit, so the bars of a long
+  send do not change width every second. `sent_at` is the time the worker *recorded* success, which is when the provider's answer
+  arrived, not the provider's own clock.
+- **Summary:** `summary = {duration_seconds, average_per_second, peak_per_second, retried_messages, total_attempts}`.
+  Duration is approval to completion (null until completed). Average is accepted messages divided by the time from the first to the
+  last of them (at least 1 s), both channels together; peak is the busiest bucket of both channels together, per second.
+  *Retried* means more than one attempt (`attempts > 1`); the attempt that an outage gave back (see "A circuit breaker per channel")
+  does not count, which is why the outage scenario shows no retries. Total attempts is `sum(attempts)`.
+- **Index (migration 0008):** `deliveries_sent_at_idx (campaign_id, sent_at, channel) WHERE status = 'sent'`. The first and last send time are
+  the two ends of the index; the counts per bucket read the index alone. The EXPLAIN test shows both plans (`go test -run Index -v`).
+  *Known limit of the test:* on a fresh test database the visibility map is empty and the planner cannot tell this index from the
+  stats index (costs within a few percent), so the last subtest drops the stats index first and shows that the sent-at index alone
+  answers the query with an Index Only Scan. In production the planner may use either; both are index scans.
+- **Cost:** the timeline is recomputed on every stats request (1 per second per open dashboard): an index-only scan of the sent rows of one
+  campaign. Fine for the sizes here (5,000 in the soak, 10^5 would be tens of milliseconds); a finished campaign could be cached, not done.
+- **UI:** `RateChart` is a small SVG of bars (no chart library, no inline styles: the CSP forbids them) with the limit as a dashed
+  line, live while sending and kept after the end; at least 12 bar slots so a four-second send is not four slabs. The image has a text
+  summary as its label ("SMS: 5 saniyede 260 mesaj kabul edildi; en yoğun saniyede 100 mesaj. Sınır: saniyede 100 mesaj."); the
+  label does not change what a screen reader announces each second (an image's label is not live). `SummaryLine` is the line under the
+  result band. The shapes in the API client are validated when present and optional, so an older server still works.
+
+### Polling backs off after failures
+- **Decision:** after a failed stats request the wait is 1, 2, 4, 8, then 10 s (`min(10 s, 1 s * 2^(failures-1))`); an answer that
+  works resets it to 1 s, so does pressing the retry button; a `Retry-After` longer than the backoff wins. The screen says
+  "Yeniden deneniyor (N sn)" (N is the wait that was scheduled, not a countdown: a countdown would re-render every second for
+  nothing while the server is in trouble); `not_found` still stops the polling.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the
