@@ -102,7 +102,8 @@ function isTimeline(t: unknown): boolean {
     t.bucket_seconds > 0 &&
     Array.isArray(t.accepted) &&
     t.accepted.length <= MAX_BUCKETS &&
-    t.accepted.every((n) => typeof n === 'number' && n >= 0)
+    t.accepted.every((n) => typeof n === 'number' && n >= 0) &&
+    optional(t.average_per_second, (a) => typeof a === 'number' && a >= 0)
   )
 }
 
@@ -110,7 +111,7 @@ function isSummary(s: unknown): boolean {
   return (
     isRecord(s) &&
     isNullOr(s.duration_seconds, (d) => typeof d === 'number') &&
-    ['average_per_second', 'peak_per_second', 'retried_messages', 'total_attempts'].every((k) => typeof s[k] === 'number')
+    ['retried_messages', 'total_attempts'].every((k) => typeof s[k] === 'number')
   )
 }
 

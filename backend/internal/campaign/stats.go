@@ -173,7 +173,7 @@ func (s *Store) stats(ctx context.Context, db reader, q *queue.Queue, id int64, 
 	}
 
 	if approvedAt != nil {
-		timelines, peak, average, err := s.timelines(ctx, db, id, *approvedAt, completedAt, slices.Collect(maps.Keys(out.Channels)))
+		timelines, err := s.timelines(ctx, db, id, *approvedAt, completedAt, slices.Collect(maps.Keys(out.Channels)))
 		if err != nil {
 			return Stats{}, err
 		}
@@ -182,7 +182,7 @@ func (s *Store) stats(ctx context.Context, db reader, q *queue.Queue, id int64, 
 			c.Timeline = tl
 			out.Channels[ch] = c
 		}
-		sum := SendSummary{AveragePerSecond: average, PeakPerSecond: peak, RetriedMessages: retried, TotalAttempts: attempts}
+		sum := SendSummary{RetriedMessages: retried, TotalAttempts: attempts}
 		if completedAt != nil {
 			d := completedAt.Sub(*approvedAt).Seconds()
 			sum.DurationSeconds = &d

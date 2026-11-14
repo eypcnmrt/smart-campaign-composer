@@ -176,14 +176,14 @@ export interface Timeline {
   start: string
   bucket_seconds: number
   accepted: number[]
+  /** Messages of this channel per second from its first to its last one (at least a second); each channel has its own cap, so the rate is per channel. */
+  average_per_second?: number
 }
 
 /** The send as a whole (null before the approval). */
 export interface SendSummary {
   /** Approval to completion, in seconds; null until the campaign is completed. */
   duration_seconds: number | null
-  average_per_second: number
-  peak_per_second: number
   /** Messages that needed more than one attempt. */
   retried_messages: number
   total_attempts: number

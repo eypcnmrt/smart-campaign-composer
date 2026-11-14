@@ -123,6 +123,7 @@ describe('chartOf', () => {
     const chart = chartOf({ bucket_seconds: 2, accepted: [200, 100, 0] }, 100)
     expect(chart.bars.map((b) => b.rate)).toEqual([100, 50, 0])
     expect(chart.peak).toBe(100)
+    expect(chart.average).toBeNull() // no average from the server (an older one) or nothing sent: none is made up
     expect(chart.total).toBe(300)
     expect(chart.seconds).toBe(6)
     expect(chart.max).toBeCloseTo(115)

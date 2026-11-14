@@ -41,6 +41,17 @@ describe('RateChart', () => {
     expect(unknown.text()).not.toContain('Sınır')
   })
 
+  it('gives the channel’s own average next to its peak and its cap', () => {
+    const wrapper = mount(RateChart, {
+      props: { timeline: { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 40, 100, 100, 20], average_per_second: 86.7 }, limit: 100, label: 'SMS' },
+    })
+    expect(wrapper.get('.chart__caption').text()).toContain('Ortalama: 86,7/s')
+    expect(wrapper.get('.chart__caption').text()).toContain('En yoğun: 100/s')
+    expect(wrapper.get('svg').attributes('aria-label')).toContain('ortalama saniyede 86,7 mesaj, en yoğun saniyede 100 mesaj')
+    // an older server sends no average: the caption simply has none
+    expect(render([0, 40]).get('.chart__caption').text()).not.toContain('Ortalama')
+  })
+
   it('has a text summary for a screen reader and the figures in words next to it', () => {
     const wrapper = render([0, 40, 100, 100, 20])
     expect(wrapper.get('svg').attributes('role')).toBe('img')
@@ -60,13 +71,14 @@ describe('RateChart', () => {
 describe('SummaryLine', () => {
   const render = (s: Partial<SendSummary> = {}) =>
     mount(SummaryLine, {
-      props: { summary: { duration_seconds: 4.8, average_per_second: 98.4, peak_per_second: 100, retried_messages: 12, total_attempts: 5012, ...s } },
+      props: { summary: { duration_seconds: 4.8, retried_messages: 12, total_attempts: 5012, ...s } },
     })
 
-  it('says how long it took, how fast it went and what was tried again', () => {
-    expect(render().text()).toBe(
-      'Süre 4,8 sn · ortalama 98,4 mesaj/sn · en yüksek 100 mesaj/sn · 12 mesaj en az bir kez yeniden denendi (toplam 5.012 deneme)',
-    )
+  it('says how long it took and what was tried again, and names no rate', () => {
+    const text = render().text()
+    expect(text).toBe('Süre 4,8 sn · 12 mesaj en az bir kez yeniden denendi (toplam 5.012 deneme)')
+    // a rate of both channels together reads as a broken cap of 100 per channel: the speeds are in the channel cards
+    expect(text).not.toMatch(/mesaj\/sn|ortalama|en yüksek/)
   })
 
   it('says plainly that nothing had to be retried, and leaves the duration out while it is unknown', () => {

@@ -107,7 +107,7 @@ describe('the campaign endpoints', () => {
 
   it('stats: accepts the rate limit, the timeline and the summary, and works without them', async () => {
     const timeline = { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 5] }
-    const summary = { duration_seconds: null, average_per_second: 5, peak_per_second: 5, retried_messages: 0, total_attempts: 5 }
+    const summary = { duration_seconds: null, retried_messages: 0, total_attempts: 5 }
     stubFetch({ ...stats, channels: { sms: { ...counts, provider, rate_limit: 100, timeline } }, summary })
     const got = await getStats(7)
     expect(got.channels.sms?.timeline?.accepted).toEqual([0, 5])
@@ -159,6 +159,7 @@ describe('a response that does not match the contract is a bad_response', () => 
     ['a rate limit that is not a number', { rate_limit: '100' }],
     ['a timeline without buckets', { timeline: { start: 'x', bucket_seconds: 1 } }],
     ['a timeline with a bucket width of zero', { timeline: { start: 'x', bucket_seconds: 0, accepted: [1] } }],
+    ['a timeline with an average that is not a number', { timeline: { start: 'x', bucket_seconds: 1, accepted: [1], average_per_second: 'fast' } }],
     ['a timeline with a negative count', { timeline: { start: 'x', bucket_seconds: 1, accepted: [-1] } }],
     ['a timeline far longer than the server sends', { timeline: { start: 'x', bucket_seconds: 1, accepted: new Array(5000).fill(1) } }],
   ])('statistics with %s', async (_name, extra) => {
@@ -167,7 +168,7 @@ describe('a response that does not match the contract is a bad_response', () => 
   })
 
   it('statistics with a summary that lacks a figure', async () => {
-    stubFetch({ ...stats, summary: { duration_seconds: null, average_per_second: 1, peak_per_second: 1, retried_messages: 0 } })
+    stubFetch({ ...stats, summary: { duration_seconds: null, retried_messages: 0 } })
     expect((await rejection(getStats(7))).code).toBe('bad_response')
   })
 

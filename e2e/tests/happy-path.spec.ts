@@ -74,13 +74,19 @@ test('brief to a finished delivery', async ({ page }) => {
   await expect(page.getByRole('img', { name: /E-posta: .*mesaj kabul edildi/ })).toBeVisible()
   const summary = page.getByText(/^Süre /)
   await expect(summary).toBeVisible()
-  await expect(summary).toContainText('mesaj/sn')
-  const text = await summary.innerText()
-  const figure = (re: RegExp) => Number(re.exec(text)?.[1]?.replace(/\./g, '').replace(',', '.'))
-  const peak = figure(/en yüksek ([\d.,]+) mesaj\/sn/)
-  const average = figure(/ortalama ([\d.,]+) mesaj\/sn/)
-  expect(average, 'the average of the summary').toBeGreaterThan(0)
-  expect(peak, 'the peak of the summary').toBeGreaterThan(0)
-  expect(peak, 'one channel is capped at 100/s and there are two').toBeLessThanOrEqual(200)
+  // The summary line has no speed (the cap is per channel; a figure of both channels together looks like a broken cap) ...
+  await expect(summary).not.toContainText(/mesaj\/sn|ortalama|en yüksek/)
+  // ... the speeds are in each channel's card, next to its own cap of 100/s.
+  for (const channel of ['sms', 'email']) {
+    const caption = (await page.locator(`[data-channel="${channel}"] .chart__caption`).innerText()).replace(/\s+/g, ' ')
+    const figure = (re: RegExp) => Number(re.exec(caption)?.[1]?.replace(/\./g, '').replace(',', '.'))
+    const average = figure(/Ortalama: ([\d.,]+)\/s/)
+    const peak = figure(/En yoğun: ([\d.,]+)\/s/)
+    expect(average, `the average of ${channel}`).toBeGreaterThan(0)
+    expect(peak, `the peak of ${channel}`).toBeGreaterThan(0)
+    // buckets are by the time the answer was recorded, so a little over the cap is not a broken cap; double would be one
+    expect(peak, `${channel} is capped at 100/s`).toBeLessThanOrEqual(110)
+    expect(average, `${channel} is capped at 100/s`).toBeLessThanOrEqual(110)
+  }
   await shot(page, '05-delivery-completed')
 })

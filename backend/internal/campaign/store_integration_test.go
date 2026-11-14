@@ -811,9 +811,16 @@ func TestStore_statsTimelineAndSummary(t *testing.T) {
 	if sum.DurationSeconds != nil {
 		t.Fatalf("duration of a campaign that is not completed = %v, want none", *sum.DurationSeconds)
 	}
-	// seven sent in 1.4 s between the first and the last; the busiest second (both channels) took four
-	if sum.AveragePerSecond < 4.99 || sum.AveragePerSecond > 5.01 || sum.PeakPerSecond != 4 {
-		t.Fatalf("average / peak = %v / %v, want 5 / 4", sum.AveragePerSecond, sum.PeakPerSecond)
+	// The rates are per channel (each has its own cap): five sms in the 1.4 s from 0.5 to 1.9, two e-mails in 0.1 s (counted
+	// as at least a second).
+	if got := smsTL.AveragePerSecond; got < 3.56 || got > 3.58 {
+		t.Fatalf("sms average = %v, want 5 / 1.4 = 3.57", got)
+	}
+	if got := emailTL.AveragePerSecond; got != 2 {
+		t.Fatalf("email average = %v, want 2 (two messages in less than a second)", got)
+	}
+	if stats.Channels["sms"].Timeline.AveragePerSecond == stats.Channels["email"].Timeline.AveragePerSecond {
+		t.Fatal("the two channels have one average: it must be per channel")
 	}
 	// 5 sms: 2+1+1+1+1, 2 email: 3+1
 	if sum.RetriedMessages != 2 || sum.TotalAttempts != 10 {

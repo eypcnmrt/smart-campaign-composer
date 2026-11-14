@@ -979,9 +979,8 @@ reporting and in the stream's write path.
   buckets**: a campaign longer than that is counted in the narrowest of 2, 5, 10, 30 s ... buckets that fit, so the bars of a long
   send do not change width every second. `sent_at` is the time the worker *recorded* success, which is when the provider's answer
   arrived, not the provider's own clock.
-- **Summary:** `summary = {duration_seconds, average_per_second, peak_per_second, retried_messages, total_attempts}`.
-  Duration is approval to completion (null until completed). Average is accepted messages divided by the time from the first to the
-  last of them (at least 1 s), both channels together; peak is the busiest bucket of both channels together, per second.
+- **Summary:** `summary = {duration_seconds, retried_messages, total_attempts}` (it had an average and a peak of both channels together until
+  the closing session, see "Speeds are per channel"). Duration is approval to completion (null until completed).
   *Retried* means more than one attempt (`attempts > 1`); the attempt that an outage gave back (see "A circuit breaker per channel")
   does not count, which is why the outage scenario shows no retries. Total attempts is `sum(attempts)`.
 - **Index (migration 0008):** `deliveries_sent_at_idx (campaign_id, sent_at, channel) WHERE status = 'sent'`. The first and last send time are
@@ -1077,6 +1076,19 @@ reporting and in the stream's write path.
 - **Cost, measured** (`TestStore_statsLatency`, about 6,000 deliveries, 60 requests, PostgreSQL in a container, `-race`): median 3.95 ms
   and p95 4.13 ms before, median 4.29 ms and p95 4.53 ms after. The two extra round trips (BEGIN, ROLLBACK) are the whole difference;
   a read-only snapshot takes no locks and blocks no writer.
+
+### Speeds are per channel
+- **Problem (from the screenshots):** the line under the result said "ortalama 176 mesaj/sn · en yüksek 193 mesaj/sn". That is two channels
+  added together; each is capped at 100/s, so a reader took it for a broken cap.
+- **Decision:** the summary line has no speed at all (duration, retries, attempts). The channel card has it, next to that channel's own cap:
+  "Sınır: 100/s · Ortalama: N/s · En yoğun: N/s" under the chart, and the same in the chart's label for a screen reader. The server
+  sends `timeline.average_per_second` per channel (messages of that channel over the time from its first to its last message, at
+  least a second; from the same query as the buckets, min and max of `sent_at` per bucket, still an index-only read); the peak was
+  already computed per channel from the buckets in the browser. `summary.average_per_second` and `peak_per_second` are gone. The client
+  treats the new field as optional (an older server has none, no average is shown), but a field that is there and not a number is a
+  `bad_response`, as before.
+- **Choice:** removing the two summary fields rather than keeping and relabelling them ("iki kanalın toplamı"): nothing needs a total
+  speed, and a number that has to be explained is a number that gets misread. The e2e test now reads the figures from each channel card.
 
 ## Open issues
 

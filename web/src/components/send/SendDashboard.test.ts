@@ -91,7 +91,7 @@ describe('SendDashboard', () => {
 
     const done = {
       ...stats('completed', { sent: 200, total: 200, timeline: { ...timeline, accepted: [0, 60, 100, 40] } }),
-      summary: { duration_seconds: 3.2, average_per_second: 66.7, peak_per_second: 100, retried_messages: 3, total_attempts: 203 },
+      summary: { duration_seconds: 3.2, retried_messages: 3, total_attempts: 203 },
     }
     api.set(KEY, { body: done })
     await vi.advanceTimersByTimeAsync(1000)

@@ -7,7 +7,7 @@ import { formatDuration, formatRate } from '@/domain/format'
 // The messages the provider accepted, second by second, as bars, with the channel's rate limit as a line. A small SVG without a
 // chart library: each bar is one bucket of the server's timeline. While the delivery runs the chart grows to the right with
 // every answer; once it is over it stays, so the speed and the cap can still be seen afterwards. The drawing is for the eye; a
-// screen reader gets the same facts as a sentence (the image's label), and the figures are also in the summary line.
+// screen reader gets the same facts as a sentence (the image's label), and the figures are also written under the chart.
 const props = defineProps<{ timeline: Timeline; limit: number | null; label: string }>()
 
 const id = useId()
@@ -48,6 +48,7 @@ const span = computed(() => formatDuration(chart.value.seconds))
     </div>
     <p class="chart__caption">
       <template v-if="limit !== null"><span class="chart__key" aria-hidden="true" />Sınır: <span class="num">{{ formatRate(limit) }}</span>/s · </template>
+      <template v-if="chart.average !== null">Ortalama: <span class="num">{{ formatRate(chart.average) }}</span>/s · </template>
       En yoğun: <span class="num">{{ formatRate(chart.peak) }}</span>/s
     </p>
   </figure>
