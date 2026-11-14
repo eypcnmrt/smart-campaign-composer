@@ -292,6 +292,14 @@ func (w *Worker) dispatch(ctx context.Context, ch *channelState, sends *sync.Wai
 // error of the first failed claim otherwise.
 func (w *Worker) serve(ctx context.Context, ch *channelState, lock *queue.ChannelLock, sends *sync.WaitGroup) error {
 	log := w.cfg.Logger.With("channel", ch.name)
+
+	// The pacing lives in this process: its token bucket and window guard know nothing of the sends of the worker that
+	// served the channel before (another worker, or this one before a restart), and the guard's margin, which keeps
+	// any 100 sends one 1.04 s apart, is lost across the hand-over: the old worker's last sends and the new worker's
+	// first ones then fall into one second, and the provider sees 101. Everything the previous holder sent was reserved
+	// before it let go of the lock, so waiting one window after taking the lock makes the cap hold across the hand-over.
+	w.pause(ctx, time.Second+w.cfg.RateMargin)
+
 	for ctx.Err() == nil {
 		select {
 		case ch.slots <- struct{}{}: // a free send slot

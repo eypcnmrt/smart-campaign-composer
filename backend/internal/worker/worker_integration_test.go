@@ -860,3 +860,24 @@ func TestWorker_twoWorkersKeepTheChannelCapAndHandOver(t *testing.T) {
 	}
 	e.requireProviderMatchesDatabase(t)
 }
+
+// The pacing of a worker knows nothing of the sends of the worker that served the channel before it, so a worker that
+// takes a channel waits out one rate window (1 s plus the margin) before its first send; that keeps the cap across the
+// hand-over, where the old worker's last sends and the new one's first ones would otherwise fall into one second.
+func TestWorker_aNewTenureWaitsOutOneRateWindowBeforeSending(t *testing.T) {
+	e := newEnv(t, mockprovider.Config{})
+	id := e.campaign(t, 5, "sms")
+	_, stop := e.start(t, worker.Config{Channels: []string{"sms"}})
+	eventually(t, 10*time.Second, "the worker did not take the channel lock", func() bool { return e.channelLocks(t) == 1 })
+
+	time.Sleep(900 * time.Millisecond) // the window is 1.04 s from taking the lock; the lock was seen a few ms after that
+	if got := e.provider.Stats().SMS.Requests; got != 0 {
+		t.Fatalf("the provider got %d requests within 0.9 s of the worker taking the channel, want none", got)
+	}
+	if status := e.waitFinished(t, id, 30*time.Second); status != "completed" {
+		t.Fatalf("campaign = %q", status)
+	}
+	if err := stop(); err != nil {
+		t.Fatal(err)
+	}
+}
