@@ -1129,6 +1129,22 @@ reporting and in the stream's write path.
   `TestMock_participlesWithPluralAndCase`, the fuzz target. The old test "the window is clamped to the supported range" asserted
   the very behaviour that was wrong (999 days became 30) and now asserts the report.
 
+### Every regeneration over existing text asks the same question
+- **Problem:** after a regeneration that broke off, "Tekrar dene" started a second paid generation without asking (the retry ran
+  `run(lastRegenerate)` and skipped the confirmation that the button had asked for, or had not needed for the model's own text).
+- **Decision:** while there is text, every regeneration goes through the one confirmation ("İçerik yeniden üretilsin mi?"): the
+  "İçeriği yeniden üret" button, "Tekrar dene" after a failure (before anything was written, or in the middle of the text) and the
+  "Yeniden üret" of the "içeriği zaten var" note. The retry sends the same kind of request as the one that failed: with text present
+  it is a regeneration (the server refuses a plain generation while text exists), so it asks and, confirmed, sends `regenerate=true`.
+  A first generation (no text yet) still starts without a question.
+- **A change of behaviour that was chosen:** the button used to replace the model's own *untouched* text without asking, because
+  nothing of the marketer's was lost. It asks now too: the request was "every regeneration over existing content asks the same
+  question", and a regeneration is a paid model call, not only a replacement. The dialog's wording for that case is the old
+  "Mevcut metin yenisiyle değiştirilir."
+- **Tests:** the untouched-text case now asks and replaces on confirm; "Tekrar dene" after a refusal and after a stream that broke off
+  mid-text opens the dialog, starts nothing before the answer, does nothing on "Vazgeç", and sends `regenerate=true` on confirm. The three
+  fail on the old code.
+
 ## Open issues
 
 (Things that were not finished or need a human decision; one entry per issue. The first block comes from the

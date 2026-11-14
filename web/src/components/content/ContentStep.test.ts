@@ -362,13 +362,54 @@ describe('the content step, making the content again', () => {
     })
   const dialog = (w: Wrapper) => w.get('dialog').element as HTMLDialogElement
 
-  it('replaces the model’s own untouched text without asking', async () => {
+  it('asks first even when the text is the model’s own and untouched (it costs a model call), and replaces on confirm', async () => {
     const { wrapper, api } = await openContent()
     await button(wrapper, 'İçeriği yeniden üret').trigger('click')
     await flushPromises()
-    expect(dialog(wrapper).open).toBe(false)
+    expect(dialog(wrapper).open).toBe(true)
+    expect(wrapper.get('dialog').text()).toContain('Mevcut metin yenisiyle değiştirilir')
+    expect(api.callsTo(STREAM)).toHaveLength(0)
+    await wrapper.findAll('dialog button')[1]?.trigger('click') // Yeniden üret
+    await flushPromises()
     expect(api.callsTo(STREAM)[0]?.path).toBe('/api/campaigns/7/content/stream?regenerate=true')
     await vi.waitFor(() => expect(control(wrapper, 'sms').value).toBe('Yeni'))
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['a failure before anything was written', 'refused'],
+    ['a connection that broke off in the middle of the text', 'broken'],
+  ])('asks the same question again on "Tekrar dene" after %s, and starts nothing before the answer', async (_name, kind) => {
+    const stream = openSse()
+    const { wrapper, api } = await open('/campaigns/7?step=content', {
+      'GET /api/campaigns/7': { body: contentReady },
+      [STREAM]: kind === 'refused' ? error(503, 'llm_unavailable') : () => stream.response,
+    })
+    await button(wrapper, 'İçeriği yeniden üret').trigger('click')
+    await wrapper.findAll('dialog button')[1]?.trigger('click') // Yeniden üret: the first (confirmed) regeneration
+    await vi.waitFor(() => expect(api.callsTo(STREAM)).toHaveLength(1))
+    if (kind === 'broken') {
+      stream.push(attempt(1))
+      stream.push(delta('sms', 'Yarım '))
+      stream.close()
+    }
+    await vi.waitFor(() => expect(wrapper.find('[role="alert"]').exists()).toBe(true))
+    expect(dialog(wrapper).open).toBe(false)
+
+    // The retry is a second paid generation over text that exists: it asks, and the question can be declined.
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await flushPromises()
+    expect(dialog(wrapper).open).toBe(true)
+    expect(api.callsTo(STREAM)).toHaveLength(1)
+    await wrapper.get('dialog button').trigger('click') // Vazgeç
+    await flushPromises()
+    expect(api.callsTo(STREAM)).toHaveLength(1)
+
+    // Confirmed, it goes out as a regeneration (the server refuses a plain request while text exists).
+    await wrapper.get('[role="alert"] button').trigger('click')
+    await wrapper.findAll('dialog button')[1]?.trigger('click')
+    await vi.waitFor(() => expect(api.callsTo(STREAM)).toHaveLength(2))
+    expect(api.callsTo(STREAM)[1]?.path).toBe('/api/campaigns/7/content/stream?regenerate=true')
     wrapper.unmount()
   })
 

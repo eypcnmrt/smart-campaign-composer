@@ -18,8 +18,8 @@ import FieldEditor from './FieldEditor.vue'
 //  * Generation starts only on a request: `autostart` is set by the audience step's "İçeriği üret" button, never by opening
 //    the page, so a reload or a shared link costs no model call.
 //  * While the model writes, the same fields show its text, read-only and with live counters; the editor is locked.
-//  * A new generation replaces the text. When that would throw away the marketer's work (an edited text, or edits not saved
-//    yet) the replacement waits for a confirmation.
+//  * A new generation replaces the text and costs a model call, so while there is text every regeneration waits for the same
+//    confirmation: the button, the retry after a generation that broke off, and the note that the text exists already.
 const props = defineProps<{ campaign: Campaign; autostart?: boolean }>()
 const emit = defineEmits<{
   updated: [campaign: Campaign]
@@ -70,10 +70,8 @@ function edit(field: ContentField, value: string): void {
 // ---- Generation ----
 
 const confirmOpen = shallowRef(false)
-let lastRegenerate = false
 
 async function run(regenerate: boolean): Promise<void> {
-  lastRegenerate = regenerate
   saved.value = false
   const next = await stream.start(props.campaign.id, { regenerate })
   if (next) emit('updated', next)
@@ -81,13 +79,18 @@ async function run(regenerate: boolean): Promise<void> {
   else if (mayBeOutOfDate(stream.error.value)) emit('reload')
 }
 
-/** Replacing text the marketer wrote or changed asks first; replacing the model's own untouched text does not. */
+/** Replacing existing text (the model's own, an edited one or unsaved edits) always asks first; a first generation does not. */
 function generate(regenerate: boolean): void {
-  if (regenerate && (props.campaign.content_origin === 'edited' || dirty.value)) {
+  if (regenerate) {
     confirmOpen.value = true
     return
   }
-  void run(regenerate)
+  void run(false)
+}
+
+/** "Tekrar dene" after a failure: the same kind of request as the one that failed, and with text present the same question. */
+function retry(): void {
+  generate(hasContent.value)
 }
 
 function confirmed(): void {
@@ -281,7 +284,7 @@ defineExpose({ dirty })
         </form>
       </template>
 
-      <ErrorPanel v-if="stream.status.value === 'error' && !contentExists" :error="stream.error.value" @retry="run(lastRegenerate)" />
+      <ErrorPanel v-if="stream.status.value === 'error' && !contentExists" :error="stream.error.value" @retry="retry" />
       <StatusNote v-if="contentExists" tone="warning" title="Bu kampanyanın içeriği zaten var" announce>
         <p>Siz sayfayı açtıktan sonra içerik üretilmiş. Mevcut içeriği görebilir ya da yenisini yazdırabilirsiniz.</p>
         <p class="actions">
