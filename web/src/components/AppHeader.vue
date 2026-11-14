@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { ConfigState } from '@/composables/useConfig'
 import LlmBadge from './LlmBadge.vue'
+import StatusIcon from './ui/StatusIcon.vue'
 
 defineProps<{ configState: ConfigState }>()
 defineEmits<{ retry: [] }>()
@@ -28,7 +29,8 @@ defineEmits<{ retry: [] }>()
       <div class="model" aria-live="polite">
         <LlmBadge v-if="configState.status === 'ready'" :mode="configState.config.llm_mode" :model="configState.config.model" />
         <span v-else-if="configState.status === 'error'" class="model__error">
-          Sunucuya ulaşılamıyor.
+          <StatusIcon tone="danger" />
+          <span>Sunucuya ulaşılamıyor.</span>
           <button type="button" class="link-button" @click="$emit('retry')">Yeniden dene</button>
         </span>
         <span v-else class="model__status">Model bilgisi yükleniyor…</span>
@@ -126,8 +128,16 @@ defineEmits<{ retry: [] }>()
 }
 
 .model__error {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
   color: var(--danger);
   font-weight: 600;
+}
+
+/* On the error tint the retry link keeps the state colour, so it stays readable (5.5:1) and recognisable as a link. */
+.model__error .link-button {
+  color: inherit;
 }
 
 @media (max-width: 40rem) {

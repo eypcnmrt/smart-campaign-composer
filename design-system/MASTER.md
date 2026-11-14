@@ -106,21 +106,57 @@ pattern and a pink brutalist style, which do not fit, so it was discarded.
 | ink / ink-soft | `#14302A` / `#44605A` | text / secondary text (6.3:1 on paper) |
 | brand / brand-strong / tint | `#0E6B58` / `#0A5445` / `#DCEFE8` | actions and links / hover / selected |
 | mark | `#F3E55B` | the highlighter: personalization variables, the live-writing caret, the "Mock LLM" badge |
-| ok, warn, danger (+ background) | `#17653A`/`#DDF1E4`, `#7A4B00`/`#FCEBC4`, `#A8261D`/`#FBE3E0` | state; always with text or an icon, never colour alone |
+| success (+ bg, border) | `#2B6A17` / `#E4F2D6` / `#4C9A2A` | sent, completed, ok: see "State colours" |
+| warning (+ bg, border) | `#7F4100` / `#FFEACB` / `#BF6A0C` | matches_everyone, unsupported_criteria, provider unreachable, completed with failures |
+| danger (+ bg, border) | `#A8261D` / `#FBE3E0` / `#C93A30` | no_recipients, failed, worker down, request errors |
 | line / line-strong | `#CBD5CE` / `#74897F` | decorative rules / input and control borders (3:1 or better) |
 | focus | `#0B57D0` | 3 px ring, offset 2 px, on every focusable element |
+| font-mono | `ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace` | raw JSON rule panel and code; the system's fonts, no font package |
 
-Contrast was computed, not guessed: every text pair is at least 5.4:1, control borders at least 3.4:1, the focus ring at least 5.3:1.
+Contrast was computed, not guessed, and `web/src/styles/tokens.test.ts` re-checks it from the CSS on every test run: every text pair
+is at least 5.4:1, control borders at least 3.4:1, the focus ring at least 5.3:1. Editing a colour below those values fails the tests.
+
+### State colours
+Four things look alike if they share a hue, so each has its own, and the tests keep them apart:
+
+| Meaning | Colour | Where it may appear |
+|---|---|---|
+| Act, choose, navigate | action teal (hue 168) | buttons, links, the selected step, the info note |
+| Done, delivered (ok, sent, completed) | success leaf green (hue 106) | only as a tinted badge or note with a check icon, never on a control, never as a link |
+| Look before you go on | warning amber-orange (hue 31) | matches_everyone, unsupported_criteria, provider_unreachable, retrying, completed_with_failures |
+| Something is wrong or blocked | danger red (hue 4) | no_recipients, failed, worker_down, request errors, invalid fields |
+| Not final text | highlighter yellow (hue 54) | personalization variables, live-writing caret, "Mock LLM". Never used for a warning |
+
+- **Never colour alone.** A state is an icon plus a word, always: circle with a check (success), triangle (warning), octagon with a
+  cross (danger), circle with an i (info), clock (waiting). `StatusBadge` takes a required label, and `StatusNote` adds a hidden word
+  ("Hata:", "Uyarı:") for screen readers. A test checks that every tone draws a different shape.
+- Text and icons take the state colour on its tint, on white, on the page and on the sunken well, all at 5.5:1 or more.
+- Messages that appear after an action are live regions (`role="alert"` for danger, `role="status"` otherwise); messages that are
+  already on the page when it opens are not.
 
 ### Type
 Schibsted Grotesk 600-700 for page titles, step titles and big numbers (tight tracking, balanced wrapping); Source Sans 3 for
-everything else at 16 px / 1.5, 14 px for dense data. Tabular numerals wherever numbers line up. Line length stays under 75 characters.
+everything else at 16 px / 1.5, 14 px for dense data. Line length stays under 75 characters.
 `lang="tr"` is set on the document, so case conversion follows Turkish rules (i becomes İ).
+
+**Numbers that change** (character counters, audience counts, dashboard figures, rates) take the `.num` class, which is
+`font-variant-numeric: tabular-nums`, so digits do not jump while a page polls. Checked in the font files and in a browser (digit
+strings such as 0000000000 and 1111111111 measured at weights 400, 600 and 700): Source Sans 3 has tabular digits by default (the
+latin subset has no `tnum` feature, so the class changes nothing there and is harmless), and Schibsted Grotesk has proportional
+digits by default and tabular ones with `tnum` (203.1 px for every digit string at 32 px). Both fonts support it, but Schibsted's
+tabular digits give the separator a full digit cell ("3 . 412", "1 . 111"), which looks poor in a large figure. So `.num` also sets
+the body font: counters, audience counts and dashboard figures are Source Sans 3 (600-700 for big ones), never Schibsted.
+
+**Raw JSON** (the rule panel) and code use `--font-mono`, the system monospace stack; no monospace font package is added.
 
 ### Layout
 Slim header (56 px): wordmark, Kampanyalar, Yeni kampanya, and on the right the model: "Mock LLM" badge when no key is set, plus the model name.
-Campaign pages: a step rail on the left (Brief, Kitle, İçerik, Onay, Gönderim) as a vertical line with a mark per step, content in a
-column of at most 760 px, everything left-aligned. Under 960 px the rail becomes a compact horizontal stepper above the content.
+Campaign pages: a step rail on the left (Brief, Kitle, İçerik, Onay, Gönderim) as a vertical line with a mark per step, everything
+left-aligned. Under 960 px the rail becomes a compact horizontal stepper above the content.
+
+**Two measures** (`PageColumn`): brief, audience, content and approval stay in a narrow column of 760 px (forms and reading, lines
+under 75 characters). The campaign list and the delivery dashboard use a wide column of 1120 px, so a table and two channels side by
+side are not squeezed. The page itself is 1120 px plus its gutters, so the header lines up with the wide column.
 Panels are ruled sections with a 1 px border and a 6 px radius, not a grid of identical cards; inputs and chips have a 3 px radius.
 
 ### What makes it this product's

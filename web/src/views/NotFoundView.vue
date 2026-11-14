@@ -1,8 +1,10 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import PageColumn from '@/components/ui/PageColumn.vue'
+</script>
 
 <template>
-  <section>
+  <PageColumn>
     <h1>Sayfa bulunamadı</h1>
     <p><RouterLink :to="{ name: 'campaigns' }">Kampanyalara dön</RouterLink></p>
-  </section>
+  </PageColumn>
 </template>

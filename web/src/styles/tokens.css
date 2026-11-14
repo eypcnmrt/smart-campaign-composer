@@ -29,20 +29,30 @@
   --mark: #f3e55b;
   --on-mark: var(--text);
 
-  /* State: always paired with text or an icon */
-  --ok: #17653a;
-  --ok-bg: #ddf1e4;
-  --warn: #7a4b00;
-  --warn-bg: #fcebc4;
-  --warn-border: #d9a93f;
+  /*
+   * State colours. Each state has one text/icon colour, a tint behind it and a border, and each has its own hue so that no
+   * state can be mistaken for another or for the action colour: action teal (hue 168), success leaf green (106),
+   * warning amber-orange (31), danger red (4), and the highlighter yellow (54) that only means "not final text".
+   * A state is never shown by colour alone: it always comes with its icon (see StatusIcon) and a text.
+   * Text and icon colours reach 5.5:1 or more on their tint, on white, on the page and on the sunken well.
+   */
+  --success: #2b6a17;
+  --success-bg: #e4f2d6;
+  --success-border: #4c9a2a;
+  --warning: #7f4100;
+  --warning-bg: #ffeacb;
+  --warning-border: #bf6a0c;
   --danger: #a8261d;
   --danger-bg: #fbe3e0;
+  --danger-border: #c93a30;
 
   --focus: #0b57d0;
 
   /* Type */
   --font-display: 'Schibsted Grotesk Variable', 'Segoe UI', system-ui, sans-serif;
   --font-body: 'Source Sans 3 Variable', 'Segoe UI', system-ui, sans-serif;
+  /* Raw JSON and code: the system's own monospace fonts, no font package. */
+  --font-mono: ui-monospace, 'Cascadia Mono', 'Segoe UI Mono', SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
   --text-xs: 0.8125rem;
   --text-sm: 0.875rem;
   --text-base: 1rem;
@@ -71,8 +81,11 @@
 
   /* Layout */
   --header-h: 3.5rem;
-  --page-max: 72.5rem;
-  --column-max: 47.5rem;
+  /* Two measures: reading and forms (brief, content, approval) stay narrow; the list and the dashboard get room for a
+     table and two channels side by side. The page is as wide as the wide measure plus its gutters. */
+  --column-narrow: 47.5rem;
+  --column-wide: 70rem;
+  --page-max: calc(var(--column-wide) + 2 * var(--gutter));
   --rail-w: 14.5rem;
   --gutter: 1rem;
   --control-h: 2.5rem;

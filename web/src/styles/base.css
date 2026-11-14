@@ -96,9 +96,26 @@ button:disabled {
   border: 0;
 }
 
-/* Numbers that line up in columns and counters that must not jitter. */
+/*
+ * Numbers that change while someone watches (character counters, audience counts, dashboard figures, rates) take this
+ * class so the digits do not jump. Measured in a browser: Source Sans 3 has tabular digits by default (it has no tnum
+ * feature, so tabular-nums changes nothing there). Schibsted Grotesk has proportional digits and does switch to tabular
+ * ones with tnum, but then the separator gets a full digit cell ("3 . 412"), which is poor in large figures. So these
+ * numbers are always set in the body font, whatever the size, and tabular-nums stays as a guarantee.
+ */
 .num {
+  font-family: var(--font-body);
   font-variant-numeric: tabular-nums;
+}
+
+/* Raw JSON and code in the system's monospace fonts. */
+pre,
+code,
+kbd,
+samp,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
 }
 
 /* Buttons. Primary is the one action of a screen; the rest are quiet. */

@@ -1,8 +1,10 @@
-<script setup lang="ts"></script>
+<script setup lang="ts">
+import PageColumn from '@/components/ui/PageColumn.vue'
+</script>
 
 <template>
-  <section>
+  <PageColumn wide>
     <h1>Kampanyalar</h1>
     <p>Kampanya listesi sonraki aşamada eklenecek.</p>
-  </section>
+  </PageColumn>
 </template>

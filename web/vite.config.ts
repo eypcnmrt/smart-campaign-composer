@@ -18,6 +18,9 @@ export default defineConfig({
     strictPort: true,
     // The dev server forwards /api (including the event stream) to the Go API.
     proxy: { '/api': { target: apiTarget } },
+    // Bind mounts from Windows send no file events into the container, so the dev container asks for polling
+    // (scripts/web.sh dev sets it); without it the server would keep serving stale files after an edit.
+    watch: process.env.WATCH_POLLING === '1' ? { usePolling: true, interval: 300 } : undefined,
   },
   build: {
     target: 'es2023',
@@ -28,5 +31,7 @@ export default defineConfig({
     environment: 'happy-dom',
     include: ['src/**/*.test.ts'],
     restoreMocks: true,
+    // Vitest replaces CSS with an empty string unless told otherwise; the token tests read tokens.css as text (?raw).
+    css: { include: [/\.css\?raw$/] },
   },
 })

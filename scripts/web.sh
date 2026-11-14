@@ -28,7 +28,7 @@ if [ "$1" = "dev" ]; then
 	exec docker run --rm \
 		--security-opt=no-new-privileges \
 		-v "$src:/app" -v scc-web-node-modules:/app/node_modules -v scc-npm-cache:/root/.npm -w /app \
-		-e npm_config_ignore_scripts=true -e API_PROXY_TARGET=http://host.docker.internal:8080 \
+		-e npm_config_ignore_scripts=true -e API_PROXY_TARGET=http://host.docker.internal:8080 -e WATCH_POLLING=1 \
 		-p 127.0.0.1:5173:5173 \
 		"$IMAGE" npm run dev -- --host 0.0.0.0
 fi
