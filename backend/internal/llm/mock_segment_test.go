@@ -154,7 +154,33 @@ func TestMock_segmentNeverInvertsOrDropsACriterion(t *testing.T) {
 		{brief: "İzmir'deki müşterilere 50 TL indirim kuponu", conds: []string{"city eq İzmir"}},
 
 		// --- other things the mock does not read are reported
-		{brief: "İzmir'deki en az 3 sipariş veren müşteriler", conds: []string{"city eq İzmir"}, unsupported: []string{"sipariş sayısı"}},
+		// --- a number of orders is read with its direction (the golden brief ve-email, and the other ways to say it)
+		{brief: "Ankara'da yaşayan ve en az 5 siparişi olan müşterilerimize sadece e-posta ile teşekkür kampanyası göndermek istiyorum.", conds: []string{"city eq Ankara", "total_orders gte 5"}},
+		{brief: "İzmir'deki en az 3 sipariş veren müşteriler", conds: []string{"city eq İzmir", "total_orders gte 3"}},
+		{brief: "5'ten fazla siparişi olan müşteriler", conds: []string{"total_orders gt 5"}},
+		{brief: "5 siparişten fazla veren müşteriler", conds: []string{"total_orders gt 5"}},
+		{brief: "5 sipariş ve üzeri veren müşteriler", conds: []string{"total_orders gte 5"}},
+		{brief: "5 veya daha fazla siparişi olan müşteriler", conds: []string{"total_orders gte 5"}},
+		{brief: "en az beş siparişi olan müşteriler", conds: []string{"total_orders gte 5"}},
+		{brief: "en fazla 2 siparişi olan müşteriler", conds: []string{"total_orders lte 2"}},
+		{brief: "3'ten az siparişi olan müşteriler", conds: []string{"total_orders lt 3"}},
+		{brief: "3 siparişten az veren müşteriler", conds: []string{"total_orders lt 3"}},
+		{brief: "tam 4 siparişi olan müşteriler", conds: []string{"total_orders eq 4"}},
+		{brief: "10 alışveriş ve üzeri yapan müşteriler", conds: []string{"total_orders gte 10"}},
+		// a negated verb is the other side of the number, not a second criterion
+		{brief: "en az 5 siparişi olmayan müşteriler", conds: []string{"total_orders lt 5"}},
+		{brief: "en fazla 5 sipariş vermeyen müşteriler", conds: []string{"total_orders gt 5"}},
+		{brief: "tam 4 siparişi olmayan müşteriler", conds: []string{"total_orders neq 4"}},
+		// it works with the purchase event of the same brief, and the order words do not make a purchase event
+		{brief: "son 30 günde sipariş veren ve en az 3 siparişi olan müşteriler", conds: []string{"purchase performed 30 days", "total_orders gte 3"}},
+		{brief: "en az 3 siparişi olan müşteriler", conds: []string{"total_orders gte 3"}},
+		// no direction, two directions that disagree, or a number out of range: reported, never guessed
+		{brief: "3 sipariş veren müşteriler", conds: []string{catchAll}, unsupported: []string{"sipariş sayısı", "yön belirtilmemiş"}},
+		{brief: "İzmir'deki 3 siparişi olan müşteriler", conds: []string{"city eq İzmir"}, unsupported: []string{"sipariş sayısı", "yön belirtilmemiş"}},
+		{brief: "en az 3'ten fazla siparişi olan müşteriler", conds: []string{catchAll}, unsupported: []string{"sipariş sayısı", "çelişen"}},
+		{brief: "en az 99999999999 siparişi olan müşteriler", conds: []string{catchAll}, unsupported: []string{"sipariş sayısı", "aralığın dışında"}},
+		// "bir" is an article more often than a number: without a direction it is left alone, and the purchase is read as usual
+		{brief: "son 7 günde bir sipariş veren müşteriler", conds: []string{"purchase performed 7 days"}},
 		{brief: "İzmir'deki kadın müşteriler", conds: []string{"city eq İzmir"}, unsupported: []string{"Cinsiyet ve yaş"}},
 		{brief: "25-35 yaşındaki müşteriler", conds: []string{catchAll}, unsupported: []string{"Cinsiyet ve yaş"}},
 

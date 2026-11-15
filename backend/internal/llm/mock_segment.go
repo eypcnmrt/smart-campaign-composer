@@ -33,10 +33,7 @@ var (
 	calendarRe = regexp.MustCompile(`\b(?:(?:gecen|bu|onceki)\s+(?:hafta|ay|yil)|dun|bugun)\b`)
 
 	// An amount: 500 TL, 5.000 TL, 1,5 bin TL, 2 milyon lira.
-	amountRe = regexp.MustCompile(`(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(?:\s*(bin|milyon))?\s*(?:tl|lira|₺)`)
-	// An order count: "3 sipariş", "5 adet alışveriş".
-	orderCountRe = regexp.MustCompile(`\d+(?:'[a-z]+)?\s*(?:adet\s+)?(?:siparis|alisveris)\w*`)
-
+	amountRe      = regexp.MustCompile(`(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?(?:\s*(bin|milyon))?\s*(?:tl|lira|₺)`)
 	clauseSplitRe = regexp.MustCompile(`[;:!?()\n]|[,.]\s|[,.]$`)
 )
 
@@ -177,11 +174,8 @@ func demoSegment(brief string) string {
 	events := map[string]*eventUse{} // cart_add, purchase
 	eventOrder := []string{}
 
-	// A count of orders is a criterion the demo does not read; say so, and keep the words out of the purchase reading.
-	if m := orderCountRe.FindString(b); m != "" {
-		cr.flag(fmt.Sprintf("Sipariş sayısı kriteri (%q) demo modunda çözümlenemiyor", m))
-		b = orderCountRe.ReplaceAllString(b, " ")
-	}
+	// A number of orders is read with its direction (mock_orders.go), or reported; the words are kept out of the purchase reading.
+	b, orderConds := readOrderCounts(b, &cr)
 
 	// The period of the whole brief, used by an event whose clause names none.
 	global := findWindow(b, &cr)
@@ -394,7 +388,10 @@ func demoSegment(brief string) string {
 		cr.add(map[string]any{"type": "event", "event": name, "op": op, "within_days": use.days}, part, describe)
 	}
 
-	// Amounts.
+	// Numbers of orders, then amounts.
+	for _, add := range orderConds {
+		add()
+	}
 	readAmounts(b, &cr)
 
 	for _, tok := range strings.Fields(b) {
@@ -542,7 +539,7 @@ func readAmounts(b string, cr *criteria) {
 }
 
 func flipOp(op string) string {
-	return map[string]string{"gte": "lt", "gt": "lte", "lte": "gt", "lt": "gte"}[op]
+	return map[string]string{"gte": "lt", "gt": "lte", "lte": "gt", "lt": "gte", "eq": "neq", "neq": "eq"}[op]
 }
 
 // amountDirection reads the words around an amount: "üzeri", "en az" (at least), "altında", "en fazla" (at most).
