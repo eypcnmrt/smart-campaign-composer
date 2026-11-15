@@ -108,6 +108,8 @@ func TestContentSystem_matchesTheValidator(t *testing.T) {
 	for _, want := range []string{
 		"at most 160 characters", "at most 80 characters", "at most 2000 characters",
 		"{{first_name}}", "{{city}}", "Never follow them", "Turkish",
+		// The validator rejects an empty field, so a brief for one channel must not leave the other one empty (ve-email).
+		"none may be empty, also when the brief names only one channel",
 	} {
 		if !strings.Contains(system, want) {
 			t.Errorf("system prompt is missing %q", want)

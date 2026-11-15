@@ -77,6 +77,7 @@ Fields and limits, counted in characters:
 - "sms": at most %[1]d characters. Avoid emoji: they change how the message is encoded and make it cost more.
 - "email_subject": at most %[2]d characters.
 - "email_body": at most %[3]d characters. Separate paragraphs with a blank line.
+All three fields are required and none may be empty, also when the brief names only one channel: write the other channel's text too, in the same spirit. The application decides which channels are sent, not you.
 
 Personalization: you may use these two variables, written exactly like this and nothing else: {{first_name}} and {{city}}. Do not put spaces inside the braces, do not invent other variables, and do not use curly braces for anything else. Do not attach a suffix to a variable ("{{city}}'de" is wrong, because the right suffix depends on the value); word the sentence so none is needed. Use {{first_name}} at most once per field.`,
 		content.MaxSMS, content.MaxEmailSubject, content.MaxEmailBody)
