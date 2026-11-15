@@ -130,6 +130,10 @@ func (c *Composer) Segment(ctx context.Context, brief string) (SegmentResult, er
 			if err == nil {
 				err = segment.Validate(rule)
 			}
+			if err == nil {
+				// The marketer reads the explanation: a city it names must be in the rule (the repair loop gets the problem).
+				err = segment.CheckExplanation(rule)
+			}
 			if err != nil {
 				return segment.Rule{}, problemsOf(err)
 			}

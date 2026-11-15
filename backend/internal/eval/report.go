@@ -16,6 +16,7 @@ import (
 var columnHeader = map[string]string{
 	CheckSegmentValid: "valid", CheckRequired: "required", CheckNoReversed: "no-reversed", CheckNoInvented: "no-invented",
 	CheckNoFiller: "no-filler", CheckUnsupported: "unsupported", CheckWarnings: "warnings", CheckChannels: "channels",
+	CheckExplanation:  "explanation",
 	CheckContentValid: "c-valid", CheckNoCutoff: "c-no-cutoff", CheckNoForbidden: "c-no-forbidden",
 	CheckLanguage: "c-language",
 }

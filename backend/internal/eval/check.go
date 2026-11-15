@@ -26,6 +26,7 @@ const (
 	CheckUnsupported  = "unsupported"
 	CheckWarnings     = "warnings"
 	CheckChannels     = "channels"
+	CheckExplanation  = "explanation_matches_rule"
 	CheckContentValid = "content_valid"
 	CheckNoCutoff     = "no_refusal_or_cutoff"
 	CheckNoForbidden  = "no_forbidden_text"
@@ -34,7 +35,7 @@ const (
 
 // Names of the checks in report order.
 var (
-	SegmentChecks = []string{CheckSegmentValid, CheckRequired, CheckNoReversed, CheckNoInvented, CheckNoFiller, CheckUnsupported, CheckWarnings, CheckChannels}
+	SegmentChecks = []string{CheckSegmentValid, CheckRequired, CheckNoReversed, CheckNoInvented, CheckNoFiller, CheckUnsupported, CheckWarnings, CheckChannels, CheckExplanation}
 	ContentChecks = []string{CheckContentValid, CheckNoCutoff, CheckNoForbidden, CheckLanguage}
 )
 
@@ -414,7 +415,23 @@ func CheckSegment(rule segment.Rule, aud campaign.Audience, alone []campaign.Aud
 		check(CheckUnsupported, unsupportedProblems(rule, e)),
 		check(CheckWarnings, warningProblems(rule, aud, e)),
 		check(CheckChannels, channelProblems(rule, e)),
+		check(CheckExplanation, explanationProblems(rule)),
 	}
+}
+
+// explanationProblems is the application's own consistency check (segment.CheckExplanation: every city the explanation names is
+// in a city condition), run again on the final rule. The application already sends such a rule back to the model, so this one
+// can only fail when the repair loop let a rule through, which is what it is here to notice.
+func explanationProblems(rule segment.Rule) []string {
+	errs, ok := errors.AsType[segment.ValidationErrors](segment.CheckExplanation(rule))
+	if !ok {
+		return nil
+	}
+	out := make([]string, len(errs))
+	for i, e := range errs {
+		out[i] = e.Error()
+	}
+	return out
 }
 
 func dedupe(in []string) []string {

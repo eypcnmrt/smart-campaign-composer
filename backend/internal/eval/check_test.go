@@ -306,6 +306,35 @@ func TestCheckSegment_filler(t *testing.T) {
 	}
 }
 
+// The explanation names a city the rule does not have (olmayan-kriter: İstanbul in the sentence, a purchase condition in the
+// rule): the check fails and says which city. A rule that has the city passes.
+func TestCheckSegment_explanationMatchesRule(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		conditions string
+		wantFail   bool
+	}{
+		{"the city is missing from the rule", `[{"type":"event","event":"purchase","op":"performed","within_days":30}]`, true},
+		{"no condition at all", `[]`, true},
+		{"the city is in the rule", `[{"type":"attribute","field":"city","op":"neq","value":"İstanbul"}]`, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule := ruleOf(t, tt.conditions, `["25 yaş üstü"]`, `[]`)
+			rule.Explanation = "İstanbul'daki müşteriler için yeni koleksiyon"
+			checks := CheckSegment(rule, someUsers, aloneSome(rule), Expect{FreeConditions: true})
+			if got := failed(checks)[CheckExplanation]; got != tt.wantFail {
+				t.Fatalf("%s failed = %v, want %v", CheckExplanation, got, tt.wantFail)
+			}
+			if d := detailOf(checks, CheckExplanation); tt.wantFail && !strings.Contains(d, `"İstanbul"`) {
+				t.Errorf("detail = %q, want it to name the city", d)
+			}
+		})
+	}
+}
+
 // countingAuditor says what each rule it is asked about reaches, and what it was asked.
 type countingAuditor struct {
 	asked []segment.Rule
