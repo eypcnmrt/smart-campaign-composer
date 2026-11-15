@@ -80,6 +80,9 @@ func TestRunner_aFailedSegmentSkipsTheContent(t *testing.T) {
 	}
 }
 
+// pricedModel is the model the priced client reports: the dearer one, so the arithmetic below does not move with the default.
+const pricedModel = "claude-opus-5-5"
+
 // priced answers with fixed text and a fixed usage, so the budget can be tested without a network.
 type priced struct {
 	in, out int64
@@ -87,10 +90,10 @@ type priced struct {
 }
 
 func (*priced) Mode() llm.Mode { return llm.ModeAnthropic }
-func (*priced) Model() string  { return llm.DefaultModel }
+func (*priced) Model() string  { return pricedModel }
 func (p *priced) resp(text string) llm.Response {
 	p.calls++
-	return llm.Response{Text: text, Model: llm.DefaultModel, ServedBy: llm.DefaultModel, InputTokens: p.in, OutputTokens: p.out}
+	return llm.Response{Text: text, Model: pricedModel, ServedBy: pricedModel, InputTokens: p.in, OutputTokens: p.out}
 }
 func (p *priced) Complete(context.Context, llm.Request) (llm.Response, error) {
 	return p.resp(goodRule), nil
@@ -104,7 +107,7 @@ func TestRunner_stopsWhenTheBudgetIsSpent(t *testing.T) {
 	t.Parallel()
 	// One segment call costs 4 + 20 = $24 with these tokens; the limit is $10.
 	client := &priced{in: 1_000_000, out: 1_000_000}
-	r := NewRunner(client, fixedAuditor{someUsers}, Config{Model: llm.DefaultModel, MaxUSD: 10})
+	r := NewRunner(client, fixedAuditor{someUsers}, Config{Model: pricedModel, MaxUSD: 10})
 	second := izmirBrief
 	second.ID = "second"
 	res, err := r.Run(t.Context(), []Brief{izmirBrief, second}, nil)
@@ -131,7 +134,7 @@ func TestRunner_stopsWhenTheBudgetIsSpent(t *testing.T) {
 
 func TestPlanFor(t *testing.T) {
 	t.Parallel()
-	p := PlanFor(llm.DefaultModel, 14)
+	p := PlanFor("claude-opus-5-5", 14)
 	if p.PlannedCalls != 28 || p.MaxCalls != 84 {
 		t.Errorf("calls = %d / %d, want 28 / 84", p.PlannedCalls, p.MaxCalls)
 	}
@@ -140,6 +143,10 @@ func TestPlanFor(t *testing.T) {
 	}
 	if cheaper := PlanFor("claude-sonnet-5-5", 14); cheaper.TypicalUSD >= p.TypicalUSD {
 		t.Errorf("the cheaper model must cost less: %v vs %v", cheaper.TypicalUSD, p.TypicalUSD)
+	}
+	// A model the table does not know is estimated at the dearest price, not at the default's.
+	if unknown := PlanFor("claude-future-9", 14); !near(unknown.TypicalUSD, p.TypicalUSD) {
+		t.Errorf("an unknown model is estimated at %v, want the dearest price %v", unknown.TypicalUSD, p.TypicalUSD)
 	}
 }
 

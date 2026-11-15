@@ -10,6 +10,7 @@
 #   make eval       the golden set (eval/golden.json) against the REAL model, scored by deterministic checks; costs money, so it
 #                   needs LLM_MODE=anthropic and a key in the dotenv file: make eval LLM_MODE=anthropic (EVAL_MAX_USD=1.00 is the
 #                   budget, EVAL_MODEL=... another model, EVAL_ARGS="-only id1,id2" some briefs). Results go to eval/results/.
+#                   The model is the application's default, claude-sonnet-5-5 (EVAL_MODEL=claude-opus-5-5 for Opus).
 #                   make eval EVAL_ARGS="-mock" is a free dry run. Not part of `make test` or of CI.
 #
 # Local, quick, without Docker (Go installed; the integration tests are not included):

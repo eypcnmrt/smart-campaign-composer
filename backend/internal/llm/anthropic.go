@@ -96,9 +96,10 @@ func (a *Anthropic) Mode() Mode { return ModeAnthropic }
 // Model implements Client.
 func (a *Anthropic) Model() string { return a.model }
 
-// params builds the request. Thinking is left unset: on Claude Opus 5.5 it is
-// always on and adaptive, and effort is the only control. No assistant prefill
-// and no forced tool use, both of which that model rejects; the JSON shape
+// params builds the request. Thinking is left unset: on Claude Sonnet 5.5 and
+// Claude Opus 5.5 it is adaptive when omitted (an explicit "disabled" is a 400 on
+// both), and effort is the only control. No assistant prefill, no forced tool use
+// and no sampling parameters, all of which those models reject; the JSON shape
 // comes from structured outputs (output_config.format) instead.
 func (a *Anthropic) params(req Request, defaultMaxTokens int64) anthropic.BetaMessageNewParams {
 	maxTokens := req.MaxTokens

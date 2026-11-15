@@ -226,8 +226,8 @@ func TestAnthropic_Complete(t *testing.T) {
 	}
 
 	body := call.Body
-	if body["model"] != "claude-opus-5-5" {
-		t.Errorf("model = %v", body["model"])
+	if body["model"] != DefaultModel {
+		t.Errorf("model = %v, want the default %s", body["model"], DefaultModel)
 	}
 	if body["max_tokens"] != float64(16000) {
 		t.Errorf("max_tokens = %v, want 16000: thinking tokens count toward it, so it must not be small", body["max_tokens"])

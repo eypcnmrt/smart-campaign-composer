@@ -16,7 +16,7 @@ Insider One AI Developer case'i. Pazarlamacının doğal dille yazdığı brief,
 - [ ] Doğrulama hatası olursa hata mesajı Claude'a geri verilip onarım deneniyor (en fazla 2 kez); yine olmazsa kontrollü hata
 - [ ] SMS/email içeriği SSE ile ekrana stream ediliyor
 - [ ] `LLMClient` interface'i var: gerçek Anthropic ve mock implementasyonu. Testler key olmadan çalışıyor
-- [ ] Refusal / `max_tokens` / timeout / 429 durumları ele alınıyor. Model `ANTHROPIC_MODEL` env'den geliyor (varsayılan `claude-opus-5-5`)
+- [ ] Refusal / `max_tokens` / timeout / 429 durumları ele alınıyor. Model `ANTHROPIC_MODEL` env'den geliyor (varsayılan `claude-sonnet-5-5`; `claude-opus-5-5` seçilebilir)
 - [ ] Key yoksa uygulama mock LLM modunda açılıyor ve UI'da "Mock LLM" rozeti görünüyor
 
 ### Mimari ve kararlar — %20

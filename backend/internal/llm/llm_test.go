@@ -154,8 +154,8 @@ func TestFromEnv_invalidModeIsNotEchoed(t *testing.T) {
 
 func TestDefaultModel(t *testing.T) {
 	t.Parallel()
-	if DefaultModel != "claude-opus-5-5" {
-		t.Errorf("DefaultModel = %q, want claude-opus-5-5", DefaultModel)
+	if DefaultModel != "claude-sonnet-5-5" {
+		t.Errorf("DefaultModel = %q, want claude-sonnet-5-5", DefaultModel)
 	}
 }
 

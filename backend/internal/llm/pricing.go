@@ -40,21 +40,23 @@ func priciest() Price {
 	return top
 }
 
+// PriceOrPriciest returns the price of a model, or the dearest price in the table for a model it does not know.
+func PriceOrPriciest(model string) Price {
+	if p, ok := PriceOf(model); ok {
+		return p
+	}
+	return priciest()
+}
+
 // CostOf returns the cost in US dollars of one answer. The mock models, which report no tokens, cost nothing. When a
 // fallback model wrote part of the answer, the usage is not split between the two, so the dearer of the two prices is used.
 func CostOf(resp Response) float64 {
 	if resp.InputTokens == 0 && resp.OutputTokens == 0 {
 		return 0
 	}
-	price := func(model string) Price {
-		if p, ok := PriceOf(model); ok {
-			return p
-		}
-		return priciest()
-	}
-	p := price(resp.Model)
+	p := PriceOrPriciest(resp.Model)
 	if resp.FallbackUsed && resp.ServedBy != resp.Model {
-		if q := price(resp.ServedBy); q.OutputPerMTok > p.OutputPerMTok {
+		if q := PriceOrPriciest(resp.ServedBy); q.OutputPerMTok > p.OutputPerMTok {
 			p = q
 		}
 	}

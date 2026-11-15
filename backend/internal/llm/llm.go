@@ -24,8 +24,9 @@ const (
 	ModeMock      Mode = "mock"
 )
 
-// DefaultModel is used when ANTHROPIC_MODEL is not set.
-const DefaultModel = "claude-opus-5-5"
+// DefaultModel is used when ANTHROPIC_MODEL is not set. claude-opus-5-5 stays selectable with ANTHROPIC_MODEL (DECISIONS.md,
+// "The default model").
+const DefaultModel = "claude-sonnet-5-5"
 
 // Task names what a request is for. Real providers ignore it; the demo mock
 // uses it to decide what to answer.
@@ -171,7 +172,7 @@ type Selection struct {
 //
 //	LLM_MODE            auto (default), anthropic or mock
 //	ANTHROPIC_API_KEY   the key
-//	ANTHROPIC_MODEL     model name, default claude-opus-5-5
+//	ANTHROPIC_MODEL     model name, default claude-sonnet-5-5
 //	ANTHROPIC_FALLBACK  "off" disables the server-side refusal fallback
 //
 // auto uses the real client when a key is set and the demo mock otherwise; anthropic needs the key and fails with

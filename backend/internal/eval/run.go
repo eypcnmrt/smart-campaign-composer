@@ -313,13 +313,10 @@ type Plan struct {
 	UpperUSD     float64 // every request repaired twice: the practical upper bound, not a guarantee (see the budget)
 }
 
-// PlanFor estimates a run of n briefs on a model. A model the price table does not know is estimated at the price of the
-// default model, which is the dearest one known.
+// PlanFor estimates a run of n briefs on a model. A model the price table does not know is estimated at the dearest price
+// in the table.
 func PlanFor(model string, n int) Plan {
-	p, ok := llm.PriceOf(model)
-	if !ok {
-		p, _ = llm.PriceOf(llm.DefaultModel)
-	}
+	p := llm.PriceOrPriciest(model)
 	perBrief := p.Of(typicalSegmentIn, typicalSegmentOut) + p.Of(typicalContentIn, typicalContentOut)
 	attempts := compose.MaxRepairs + 1
 	return Plan{

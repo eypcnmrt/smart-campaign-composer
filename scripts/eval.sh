@@ -4,7 +4,7 @@
 #
 #   make eval LLM_MODE=anthropic                                   all briefs, budget EVAL_MAX_USD (default 1.00)
 #   make eval LLM_MODE=anthropic EVAL_ARGS="-only tek-kriter-sms"  some briefs
-#   make eval LLM_MODE=anthropic EVAL_MODEL=claude-sonnet-5-5      another model (the default stays as it is)
+#   make eval LLM_MODE=anthropic EVAL_MODEL=claude-opus-5-5        another model (the default is claude-sonnet-5-5)
 #   make eval EVAL_ARGS="-mock"                                    a free dry run of the runner with the demo model
 #
 # The key is read from the dotenv file by compose and goes to the runner only. Not part of `make test` or of CI.
