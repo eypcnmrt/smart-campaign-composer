@@ -197,4 +197,226 @@
     verirseniz Edit aracıyla eklerim.
   - Ağaç temiz, push yok.
 
-✻ Worked for 25m 21s · done 22:06
+✻ Worked for 25m 21s · done Cumartesi 22:06
+
+❯ /export ai-sessions/14-devir-testi.txt                                        
+  ⎿  Conversation exported to: C:\Users\EYUP\Desktop\smart-campaign-composer\ai-
+     sessions\14-devir-testi.txt
+
+❯ Raporu okudum; kök neden analizi ve düzeltme iyi. Kalan beş kısa iş var,      
+  bitince dur.                                                                  
+                                                                                
+  Kurallar aynı. Guard'ın engellediği DECISIONS yazımı için: dosyayı script'le  
+  değil Edit aracıyla düzenle, commit'i ayrı ve tek başına bir git commit       
+  komutuyla at, komutları zincirleme.                                           
+                                                                                
+  1. DECISIONS kaydı: hazırladığın taslağı (decisions-draft.md) Edit ile        
+  DECISIONS.md'ye ekle, diğer kayıtlar gibi İngilizce ve kısa. Şunlar olsun:    
+  ölçülen kanıt (en yoğun pencerede eski worker'dan ~51, yeni worker'dan ~50    
+  istek, aradaki 14-15 ms), düzeltme, maliyeti (başlangıçta ve devirde 1 sn),   
+  beklemenin neden kilidi alan tarafta olduğu (çöken bir worker kendi           
+  penceresini bekleyemez) ve kanıtlar (50/50, 30/30, soak).                     
+  2. Yeni testin hatayı yakaladığını göster: worker.go'daki beklemeyi geçici    
+  olarak kapat, TestWorker_aNewTenureWaitsOutOneRateWindowBeforeSending'in      
+  kırmızı çıktığını göster, değişikliği Edit ile geri al ve git diff'in boş     
+  olduğunu göster. Kırmızı çıkmıyorsa test beklemeyi sabitlemiyor demektir;     
+  testi düzelt.                                                                 
+  3. Eski worker kilidi kaybettiğini fark ediyor mu: bir worker'ın veritabanı   
+  bağlantısı koparsa ya da kilidi başka bir yolla kaybederse yeni worker 1 sn   
+  sonra göndermeye başlıyor. Eski worker o sırada hâlâ çalışıyorsa göndermeye   
+  devam ediyor mu? Kodu okuyarak cevapla, kodu değiştirme. Devam ediyorsa       
+  DECISIONS'a bilinen sınır olarak yaz.                                         
+  4. Tarama script'inin 08 ve 09'da bulduğu 19 bulguyu dosya, satır ve desen    
+  türüyle listele; değerleri tam yazma, yalnızca ilk birkaç karakterini göster. 
+  Hepsi sahte seed verisi (example.com, +90000...), geliştirme şifresi ya da    
+  script'in kendi maskeli çıktısını yakalaması gibi bilinen yanlış alarmlarsa:  
+  sahte veriyi diğer export'lardaki gibi maskele; script kendi maske biçimini   
+  yakalıyorsa script'i yalnızca o biçimi atlayacak şekilde düzelt, geniş bir    
+  izin listesi ekleme; commit et. Bunların dışında bir şey varsa (gerçek bir    
+  isim, e-posta, telefon, kullanıcı adı içeren yol, anahtar) hiçbir şeye        
+  dokunma, dur ve raporda yaz.                                                  
+  5. Worker artık başlangıçta 1 sn bekliyor; make e2e'yi bir kez çalıştır ve    
+  çıktısını göster. 4. maddede script'i değiştirdiysen make test'i de çalıştır. 
+                                                                                
+  Son mesajın kısa bir rapor olsun: her madde için ne çıktı.                    
+  Searched for 1 pattern, read 2 files (ctrl+o to expand)
+
+● Update(DECISIONS.md)
+  ⎿  Added 24 lines
+      1222  - **The scenario also covers a check that the layout scenario
+             used to make by accident:** the "Yeni kampanya" button and t
+            he 16 px
+      1223    margins are still asserted by `layout.spec.ts`; only its pi
+            cture moved.
+      1224  
+      1225 +### A worker waits out one rate window after it takes a chann
+           +el                                                           
+      1226 +- **Problem:** `TestWorker_twoWorkersKeepTheChannelCapAndHand
+           +Over` failed now and then with "101 requests arrived within o
+           +ne second                                                    
+      1227 +  (the cap is 100)": 4 of 40 runs with `-race`, always 101, o
+           +nly at the hand-over. The measurement was right: the provider
+           + really got 101                                              
+      1228 +  requests in one second.                                    
+      1229 +- **Root cause (measured):** a temporary dump of the provider
+           +'s arrival times showed the busiest window of both failing ru
+           +ns straddling                                                
+      1230 +  the moment the first worker stopped: about 51 requests from
+           + the old worker and about 50 from the new one, each 10 ms apa
+           +rt, with only                                                
+      1231 +  14 to 15 ms between the last of one and the first of the ot
+           +her (101 requests in about 999 ms). The guard of "Rate limit:
+           + ..." keeps                                                  
+      1232 +  any 101 consecutive sends of one limiter 1.04 s apart, but 
+           +as one pause of about 40 ms per 100 sends, and per worker pro
+           +cess. The new                                                
+      1233 +  worker starts with an empty guard, so that pause is missing
+           + at the hand-over. A full token bucket was not the cause (the
+           + burst is 1).                                                
+      1234 +- **Decision:** `serve` waits `1 s + RateMargin` (one guard w
+           +indow) before the first claim of every tenure of a channel lo
+           +ck. The test                                                 
+      1235 +  was not loosened; `TestWorker_aNewTenureWaitsOutOneRateWind
+           +owBeforeSending` pins the wait.                              
+      1236 +- **Cost:** one idle second between taking a channel and its 
+           +first send, at every worker start and every hand-over.       
+      1237 +- **Why the wait is on the side that takes the lock:** the ol
+           +d holder cannot be asked to wait out its own window; a worker
+           + that crashed                                                
+      1238 +  never does. Everything the previous holder sent was reserve
+           +d before the lock was free, so after one window no second of 
+           +the provider's                                               
+      1239 +  time holds sends of both.                                  
+      1240 +- **Does the old worker keep sending after it lost the lock?*
+           +* No. A session-level lock ends only with its session, and th
+           +e claims go                                                  
+      1241 +  through that session, so the old worker's next claim fails 
+           +(`ChannelLock`), about one pacing interval (10 ms) later whil
+           +e it is                                                      
+      1242 +  sending, and it stops serving; the new worker's wait is a h
+           +undred times longer. While its circuit is open it claims noth
+           +ing, so it                                                   
+      1243 +  sends nothing either (see the known limit under "Only one w
+           +orker serves a channel").                                    
+      1244 +- **Alternative:** seeding the new worker with the last send 
+           +times from the database (no column holds the time of a send; 
+           +it would need                                                
+      1245 +  a column or index and a query per tenure) or a shared limit
+           +er in the database (a round trip per message).               
+      1246 +- **Evidence:** before 4 failures in 40 runs; after 50 of 50 
+           +(`-race -count=50`); the late-reply test 30 of 30 (`-race -co
+           +unt=30`,                                                     
+      1247 +  0.30 s each); `make test` and `make soak` (5,000 messages, 
+           +at most 100 requests in any second and channel) pass.        
+      1248 +                                                             
+      1249  ## Open issues
+      1250  
+      1251  (What was not finished, and what was decided to stay as it is
+            . "Settled" items are kept on purpose, with the reason, and w
+            ait for
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Madde 1 commit edildi. Madde 2'deydim: worker.go'daki beklemeyi geçici kapatıp
+  yeni testin kırmızı çıktığını göstereceğim.
+
+● Update(backend\internal\worker\worker.go)
+  ⎿  Added 1 line, removed 1 line
+      298    // any 100 sends one 1.04 s apart, is lost across the hand-o
+           ver: the old worker's last sends and the new worker's
+      299    // first ones then fall into one second, and the provider se
+           es 101. Everything the previous holder sent was reserved
+      300    // before it let go of the lock, so waiting one window after
+            taking the lock makes the cap hold across the hand-over.
+      301 -  w.pause(ctx, time.Second+w.cfg.RateMargin)                  
+      301 +  // w.pause(ctx, time.Second+w.cfg.RateMargin) // TEMPORARILY
+          + OFF                                                          
+      302  
+      303    for ctx.Err() == nil {
+      304      select {
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Test beklemeyi sabitliyor: bekleme kapalıyken kırmızı. Değişikliği geri
+  alıyorum.
+
+● Update(backend\internal\worker\worker.go)
+  ⎿  Added 1 line, removed 1 line
+      298    // any 100 sends one 1.04 s apart, is lost across the hand-o
+           ver: the old worker's last sends and the new worker's
+      299    // first ones then fall into one second, and the provider se
+           es 101. Everything the previous holder sent was reserved
+      300    // before it let go of the lock, so waiting one window after
+            taking the lock makes the cap hold across the hand-over.
+      301 -  // w.pause(ctx, time.Second+w.cfg.RateMargin) // TEMPORARILY
+          - OFF                                                          
+      301 +  w.pause(ctx, time.Second+w.cfg.RateMargin)                  
+      302  
+      303    for ctx.Err() == nil {
+      304      select {
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Madde 2 tamam (test kırmızı çıktı, geri alma sonrası git diff boş). Madde 4:
+  19 bulguyu inceliyorum.
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● 19 bulgunun tamamı bilinen sahte ya da yanlış alarm; gerçek bir ad, e-posta,
+  telefon ya da anahtar yok. Script'e dokunmadan, tabloda sıralanan satırları
+  kendi maske biçimiyle maskeliyorum. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Tarama temiz (14-devir-testi.txt dahil), script'e dokunulmadı. İki ayrı commit
+  atıyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Şimdi madde 5: make e2e.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Beş maddenin hepsi bitti; engellenen ya da bırakılan madde yok. Ağaç temiz,
+  push yok.
+
+  1. DECISIONS kaydı: Edit aracıyla eklendi, commit ayrı ve tek komutla atıldı
+     (8637afd); guard bu sefer engellemedi. Kayıtta şunlar var: ölçülen kanıt
+     (en yoğun pencerede eski worker'dan ~51, yeni worker'dan ~50 istek, aradaki
+     14-15 ms), düzeltme, maliyet (her worker başlangıcında ve devirde 1 sn),
+     beklemenin kilidi alan tarafta olma gerekçesi ve kanıtlar (50/50, 30/30,
+     soak).
+  2. Yeni test gerçekten yakalıyor: worker.go'daki bekleme kapalıyken
+     TestWorker_aNewTenureWaitsOutOneRateWindowBeforeSending kırmızı çıktı ("the
+     provider got 5 requests within 0.9 s of the worker taking the channel,
+     want none"). Beklemeyi Edit ile geri aldım ve git diff boştu (0 satır).
+  3. Eski worker kilit kaybında göndermeye devam etmiyor (kodu okuyarak, kod 
+     değişmedi):
+     - Oturum seviyesindeki advisory kilit yalnızca oturumla birlikte biter.
+     - Claim'ler ChannelLock'un kendi bağlantısından geçiyor. Bağlantı koparsa
+       eski worker'ın sonraki claim'i başarısız olur ve kanalı bırakır.
+       Gönderirken bu yaklaşık bir pacing aralığı (10 ms) sürer; yeni worker
+       1,04 sn bekliyor.
+     - Devre açıkken zaten claim yapmadığı için göndermiyor; mevcut "bilinen
+       sınır" notu zaten bunu anlatıyor.
+     - Yeni bir bilinen sınır yazmadım. Bulguyu DECISIONS kaydına "Does the old
+       worker keep sending after it lost the lock?" maddesi olarak ekledim.
+  4. Tarama bulguları: 19 bulguyun hepsi sahte veri ya da yanlış alarmdı, gerçek
+     bir şey yoktu.
+     - 08: 6 telefon (+9000…, sahte seed numaraları), 6 e-posta (a@/b@ +
+       example.com), 1 e-posta (user@pro…, test URL'i), 1 api-key (ANTH…,
+       ANTHROPIC_API_KEY sabit adı), 2 api-key (sk-t…, açıkça sahte test
+       anahtarı).
+     - 09: 1 api-key (sk-t…) ve 1 telefon (+9000…) aynı satırda, 1 e-posta
+       (user@pro…).
+     - Değerleri script'in kendi maske biçimiyle (a***@e***.com, sk-t…[30 
+       chars], +9000000****) maskeledim. Script'e dokunmadım, izin listesi
+       eklemedim.
+     - Tarama temiz (14-devir-testi.txt dahil). Commit'ler 76ee55f (maskeleme)
+       ve aa878b0 (export 14).
+  5. make e2e: 9/9 geçti, çıkış 0, 126 sn. Script değişmediği için make test
+     gerekmedi.
+
+✻ Churned for 4m 18s · done 12:10
+
+※ recap: Goal was fixing the intermittent worker hand-over test; that fix and all five follow-up items are done, committed, and verified (e2e 9/9). Nothing is pending, so the next action is yours: review the commits and decide whether to push. (disable recaps in /config)
