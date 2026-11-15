@@ -66,7 +66,7 @@ func buildSchema(fs fieldSet, evTypes, evOps []string) map[string]any {
 			"conditions": obj{
 				"type":        "array",
 				"items":       obj{"anyOf": []any{ref("condition"), ref("group")}},
-				"description": fmt.Sprintf("Combined with AND, 1 to %d entries", maxConditions),
+				"description": fmt.Sprintf("Combined with AND, 0 to %d entries. An empty array means no condition: every customer", maxConditions),
 			},
 			"unsupported_criteria": obj{
 				"type":        "array",

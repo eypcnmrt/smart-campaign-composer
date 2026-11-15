@@ -134,11 +134,16 @@ function lineOf(node: unknown): RuleLine {
   }
 }
 
+/** What a rule without any condition says: it selects every user (the backend writes it as an empty list). */
+export const NO_CONDITIONS_TEXT = 'Koşul yok: tüm kullanıcılar'
+
 /**
  * The conditions of a rule, one line each. All lines apply together ("ve"); an OR group is one line with its own list.
- * Anything that is not a list of conditions comes back as a single unknown line, so the card never shows nothing for a rule.
+ * An empty list is a rule without a condition and says so in one line. Anything that is not a list of conditions comes back as
+ * a single unknown line, so the card never shows nothing for a rule.
  */
 export function describeConditions(conditions: unknown): RuleLine[] {
   if (!Array.isArray(conditions)) return [unknownLine(conditions)]
+  if (conditions.length === 0) return [{ text: NO_CONDITIONS_TEXT, known: true }]
   return conditions.map(lineOf)
 }

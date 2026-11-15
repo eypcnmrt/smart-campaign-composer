@@ -56,8 +56,8 @@ type Warning struct {
 // it could not express. It is pure, so every combination is a table test.
 //
 // A rule that matches every user is flagged even when the brief asked for everyone (a broadcast should be a decision,
-// not an accident), and a brief whose criteria all fell into unsupported_criteria usually yields exactly that rule:
-// the model has to put some condition in the rule, and the prompt's fallback matches everyone.
+// not an accident), and a brief whose criteria all fell into unsupported_criteria yields exactly that rule: a rule
+// without a condition, which selects everyone.
 //
 // no_recipients is the odd one out: it is a fact, not a judgement, and it is not something to acknowledge. It is reported
 // when the open channels reach nobody (the rule matches no one, or the matched users did not consent to those channels, or

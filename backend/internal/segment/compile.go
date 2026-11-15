@@ -64,10 +64,20 @@ type builder struct {
 
 func build(r Rule, fs fieldSet, now time.Time, firstParam int) (Fragment, ValidationErrors) {
 	b := &builder{fs: fs, now: now, next: firstParam}
+	if r.Conditions == nil {
+		// A rule that never had its conditions set (a Rule{}, a rule that was not decoded) must not turn into "everyone". Only
+		// an empty, non-nil list is the rule without a condition; Decode makes one for "conditions": [].
+		b.add("conditions", "is required (use an empty array for a rule without a condition: every customer)")
+	}
 	b.channels(r.Channels)
 	parts := b.topLevel(r.Conditions)
 	if len(b.errs) > 0 {
 		return Fragment{}, b.errs
+	}
+	if len(parts) == 0 {
+		// A rule without a condition selects every user. It is written down explicitly (an empty list, never a missing one,
+		// see Decode) so that "no criterion could be expressed" does not need a made-up condition.
+		return Fragment{SQL: "(TRUE)", Args: b.args}, nil
 	}
 	return Fragment{SQL: "(" + strings.Join(parts, " AND ") + ")", Args: b.args}, nil
 }
@@ -114,7 +124,11 @@ func (b *builder) channels(names []string) {
 func (b *builder) topLevel(nodes []Node) []string {
 	const path = "conditions"
 	var parts []string
-	for i, n := range nodes[:b.count(path, len(nodes))] {
+	visit := 0 // an empty list is allowed here: a rule without a condition selects everyone (a group must not be empty)
+	if len(nodes) > 0 {
+		visit = b.count(path, len(nodes))
+	}
+	for i, n := range nodes[:visit] {
 		at := elem(path, i)
 		switch n := n.(type) {
 		case *Attribute:

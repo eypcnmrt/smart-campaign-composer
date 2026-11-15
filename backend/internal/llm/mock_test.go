@@ -54,7 +54,7 @@ func TestMock_segment(t *testing.T) {
 		{
 			name:  "a window beyond the vocabulary is reported, not shortened",
 			brief: "son 999 gün sepete ekleyen",
-			want:  []string{`"op":"in"`, `999`, `365`},
+			want:  []string{`"conditions":[]`, `999`, `365`},
 			avoid: []string{`"within_days"`},
 		},
 		{
@@ -73,20 +73,34 @@ func TestMock_segment(t *testing.T) {
 			want:  []string{`"value":"İzmir"`, `Cinsiyet ve yaş kriterleri desteklenmiyor`},
 		},
 		{
-			name:  "nothing recognised falls back to everyone with a warning",
+			name:  "nothing recognised is a rule without a condition, with a warning",
 			brief: "yeni sezon kampanyası",
-			want:  []string{`"field":"language"`, `"op":"in"`, `Demo modu bu brief`},
+			want:  []string{`"conditions":[]`, `Demo modu bu brief`},
+			avoid: []string{`"field":`},
+		},
+		{
+			// Found by hand in the browser with the real model: the criterion cannot be expressed, so no condition may appear.
+			name:  "a birthday brief has no condition, and says why",
+			brief: "Doğum günü bu hafta olan kullanıcılara kampanya SMS'i gönder.",
+			want:  []string{`"conditions":[]`, `Takvim aralığı`, `"channels":["sms"]`},
+			avoid: []string{`"field":`},
+		},
+		{
+			name:  "a store visit brief has no condition, and says why",
+			brief: "Son 7 günde mağazamızı ziyaret eden kullanıcıları kasım indirimi hakkında bilgilendir.",
+			want:  []string{`"conditions":[]`, `Süre ifadesi (son 7 gunde)`},
+			avoid: []string{`"field":`, `"event":`},
 		},
 		{
 			name:  "empty brief",
 			brief: "",
-			want:  []string{`"op":"in"`, `Demo modu bu brief`},
+			want:  []string{`"conditions":[]`, `Demo modu bu brief`},
 		},
 		{
-			name:  "a brief that asks for everyone is the catch-all without an unsupported criterion",
+			name:  "a brief that asks for everyone has no condition and no unsupported criterion",
 			brief: "Tüm müşterilere yeni sezon duyurusu",
-			want:  []string{`"field":"language"`, `"op":"in"`, `"unsupported_criteria":[]`, `"channels":[]`},
-			avoid: []string{`Demo modu bu brief`},
+			want:  []string{`"conditions":[]`, `"unsupported_criteria":[]`, `"channels":[]`},
+			avoid: []string{`Demo modu bu brief`, `"field":`},
 		},
 		{
 			name:  "no channel named",

@@ -66,6 +66,23 @@ func TestSegmentSystem_saysWhatTheBriefDecides(t *testing.T) {
 			t.Errorf("the segment prompt lacks %q", want)
 		}
 	}
+	// The fallback condition ("language in tr, en") is gone: it was a made-up condition that selected everyone and looked like
+	// a real one in the UI. When nothing can be expressed the rule has no condition at all.
+	for _, want := range []string{
+		`an empty array means the rule has no condition and selects every customer`,
+		`return "conditions": []`,
+		`do not put in a substitute condition`,
+		`Add nothing the brief does not say`,
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the segment prompt lacks %q", want)
+		}
+	}
+	for _, gone := range []string{"fallback condition", "use one condition"} {
+		if strings.Contains(system, gone) {
+			t.Errorf("the segment prompt still says %q", gone)
+		}
+	}
 	if strings.Contains(system, "%!") {
 		t.Errorf("a formatting verb was not filled in:\n%s", system)
 	}

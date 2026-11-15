@@ -413,9 +413,10 @@ func demoSegment(brief string) string {
 	}
 
 	if len(cr.conds) == 0 {
-		// Nothing could be expressed, so the rule falls back to the catch-all the real prompt asks for. Unless the brief
-		// itself asks for everyone, that is reported as an unsupported criterion: the scenario the API must flag.
-		cr.conds = []any{attr("language", "in", []any{"tr", "en"})}
+		// Nothing could be expressed, so the rule has no condition, as the real prompt asks (an empty list is "every user",
+		// never a made-up condition). Unless the brief itself asks for everyone, that is reported as an unsupported
+		// criterion: the scenario the API must flag.
+		cr.conds = []any{}
 		if len(cr.unsupported) == 0 && !containsAny(b, "herkes", "tum musteri", "tum kullanici", "butun musteri") {
 			cr.flag("Demo modu bu brief'ten bir kural çıkaramadı; tüm kullanıcılar seçildi")
 		}

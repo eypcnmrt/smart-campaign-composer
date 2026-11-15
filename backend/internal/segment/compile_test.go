@@ -65,6 +65,13 @@ func TestCompile(t *testing.T) {
 		sql   string
 		args  []any
 	}{
+		// Decision: an empty list is the explicit "no condition" rule and selects every user. A missing or null list is
+		// not (Decode rejects it), so a half-written rule cannot widen into "everyone" by accident.
+		{
+			name: "no condition selects everyone",
+			rule: ruleJSON(),
+			sql:  "(TRUE)",
+		},
 		{
 			name: "city eq",
 			rule: ruleJSON(attrJSON("city", "eq", `"İstanbul"`)),
@@ -311,17 +318,7 @@ func TestCompile_invalidRules(t *testing.T) {
 		rule string
 		want []FieldError
 	}{
-		// Decision: empty conditions is an error, never "everyone".
-		{
-			name: "empty conditions",
-			rule: `{"conditions":[]}`,
-			want: []FieldError{{"conditions", "must contain at least one condition"}},
-		},
-		{
-			name: "missing conditions",
-			rule: `{}`,
-			want: []FieldError{{"conditions", "must contain at least one condition"}},
-		},
+		// An empty list of conditions is a rule for everyone (see TestCompile); a group still needs a member.
 		{
 			name: "empty any_of group",
 			rule: ruleJSON(groupJSON()),
@@ -501,10 +498,14 @@ func TestCompile_zeroRuleIsRejected(t *testing.T) {
 	t.Parallel()
 	frag, err := Compile(Rule{}, testNow, 1)
 	if err == nil {
-		t.Fatalf("Compile(Rule{}) = %+v, want an error: an empty rule must never match everyone", frag)
+		t.Fatalf("Compile(Rule{}) = %+v, want an error: a rule whose conditions were never set must never match everyone", frag)
 	}
 	if frag.SQL != "" || frag.Args != nil {
 		t.Errorf("failed Compile returned a fragment: %+v", frag)
+	}
+	// Only an empty, non-nil list is the rule without a condition (Decode makes one for "conditions": []).
+	if frag, err := Compile(Rule{Conditions: []Node{}}, testNow, 1); err != nil || frag.SQL != "(TRUE)" {
+		t.Errorf("Compile(Rule{Conditions: []Node{}}) = %+v, %v; want (TRUE)", frag, err)
 	}
 }
 

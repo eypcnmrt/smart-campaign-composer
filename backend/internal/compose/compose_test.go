@@ -124,6 +124,24 @@ func TestComposer_Segment_unsupportedCriteria(t *testing.T) {
 	}
 }
 
+// A brief with no criterion the data can express yields a rule without a condition: accepted as it is, no repair, and the
+// criteria that could not be expressed travel with it.
+func TestComposer_Segment_noCondition(t *testing.T) {
+	t.Parallel()
+	rule := `{"conditions":[],"unsupported_criteria":["Doğum günü kriteri"],"explanation":"Tüm kullanıcılar","channels":["sms"]}`
+	client := llm.NewScripted(llm.Reply(rule))
+	got, err := New(client).Segment(t.Context(), "Doğum günü bu hafta olan kullanıcılara SMS gönder.")
+	if err != nil {
+		t.Fatalf("Segment() error = %v", err)
+	}
+	if len(got.Rule.Conditions) != 0 || got.Attempts != 1 || len(client.Requests()) != 1 {
+		t.Errorf("Segment() = %+v after %d requests, want the empty rule accepted at once", got, len(client.Requests()))
+	}
+	if !slices.Equal(got.Rule.UnsupportedCriteria, []string{"Doğum günü kriteri"}) {
+		t.Errorf("UnsupportedCriteria = %q", got.Rule.UnsupportedCriteria)
+	}
+}
+
 // The channels the brief names travel with the rule; an unknown one is a problem the model is asked to fix.
 func TestComposer_Segment_channels(t *testing.T) {
 	t.Parallel()
@@ -170,7 +188,7 @@ func TestComposer_Segment_repairsInvalidAnswers(t *testing.T) {
 		{"unknown condition type", `{"conditions":[{"type":"not","conditions":[]}],"unsupported_criteria":[],"explanation":"x"}`, "unknown type"},
 		{"nested group", `{"conditions":[{"type":"any_of","conditions":[{"type":"any_of","conditions":[]}]}],"unsupported_criteria":[],"explanation":"x"}`, "any_of cannot be nested inside any_of"},
 		{"too many conditions", manyConditions(11), "conditions: must contain at most 10 conditions, got 11"},
-		{"no conditions", `{"conditions":[],"unsupported_criteria":[],"explanation":"x"}`, "conditions: must contain at least one condition"},
+		{"missing conditions", `{"unsupported_criteria":[],"explanation":"x"}`, "conditions: is required"},
 		{"city spelled without the dot", `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Istanbul"}],"unsupported_criteria":[],"explanation":"x"}`, "is not an allowed value"},
 		{"unknown field", `{"conditions":[{"type":"attribute","field":"age","op":"gt","value":30}],"unsupported_criteria":[],"explanation":"x"}`, "conditions[0].field: unknown field"},
 		{"operator not allowed for the field", `{"conditions":[{"type":"attribute","field":"city","op":"gt","value":"Ankara"}],"unsupported_criteria":[],"explanation":"x"}`, "is not allowed for city"},
@@ -264,7 +282,7 @@ func TestComposer_Segment_repairKeepsAttackTextInsideItsTag(t *testing.T) {
 
 func TestComposer_Segment_repairExhausted(t *testing.T) {
 	t.Parallel()
-	first, second, third := `{"conditions":[`, manyConditions(11), `{"conditions":[],"unsupported_criteria":[],"explanation":"x"}`
+	first, second, third := `{"conditions":[`, manyConditions(11), `{"unsupported_criteria":[],"explanation":"x"}`
 	client := llm.NewScripted(llm.Reply(first), llm.Reply(second), llm.Reply(third))
 	_, err := New(client).Segment(t.Context(), brief)
 
@@ -278,7 +296,7 @@ func TestComposer_Segment_repairExhausted(t *testing.T) {
 	if genErr.Stage != StageSegment || genErr.Attempts != 3 {
 		t.Errorf("GenerationError = %+v", genErr)
 	}
-	if genErr.LastOutput != third || !anyContains(genErr.Problems, "at least one condition") || anyContains(genErr.Problems, "malformed") {
+	if genErr.LastOutput != third || !anyContains(genErr.Problems, "conditions: is required") || anyContains(genErr.Problems, "malformed") {
 		t.Errorf("the error must describe the last attempt: problems %q, output %q", genErr.Problems, genErr.LastOutput)
 	}
 	if strings.Contains(err.Error(), third) {

@@ -157,6 +157,9 @@ func TestCompile_database(t *testing.T) {
 		rule string
 		want []int
 	}{
+		// a rule without a condition selects every user (the explicit "no criterion" rule)
+		{"no condition", rule(), []int{1, 2, 3, 4, 5, 6, 7, 8}},
+
 		// city and language: eq, neq, in, not_in
 		{"city eq", rule(attr("city", "eq", `"İstanbul"`)), []int{1, 2, 8}},
 		{"city neq", rule(attr("city", "neq", `"İstanbul"`)), []int{3, 4, 5, 6, 7}},

@@ -51,6 +51,24 @@ describe('AudienceCard, what the audience is', () => {
     expect(wrapper.get('.rule').text()).toContain('tanınmayan koşul')
   })
 
+  it('says a rule without a condition means every user, next to the matches_everyone warning', () => {
+    const wrapper = render(
+      campaign({
+        segment: { ...audienceReady.segment!, conditions: [], unsupported_criteria: ['Doğum günü kriteri'] },
+        audience: { ...audience, matched: 24, total_users: 24 },
+        warnings: [
+          { code: 'unsupported_criteria', message: 'English', details: ['Doğum günü kriteri'] },
+          { code: 'matches_everyone', message: 'English' },
+        ],
+      }),
+    )
+    expect(wrapper.get('.rule').text()).toBe('Koşul yok: tüm kullanıcılar')
+    expect(wrapper.find('.rule code').exists()).toBe(false)
+    expect(wrapper.find('.rule__unknown').exists()).toBe(false)
+    expect(wrapper.find('[data-warning="matches_everyone"]').exists()).toBe(true)
+    expect(wrapper.find('[data-warning="unsupported_criteria"]').exists()).toBe(true)
+  })
+
   it('says there is no audience yet when the campaign has no segment', () => {
     const wrapper = render(campaign({ segment: null, audience: null }))
     expect(wrapper.text()).toContain('Kitle henüz yok')

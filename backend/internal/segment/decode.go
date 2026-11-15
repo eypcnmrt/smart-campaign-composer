@@ -62,7 +62,12 @@ func (d *decoder) rule(top map[string]json.RawMessage) Rule {
 			d.unmarshal("channels", raw, &r.Channels, "an array of strings")
 		}
 	}
-	if raw, ok := top["conditions"]; ok {
+	// An empty list is a rule without a condition (every customer); a missing or null one is not, so that a truncated or
+	// half-written rule can never widen into "everyone" by accident.
+	if raw, ok := top["conditions"]; !ok || isNull(raw) {
+		d.add("conditions", "is required (use an empty array for a rule without a condition: every customer)")
+	} else {
+		r.Conditions = []Node{} // not nil, even when empty: that is how a rule without a condition differs from a Rule{} (see build)
 		for i, item := range d.items("conditions", raw) {
 			r.Conditions = append(r.Conditions, d.node(elem("conditions", i), item, false))
 		}

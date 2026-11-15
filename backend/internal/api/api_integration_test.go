@@ -30,8 +30,8 @@ import (
 const (
 	// ankaraRule matches the odd users (the even ones live in İzmir) and names no channel.
 	ankaraRule = `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Ankara"}],"unsupported_criteria":[],"explanation":"Ankara'daki kullanıcılar","channels":[]}`
-	// everyoneRule matches every user, which the API flags.
-	everyoneRule = `{"conditions":[{"type":"attribute","field":"total_orders","op":"gte","value":0}],"unsupported_criteria":["Tüm kriterler"],"explanation":"Herkes","channels":[]}`
+	// everyoneRule has no condition, so it matches every user, which the API flags.
+	everyoneRule = `{"conditions":[],"unsupported_criteria":["Tüm kriterler"],"explanation":"Herkes","channels":[]}`
 	goodContent  = `{"sms":"Merhaba {{first_name}}, {{city}} için fırsat","email_subject":"Fırsat {{city}}","email_body":"Selam {{first_name}}"}`
 	userCount    = 20
 )

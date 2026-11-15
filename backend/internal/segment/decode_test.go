@@ -114,6 +114,17 @@ func TestDecode_structuralErrors(t *testing.T) {
 			in:   `{"conditions":"all"}`,
 			want: []FieldError{{"conditions", "must be an array"}},
 		},
+		// Only an empty array means "no condition: everyone"; a missing or null list is a rule that was not finished.
+		{
+			name: "conditions is missing",
+			in:   `{}`,
+			want: []FieldError{{"conditions", "is required (use an empty array for a rule without a condition: every customer)"}},
+		},
+		{
+			name: "conditions is null",
+			in:   `{"conditions":null}`,
+			want: []FieldError{{"conditions", "is required (use an empty array for a rule without a condition: every customer)"}},
+		},
 		{
 			name: "missing attribute properties",
 			in:   `{"conditions":[{"type":"attribute"}]}`,

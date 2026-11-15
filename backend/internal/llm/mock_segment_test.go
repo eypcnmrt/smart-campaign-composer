@@ -55,13 +55,21 @@ func demoRule(t *testing.T, brief string) (conds, unsupported []string) {
 	if err := json.Unmarshal([]byte(resp.Text), &raw); err != nil {
 		t.Fatal(err)
 	}
+	if raw.Conditions == nil {
+		t.Fatalf("%q: the rule has no conditions property, or it is null; a rule for everyone has an empty array\n%s", brief, resp.Text)
+	}
 	for _, c := range raw.Conditions {
 		conds = append(conds, readable(c))
+	}
+	if len(conds) == 0 {
+		conds = []string{catchAll}
 	}
 	return conds, raw.Unsupported
 }
 
-const catchAll = "language in tr,en"
+// catchAll is how a rule without any condition reads here: "every user", the rule for a brief nothing of which can be expressed.
+// It is the empty array, never a made-up condition such as a language in tr and en (that was the fallback before the fix).
+const catchAll = "no condition"
 
 // A brief is either expressed the way it was written, or the part that was not understood is reported: never turned around,
 // never dropped without a word.

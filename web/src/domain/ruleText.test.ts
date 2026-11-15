@@ -144,8 +144,9 @@ describe('describeConditions', () => {
       expect(describeConditions({ a: 1 })).toEqual([{ text: '{"a":1}', known: false }])
     })
 
-    it('shows nothing for an empty list, which a valid rule never has', () => {
-      expect(describeConditions([])).toEqual([])
-    })
+  })
+
+  it('says a rule without a condition selects every user, in one known line', () => {
+    expect(describeConditions([])).toEqual([{ text: 'Koşul yok: tüm kullanıcılar', known: true }])
   })
 })
