@@ -77,7 +77,12 @@ func (d *decoder) rule(top map[string]json.RawMessage) Rule {
 	if raw, ok := top["explanation"]; !ok || isNull(raw) {
 		d.add("explanation", "is required")
 	} else {
+		before := len(d.errs)
 		d.unmarshal("explanation", raw, &r.Explanation, "a string")
+		// An empty sentence leaves the marketer nothing to check the rule against (a wrong type was reported above).
+		if len(d.errs) == before && strings.TrimSpace(r.Explanation) == "" {
+			d.add("explanation", "must not be empty or only whitespace: write one sentence that describes the audience")
+		}
 	}
 	return r
 }

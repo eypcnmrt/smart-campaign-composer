@@ -263,3 +263,22 @@ func TestMock_participlesWithPluralAndCase(t *testing.T) {
 		})
 	}
 }
+
+// The explanation is what the marketer reads to check the rule, and an empty one is a validation error: the demo mock must
+// always write one, also for a brief it understands nothing of.
+func TestMockSegment_alwaysExplains(t *testing.T) {
+	t.Parallel()
+	for _, brief := range []string{"", "   ", "?", "asdf qwer", "herkese SMS", "İstanbul'daki müşteriler", "yaşı 30'dan büyük kadın müşteriler"} {
+		resp, err := NewMock(MockConfig{}).Complete(t.Context(), Request{Task: TaskSegment, Brief: brief})
+		if err != nil {
+			t.Fatal(err)
+		}
+		rule, err := segment.Decode([]byte(resp.Text))
+		if err != nil {
+			t.Fatalf("%q: Decode() error = %v", brief, err)
+		}
+		if strings.TrimSpace(rule.Explanation) == "" {
+			t.Errorf("%q: the demo mock wrote an empty explanation", brief)
+		}
+	}
+}

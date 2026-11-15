@@ -176,6 +176,8 @@ func TestComposer_Segment_repairsInvalidAnswers(t *testing.T) {
 		{"operator not allowed for the field", `{"conditions":[{"type":"attribute","field":"city","op":"gt","value":"Ankara"}],"unsupported_criteria":[],"explanation":"x"}`, "is not allowed for city"},
 		{"window too long", `{"conditions":[{"type":"event","event":"cart_add","op":"performed","within_days":400}],"unsupported_criteria":[],"explanation":"x"}`, "conditions[0].within_days: must be between 1 and 365"},
 		{"unknown event", `{"conditions":[{"type":"event","event":"page_view","op":"performed","within_days":7}],"unsupported_criteria":[],"explanation":"x"}`, "unknown event"},
+		{"empty explanation", `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Ankara"}],"unsupported_criteria":[],"explanation":""}`, "explanation: must not be empty"},
+		{"blank explanation", `{"conditions":[{"type":"attribute","field":"city","op":"eq","value":"Ankara"}],"unsupported_criteria":[],"explanation":"   "}`, "explanation: must not be empty"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

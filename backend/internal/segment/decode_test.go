@@ -212,6 +212,7 @@ func TestDecode_malformedJSON(t *testing.T) {
 
 func TestDecode_requiresUnsupportedCriteriaAndExplanation(t *testing.T) {
 	t.Parallel()
+	const emptyExplanation = "must not be empty or only whitespace: write one sentence that describes the audience"
 	const cond = `{"type":"attribute","field":"city","op":"eq","value":"Ankara"}`
 	tests := []struct {
 		name string
@@ -225,6 +226,12 @@ func TestDecode_requiresUnsupportedCriteriaAndExplanation(t *testing.T) {
 			[]FieldError{{"explanation", "is required"}}},
 		{"null is not an answer", `{"conditions":[` + cond + `],"unsupported_criteria":null,"explanation":null}`,
 			[]FieldError{{"unsupported_criteria", "is required (use an empty array when nothing is unsupported)"}, {"explanation", "is required"}}},
+		{"empty explanation", `{"conditions":[` + cond + `],"unsupported_criteria":[],"explanation":""}`,
+			[]FieldError{{"explanation", emptyExplanation}}},
+		{"blank explanation", `{"conditions":[` + cond + `],"unsupported_criteria":[],"explanation":" \t\n  "}`,
+			[]FieldError{{"explanation", emptyExplanation}}},
+		{"a wrong type is one problem, not two", `{"conditions":[` + cond + `],"unsupported_criteria":[],"explanation":4}`,
+			[]FieldError{{"explanation", "must be a string"}}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
