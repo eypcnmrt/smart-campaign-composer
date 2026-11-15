@@ -1222,6 +1222,30 @@ reporting and in the stream's write path.
 - **The scenario also covers a check that the layout scenario used to make by accident:** the "Yeni kampanya" button and the 16 px
   margins are still asserted by `layout.spec.ts`; only its picture moved.
 
+### A worker waits out one rate window after it takes a channel
+- **Problem:** `TestWorker_twoWorkersKeepTheChannelCapAndHandOver` failed now and then with "101 requests arrived within one second
+  (the cap is 100)": 4 of 40 runs with `-race`, always 101, only at the hand-over. The measurement was right: the provider really got 101
+  requests in one second.
+- **Root cause (measured):** a temporary dump of the provider's arrival times showed the busiest window of both failing runs straddling
+  the moment the first worker stopped: about 51 requests from the old worker and about 50 from the new one, each 10 ms apart, with only
+  14 to 15 ms between the last of one and the first of the other (101 requests in about 999 ms). The guard of "Rate limit: ..." keeps
+  any 101 consecutive sends of one limiter 1.04 s apart, but as one pause of about 40 ms per 100 sends, and per worker process. The new
+  worker starts with an empty guard, so that pause is missing at the hand-over. A full token bucket was not the cause (the burst is 1).
+- **Decision:** `serve` waits `1 s + RateMargin` (one guard window) before the first claim of every tenure of a channel lock. The test
+  was not loosened; `TestWorker_aNewTenureWaitsOutOneRateWindowBeforeSending` pins the wait.
+- **Cost:** one idle second between taking a channel and its first send, at every worker start and every hand-over.
+- **Why the wait is on the side that takes the lock:** the old holder cannot be asked to wait out its own window; a worker that crashed
+  never does. Everything the previous holder sent was reserved before the lock was free, so after one window no second of the provider's
+  time holds sends of both.
+- **Does the old worker keep sending after it lost the lock?** No. A session-level lock ends only with its session, and the claims go
+  through that session, so the old worker's next claim fails (`ChannelLock`), about one pacing interval (10 ms) later while it is
+  sending, and it stops serving; the new worker's wait is a hundred times longer. While its circuit is open it claims nothing, so it
+  sends nothing either (see the known limit under "Only one worker serves a channel").
+- **Alternative:** seeding the new worker with the last send times from the database (no column holds the time of a send; it would need
+  a column or index and a query per tenure) or a shared limiter in the database (a round trip per message).
+- **Evidence:** before 4 failures in 40 runs; after 50 of 50 (`-race -count=50`); the late-reply test 30 of 30 (`-race -count=30`,
+  0.30 s each); `make test` and `make soak` (5,000 messages, at most 100 requests in any second and channel) pass.
+
 ## Open issues
 
 (What was not finished, and what was decided to stay as it is. "Settled" items are kept on purpose, with the reason, and wait for
