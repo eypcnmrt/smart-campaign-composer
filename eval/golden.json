@@ -165,7 +165,7 @@
   },
   {
     "id": "iki-kanal-ingilizce",
-    "covers": "two attributes (two cities, one language) joined by AND; both channels",
+    "covers": "two attributes (two cities, one language) joined by AND; both channels; text in the audience's language (English)",
     "brief": "İzmir ve Antalya'daki İngilizce konuşan müşterilere hem SMS hem e-posta ile tatil kampanyası duyuralım.",
     "expect": {
       "require": [
@@ -174,7 +174,8 @@
       ],
       "unsupported": "empty",
       "warnings_absent": ["matches_everyone", "unsupported_criteria"],
-      "channels": ["sms", "email"]
+      "channels": ["sms", "email"],
+      "content_language": "en"
     }
   }
 ]

@@ -27,12 +27,13 @@ const (
 	CheckContentValid = "content_valid"
 	CheckNoCutoff     = "no_refusal_or_cutoff"
 	CheckNoForbidden  = "no_forbidden_text"
+	CheckLanguage     = "content_language"
 )
 
 // Names of the checks in report order.
 var (
 	SegmentChecks = []string{CheckSegmentValid, CheckRequired, CheckNoReversed, CheckNoInvented, CheckUnsupported, CheckWarnings, CheckChannels}
-	ContentChecks = []string{CheckContentValid, CheckNoCutoff, CheckNoForbidden}
+	ContentChecks = []string{CheckContentValid, CheckNoCutoff, CheckNoForbidden, CheckLanguage}
 )
 
 // Check is the result of one deterministic check of one brief.
@@ -442,7 +443,7 @@ func CheckContent(c content.Content, err error, e Expect) []Check {
 	case errors.Is(err, llm.ErrMaxTokens):
 		cutoff = Check{Name: CheckNoCutoff, Detail: "the answer was cut off at max_tokens"}
 	}
-	var found []string
+	var found, wrongLanguage []string
 	if err == nil {
 		text := strings.ToLower(c.SMS + "\n" + c.EmailSubject + "\n" + c.EmailBody)
 		for _, w := range e.ContentForbid {
@@ -450,8 +451,33 @@ func CheckContent(c content.Content, err error, e Expect) []Check {
 				found = append(found, fmt.Sprintf("the content contains %q", w))
 			}
 		}
+		if e.ContentLanguage == "en" {
+			wrongLanguage = turkishLetterProblems(c)
+		}
 	}
-	return []Check{valid, cutoff, check(CheckNoForbidden, found)}
+	return []Check{valid, cutoff, check(CheckNoForbidden, found), check(CheckLanguage, wrongLanguage)}
+}
+
+// turkishLetters are the letters English does not use: ç ğ ı İ ö ş ü and the capitals of those (the capital of ı is the plain
+// I, which English has, so it is not in the list).
+const turkishLetters = "çğıİöşüÇĞÖŞÜ"
+
+// turkishLetterProblems names, per field, the Turkish-only letters found in text that should be English. It does not echo the
+// text. A city written the Turkish way ("İzmir") is one such letter too; the prompt asks for {{city}} instead of a name.
+func turkishLetterProblems(c content.Content) []string {
+	var out []string
+	for _, f := range []struct{ name, text string }{{content.FieldSMS, c.SMS}, {content.FieldEmailSubject, c.EmailSubject}, {content.FieldEmailBody, c.EmailBody}} {
+		var letters []string
+		for _, r := range f.text {
+			if s := string(r); strings.Contains(turkishLetters, s) && !slices.Contains(letters, s) {
+				letters = append(letters, s)
+			}
+		}
+		if len(letters) > 0 {
+			out = append(out, fmt.Sprintf("%s has Turkish letters (%s) but the text should be English", f.name, strings.Join(letters, " ")))
+		}
+	}
+	return out
 }
 
 // notRun is the failing check list of a stage that could not be scored because an earlier one failed.

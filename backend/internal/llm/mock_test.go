@@ -157,6 +157,41 @@ func TestMock_contentIsValid(t *testing.T) {
 	}
 }
 
+// The text follows the audience's language, as the real prompt asks: English for a segment that is only English-speaking
+// (valid, without Turkish-only letters), Turkish for everything else.
+func TestMock_contentFollowsTheAudienceLanguage(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		brief       string
+		wantEnglish bool
+	}{
+		{"İzmir ve Antalya'daki İngilizce konuşan müşterilere hem SMS hem e-posta ile tatil kampanyası duyuralım.", true},
+		{"İngilizce konuşan müşterilere %30 indirim duyur", true},
+		{"Türkçe konuşan müşterilere yeni sezon", false},
+		{"İngilizce konuşmayan müşterilere yeni sezon", false},
+		{"Ankara'daki müşterilere SMS ile bahar kampanyası", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.brief, func(t *testing.T) {
+			t.Parallel()
+			resp, err := NewMock(MockConfig{}).Complete(t.Context(), Request{Task: TaskContent, Brief: tt.brief})
+			if err != nil {
+				t.Fatal(err)
+			}
+			c, err := content.Parse([]byte(resp.Text))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := content.Validate(c); err != nil {
+				t.Errorf("Validate error = %v\n%s", err, resp.Text)
+			}
+			if got := !strings.ContainsAny(resp.Text, "çğıİöşüÇĞÖŞÜ"); got != tt.wantEnglish {
+				t.Errorf("text without Turkish letters = %v, want %v\n%s", got, tt.wantEnglish, resp.Text)
+			}
+		})
+	}
+}
+
 func TestMock_contentMentionsTheDiscount(t *testing.T) {
 	t.Parallel()
 	tests := []struct{ brief, want string }{

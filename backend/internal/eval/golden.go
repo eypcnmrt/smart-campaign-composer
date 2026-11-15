@@ -49,6 +49,9 @@ type Expect struct {
 	// ContentForbid lists words (case-insensitive) that must not appear in the generated content, for a brief that tries to
 	// make the model write something it must not.
 	ContentForbid []string `json:"content_forbid,omitempty"`
+	// ContentLanguage is the language the text must be written in when the brief's audience speaks one other than Turkish: "en"
+	// means the SMS, the subject and the body contain no letter that is specific to Turkish. Absent: not checked.
+	ContentLanguage string `json:"content_language,omitempty"`
 }
 
 // Atom describes one condition. There are three shapes:
@@ -127,6 +130,9 @@ func Validate(briefs []Brief) error {
 		}
 		if !slices.Contains([]string{"", "empty", "nonempty"}, e.Unsupported) {
 			return fmt.Errorf("%s: unsupported must be empty or nonempty, got %q", b.ID, e.Unsupported)
+		}
+		if !slices.Contains([]string{"", "en"}, e.ContentLanguage) {
+			return fmt.Errorf("%s: content_language must be \"en\" or absent, got %q", b.ID, e.ContentLanguage)
 		}
 		known := []string{campaign.WarnMatchesEveryone, campaign.WarnUnsupportedCriteria, campaign.WarnNoRecipients}
 		for _, code := range append(slices.Clone(e.WarningsPresent), e.WarningsAbsent...) {

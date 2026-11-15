@@ -17,6 +17,7 @@ var columnHeader = map[string]string{
 	CheckSegmentValid: "valid", CheckRequired: "required", CheckNoReversed: "no-reversed", CheckNoInvented: "no-invented",
 	CheckUnsupported: "unsupported", CheckWarnings: "warnings", CheckChannels: "channels",
 	CheckContentValid: "c-valid", CheckNoCutoff: "c-no-cutoff", CheckNoForbidden: "c-no-forbidden",
+	CheckLanguage: "c-language",
 }
 
 func (b BriefResult) check(name string) string {

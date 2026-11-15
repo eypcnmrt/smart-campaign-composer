@@ -32,13 +32,14 @@ func TestGoldenSetIsValidAndCoversTheRequiredCases(t *testing.T) {
 			t.Errorf("no brief covers %q", want)
 		}
 	}
-	var injection, everyone bool
+	var injection, everyone, english bool
 	for _, b := range briefs {
 		injection = injection || len(b.Expect.ContentForbid) > 0
 		everyone = everyone || slicesContain(b.Expect.WarningsPresent, "matches_everyone")
+		english = english || b.Expect.ContentLanguage == "en"
 	}
-	if !injection || !everyone {
-		t.Errorf("injection brief = %v, everyone brief = %v", injection, everyone)
+	if !injection || !everyone || !english {
+		t.Errorf("injection brief = %v, everyone brief = %v, English-text brief = %v", injection, everyone, english)
 	}
 }
 
@@ -64,6 +65,7 @@ func TestLoadRejectsAGoldenSetThatCouldNotBeScored(t *testing.T) {
 		"unknown warning":    `[{"id":"a","brief":"x","expect":{"warnings_present":["nope"]}}]`,
 		"unknown channel":    `[{"id":"a","brief":"x","expect":{"channels":["fax"]}}]`,
 		"bad unsupported":    `[{"id":"a","brief":"x","expect":{"unsupported":"maybe"}}]`,
+		"bad language":       `[{"id":"a","brief":"x","expect":{"content_language":"de"}}]`,
 		"empty set":          `[]`,
 	}
 	for name, body := range tests {

@@ -241,6 +241,15 @@ func TestCheckContent(t *testing.T) {
 		{name: "a forbidden word, in any case", c: content.Content{SMS: "Şifren: PassWord", EmailSubject: "a", EmailBody: "b"},
 			expect: Expect{ContentForbid: []string{"password"}}, wantFailed: []string{CheckNoForbidden}},
 		{name: "no forbidden word", c: ok, expect: Expect{ContentForbid: []string{"password"}}},
+		{name: "english text for an English audience", c: content.Content{SMS: "Hi {{first_name}}, our holiday offer is here!", EmailSubject: "Holiday offer", EmailBody: "Hi, plan your trip with us. I can help."},
+			expect: Expect{ContentLanguage: "en"}},
+		{name: "turkish text for an English audience", c: content.Content{SMS: "Merhaba {{first_name}}, tatil kampanyamız burada!", EmailSubject: "Holiday offer", EmailBody: "Hi"},
+			expect: Expect{ContentLanguage: "en"}, wantFailed: []string{CheckLanguage}},
+		{name: "one Turkish letter in the body is enough", c: content.Content{SMS: "Hi", EmailSubject: "Hi", EmailBody: "Hello from İzmir"},
+			expect: Expect{ContentLanguage: "en"}, wantFailed: []string{CheckLanguage}},
+		{name: "each Turkish-only letter counts, capitals too", c: content.Content{SMS: "Ç", EmailSubject: "Ğ", EmailBody: "ıÖŞÜüçğş"},
+			expect: Expect{ContentLanguage: "en"}, wantFailed: []string{CheckLanguage}},
+		{name: "turkish text is fine when no language is expected", c: content.Content{SMS: "Çok güzel", EmailSubject: "ş", EmailBody: "ü"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -263,6 +272,17 @@ func TestCheckContent(t *testing.T) {
 	// The detail of a failed content check says why, without the model's text.
 	if d := detailOf(CheckContent(content.Content{}, exhausted, Expect{}), CheckContentValid); !strings.Contains(d, "160") {
 		t.Errorf("detail = %q, want the validator's problem", d)
+	}
+	// The language check names the field and the letters, not the text.
+	tr := content.Content{SMS: "Merhaba şükür kampanya", EmailSubject: "Konu", EmailBody: "Gövde"}
+	d := detailOf(CheckContent(tr, nil, Expect{ContentLanguage: "en"}), CheckLanguage)
+	for _, want := range []string{"sms", "ş", "ü", "email_body", "ö"} {
+		if !strings.Contains(d, want) {
+			t.Errorf("language detail = %q, want it to mention %q", d, want)
+		}
+	}
+	if strings.Contains(d, "Merhaba") {
+		t.Errorf("language detail = %q, must not echo the text", d)
 	}
 	if !errors.Is(exhausted, compose.ErrRepairExhausted) {
 		t.Error("the test error should be a repair failure")

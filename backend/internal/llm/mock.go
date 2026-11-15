@@ -109,6 +109,9 @@ func containsAny(s string, words ...string) bool {
 // packages other than the segment vocabulary. TestMock_contentIsValid keeps
 // the copy in sync.
 func demoContent(brief string) string {
+	if audienceLanguage(brief) == "en" {
+		return demoContentEnglish(brief)
+	}
 	offer := "özel fırsatlar"
 	if m := discountRe.FindStringSubmatch(fold(brief)); m != nil {
 		for _, g := range m[1:] {
@@ -122,6 +125,48 @@ func demoContent(brief string) string {
 		"email_subject": "{{first_name}}, " + offer + " seni bekliyor",
 		"email_body": "Merhaba {{first_name}},\n\n" + offer + " sadece senin için hazır. " +
 			"{{city}} ve çevresindeki müşterilerimize özel bu fırsatı kaçırma.\n\nGörüşmek üzere,\nEkibimiz",
+	})
+}
+
+// audienceLanguage is the one language the demo's reading of the brief selects ("en", "tr"), or "" when the segment names none
+// or several. It follows the same rule as the real prompt: text goes in the audience's language, Turkish otherwise.
+func audienceLanguage(brief string) string {
+	var rule struct {
+		Conditions []struct {
+			Field string `json:"field"`
+			Op    string `json:"op"`
+			Value any    `json:"value"`
+		} `json:"conditions"`
+	}
+	if json.Unmarshal([]byte(demoSegment(brief)), &rule) != nil {
+		return ""
+	}
+	for _, c := range rule.Conditions {
+		if c.Field != "language" || c.Op != "eq" {
+			continue
+		}
+		if lang, ok := c.Value.(string); ok {
+			return lang
+		}
+	}
+	return ""
+}
+
+// demoContentEnglish is demoContent for an English-speaking audience; it has no letter that is specific to Turkish.
+func demoContentEnglish(brief string) string {
+	offer := "special offers are"
+	if m := discountRe.FindStringSubmatch(fold(brief)); m != nil {
+		for _, g := range m[1:] {
+			if g != "" {
+				offer = g + "% off is"
+			}
+		}
+	}
+	return mustJSON(map[string]string{
+		"sms":           "Hi {{first_name}}, " + offer + " waiting for you! Don't miss it, start today.",
+		"email_subject": "{{first_name}}, " + offer + " waiting for you",
+		"email_body": "Hi {{first_name}},\n\nGood news: " + offer + " ready just for you. " +
+			"Don't miss this offer for our customers in {{city}} and nearby.\n\nSee you soon,\nOur team",
 	})
 }
 
