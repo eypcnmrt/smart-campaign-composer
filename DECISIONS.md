@@ -1537,6 +1537,49 @@ limit $0.50). Everything is one run per brief and model, as before.
   open, not explained, and was not fixed here because a prompt change would invalidate the full run above and the session's
   spending limit did not allow another one. Session spend on the real API about $0.31 (the full run $0.263, two single-brief
   runs $0.029, the smoke test about $0.015, estimated from its token counts).
+  **Corrected in the next section:** "not caused by this change" was concluded from putting back `prompts.go` alone; with every
+  file of the change put back the brief passed, so the change is the likely cause.
+
+## A criterion the rule cannot express must not replace one it can (2026-11-15, olmayan-kriter)
+- **The problem.** `olmayan-kriter` ("İstanbul'daki 25 yaş üstü kadın müşterilere SMS ile yeni koleksiyonu tanıtalım.") on
+  claude-sonnet-5-5 gave `purchase performed within 30d` and no city, with `unsupported_criteria` right (age, gender). The
+  explanation still said "İstanbul'daki müşteriler", so the screen text and the rule disagreed, and a marketer who trusts the
+  sentence sends to the wrong audience (every customer who bought in 30 days, in every city). Three runs of the unchanged code:
+  2 failed this way, 1 passed.
+- **Was it the change of 183c686?** Probably, not proven. All 17 files of the commit were put back to 1822051 (`git checkout
+  1822051 -- <files>`, then `git checkout HEAD -- <files>`; `git status` was clean afterwards): **3 of 3 runs passed**, all with
+  the city and the right unsupported criteria. With the change: 1 of 3. Three against three runs is suggestive only (one-sided
+  Fisher p about 0.1), and which part of the change matters (the prompt text, or the schema description "0 to N entries ... every
+  customer") was not separated: the previous session had put back `prompts.go` alone, which is why it saw no difference.
+- **Root cause.** The old prompt had one answer for "part of the brief cannot be expressed": a stand-in condition (language in
+  tr, en). When 183c686 took the stand-in away, nothing told the model what to do with the part it could not express except "keep
+  the conditions you can express" in one long sentence, and the model made its own stand-in out of the topic of the campaign
+  ("customers", "new collection" read as "bought recently") and dropped the city, which it could express. The prompt allowed
+  this: "use 30 when the brief gives no window" and no rule that a condition describes who the customers are.
+- **The fix (general, no golden brief is named in the prompt).** The segment prompt now has the model go through the brief one
+  criterion at a time: an expressible criterion is always a condition, whatever else the brief asks; an inexpressible one is a
+  phrase in `unsupported_criteria` and nothing else, never a stand-in; conditions say who the customers are, not what the
+  campaign is about; and a closing check (every criterion is in a condition or in `unsupported_criteria`, every condition comes
+  from a criterion). The explanation must name every city of the conditions and claim no unsupported criterion. After it: 3 of 3
+  single runs, 3 of 3 again after the rest of this work, and the full set **16 of 16** (`eval/results/20261115-142948-claude-sonnet-5-5.md`,
+  $0.249, no repair). That is 7 passes in 7 runs of the brief, still a smoke result and not a rate.
+- **The consistency check.** `segment.CheckExplanation`: every city of the vocabulary that the explanation names must be in a
+  city condition of the rule (`eq`, `neq`, `in`, `not_in`, top level or inside an `any_of`; the operator does not matter, so "not in
+  Ankara" counts as naming it). Names are compared with the Turkish letters and the case folded and a suffix allowed
+  ("İstanbul'daki", "ISTANBUL'da"); the match must start at a word boundary, so "Karaadana" is not Adana. The compose validation
+  calls it after `Validate`, so a mismatch goes to the repair loop with a message that says what to do (add the condition if the
+  brief asks for the city, otherwise take it out of the explanation). It is not part of `Validate`/`Compile` on purpose: those
+  describe what a rule selects and must keep accepting stored rules. The eval has the same check as the column
+  `explanation_matches_rule`, on every brief. Cities are the only vocabulary checked, because they are the only value an
+  explanation names that way (languages and amounts have no fixed spelling in a sentence); the other direction (a condition
+  the explanation does not mention) is not checked. This check would have caught the failure above, with the old prompt.
+- **The demo mock.** It could not read "en az 5 siparişi olan", so `ve-email` failed in `make eval EVAL_ARGS="-mock"`, the mode a
+  reviewer without a key will try. It now reads a number of orders with its direction ("en az N", "en fazla N", "N'den fazla",
+  "N'den az", "N ve üzeri", "tam N", number words, a negated verb as the other side) and puts everything else (no direction,
+  contradicting directions, out of range) into `unsupported_criteria`, never guessing a direction; a bare "bir" stays an article.
+  The mock dry run is 16 of 16.
+- **Spend on the real API this session: about $0.43** (the full run $0.249, twelve single-brief runs $0.179, all read from the
+  result files).
 
 ## Open issues
 
