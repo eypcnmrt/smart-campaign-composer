@@ -1501,6 +1501,43 @@ limit $0.50). Everything is one run per brief and model, as before.
   channel. That is a reading by the author of this session of the SMS and the subjects, not a check: a deterministic check for
   cross-references would need a list of Turkish phrases, and the bodies were not read one by one.
 
+## A rule without a condition means every user (2026-11-15, found by hand in the browser)
+- **The problem.** The author tried the app with the real model (claude-sonnet-5-5) and gave it briefs of which nothing can be
+  expressed: "Doğum günü bu hafta olan kullanıcılara kampanya SMS'i gönder." and "Son 7 günde mağazamızı ziyaret eden kullanıcıları
+  kasım indirimi hakkında bilgilendir." `unsupported_criteria` and the `matches_everyone` warning were right, but the rule carried
+  the condition "Dil: Türkçe veya İngilizce". The brief does not say it, it selects everyone, and the screen showed it as a real
+  condition. The same kind of filler as the `total_orders gte 0` the Opus runs sometimes added. Neither the golden set nor the
+  eval checks saw it: they allowed this fallback on purpose (`optional` in `tutar-yonsuz`).
+- **Root cause: three layers all demanded at least one condition, and the prompt told the model what to put in.**
+  `segment/compile.go` made an empty `conditions` list an error ("must contain at least one condition", with a test whose comment
+  said "never everyone"); the schema description said "1 to N entries"; and the prompt said "If nothing at all can be expressed,
+  use one condition, language in tr, en" and exempted it from "never add a condition that is true for every customer". So the model
+  followed the prompt, and a validator that rejected the empty answer would have repaired anything else into the same filler.
+  This replaces the catch-all rule described in "A segment that matches everyone, or a brief that could not be expressed, is
+  flagged and needs an acknowledgement" (the warning and the acknowledgement stay, the made-up condition goes).
+- **The fix.** An empty list is now the explicit rule without a condition and compiles to `(TRUE)`. Safety is kept where it
+  mattered: `Decode` rejects a missing or null `conditions` (only `[]` is accepted, so a cut-off answer cannot widen to everyone),
+  and `Compile` rejects a rule whose list is `nil` (a zero `Rule{}` still never matches everyone; only the empty, non-nil list
+  `Decode` makes does). An empty `any_of` group is still an error. The prompt now asks for `"conditions": []` when nothing can be
+  expressed, for no condition the brief does not say, and none that is true for nearly every customer; the mock does the same. The
+  audience card reads "Koşul yok: tüm kullanıcılar"; the `matches_everyone` warning and the acknowledgement at approval did not
+  change (the warning is computed from the counts, not from the rule).
+- **The eval.** A deterministic check `no_filler`: every top-level condition of the rule is counted alone in the seeded database,
+  and one that selects every user by itself fails (an `any_of` group counts as one; a member that selects everyone makes the group
+  do so). It runs on all briefs, with no way to turn it off per brief, and a count that is missing is reported, never skipped.
+  Two briefs were added (`dogum-gunu`, `magaza-ziyareti`: expected a rule without a condition, filled `unsupported_criteria`, the
+  `matches_everyone` warning), and `tutar-yonsuz` lost its permission for the language fallback.
+- **Result with the real model** (claude-sonnet-5-5, once per brief, so a smoke result and not a rate): the birthday brief through
+  the web app gave `conditions: []`, the unsupported criterion and both warnings; in the golden set the three briefs with nothing
+  expressible (`dogum-gunu`, `magaza-ziyareti`, `tutar-yonsuz`) and `herkese` got the empty rule, and `no_filler` passed on all 16.
+  **15 of 16 passed, $0.263.** The one failure, `olmayan-kriter` ("İstanbul'daki 25 yaş üstü kadın müşterilere"), is not a filler: the
+  rule has `purchase performed within 30d` instead of the city (its explanation still says İstanbul), so `required` and
+  `no_invented` fail. It came out the same when that brief was run again, and also with the previous prompt text put back (the
+  run was not written to `eval/results/`), so it is not caused by this change; it passed in the run of the same afternoon. It is
+  open, not explained, and was not fixed here because a prompt change would invalidate the full run above and the session's
+  spending limit did not allow another one. Session spend on the real API about $0.31 (the full run $0.263, two single-brief
+  runs $0.029, the smoke test about $0.015, estimated from its token counts).
+
 ## Open issues
 
 (What was not finished, and what was decided to stay as it is. "Settled" items are kept on purpose, with the reason, and wait for
