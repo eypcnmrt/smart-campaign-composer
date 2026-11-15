@@ -1,0 +1,42 @@
+# Override for `make eval`: the golden-set evaluation of the real model. Used together with docker-compose.yml under its own
+# project name (scc-eval), so it never touches the normal stack's data; only the database, the migrations, the seed and the
+# runner start (no api, no worker):
+#   docker compose -p scc-eval -f docker-compose.yml -f docker-compose.eval.yml run --rm eval
+#
+# The runner calls the real API, which costs money. scripts/eval.sh refuses to start it unless LLM_MODE=anthropic is given
+# explicitly, and the runner itself stops at EVAL_MAX_USD. The key comes from the dotenv file through compose's own
+# interpolation, reaches this container only, and is never printed.
+
+services:
+  eval:
+    # The Go image of the other containers (CLAUDE.md: golang:1.27), pinned by digest so that the tag cannot drift.
+    image: golang:1.27@sha256:ec47ea3725fea0cc88f6de94919aef19f40f12fc1ec0e2d1b3426dbf15ecca04
+    working_dir: /src/backend
+    command: ["sh", "-c", "exec go run ./cmd/eval -golden /src/eval/golden.json -out /src/eval/results $$EVAL_ARGS"]
+    environment:
+      GOFLAGS: -buildvcs=false
+      DATABASE_URL: postgres://${POSTGRES_USER:-scc}:${POSTGRES_PASSWORD:-scc-dev-password}@db:5432/${POSTGRES_DB:-scc}?sslmode=disable
+      LLM_MODE: ${LLM_MODE:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      ANTHROPIC_MODEL: ${EVAL_MODEL:-}
+      EVAL_MAX_USD: ${EVAL_MAX_USD:-1.00}
+      EVAL_ARGS: ${EVAL_ARGS:-}
+    volumes:
+      - ./backend:/src/backend:ro
+      - ./eval:/src/eval
+      - gomod:/go/pkg/mod
+      - gocache:/root/.cache/go-build
+    depends_on:
+      seed:
+        condition: service_completed_successfully
+    restart: "no"
+
+# The module and build caches of the other Go containers (CLAUDE.md); external, so `down --volumes` leaves them alone.
+# scripts/eval.sh creates them when they are missing.
+volumes:
+  gomod:
+    external: true
+    name: scc-gomod
+  gocache:
+    external: true
+    name: scc-gocache
