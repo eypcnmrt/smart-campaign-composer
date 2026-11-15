@@ -1,0 +1,1055 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Sonnet 5.5 · Claude Pro
+ ▝▝   ▝▝   ~\Desktop\smart-campaign-composer
+
+
+❯ Kısa bir iş var: altın setteki olmayan-kriter hatası. Bitince dur, başka işe  
+  başlama.                                                                      
+                                                                                
+  Kurallar ve anahtar güvenliği önceki oturumdaki gibi: Go komutları            
+  CLAUDE.md'deki container'larda; her adım bitince testler yeşilse ayrı commit; 
+  hook engellerse etrafından dolanma, raporda yaz (iki istisna aynı: commit     
+  mesajındaki ifade ve okuma komutlarında yanlış alarm için Read/Grep);         
+  düzenlemeler yalnızca Edit ile, commit ayrı komutla; push, geçmişi yeniden    
+  yazma ve --no-verify yok. .env'i okuma, key'in hiçbir parçasını yazdırma,     
+  ortam döken komut yok, sızıntı kontrolü yalnızca sayarak. Gerçek API yalnızca 
+  eval koşularında; compose komutları LLM_MODE=mock ile. Bu oturumun gerçek     
+  API harcaması 0,60 $'ı geçmesin.                                              
+                                                                                
+  0. ai-sessions/18-dolgu-kosul.txt'yi kontrol script'iyle tara, gerekiyorsa    
+  maskele ve commit et.                                                         
+  1. Hatayı yeniden üret: olmayan-kriter'i ("İstanbul'daki 25 yaş üstü kadın    
+  müşterilere SMS ile yeni koleksiyonu tanıtalım.") -only ile üç kez koştur.    
+  Her koşuda tam kural JSON'unu, unsupported_criteria'yı ve açıklamayı göster.  
+  2. Değişiklikten mi kaynaklanıyor: geçen oturumda yalnızca prompts.go geri    
+  alınmıştı; şema açıklaması ve derleyici değişikliği yerinde kalmıştı.         
+  183c686'nın değiştirdiği bütün dosyaları geçici olarak önceki sürüme al (git  
+  checkout 1822051 -- <dosyalar>), aynı brief'i üç kez koştur, sonra git        
+  checkout HEAD -- <dosyalar> ile geri al ve git status'un temiz olduğunu       
+  göster.                                                                       
+  3. Kök nedeni bul ve genel bir düzeltme yap; tek tek altın brief'lere göre    
+  ayar yapma. Model kriterin birini ifade edemediğinde ifade edilebilen kriteri 
+  (burada şehir) düşürmemeli ve brief'te olmayan bir koşul (burada son 30       
+  günde satın alma) eklememeli.                                                 
+  4. Açıklama ile kural tutarlılığı: bu hatada açıklama "İstanbul" diyor, kural 
+  demiyor; pazarlamacı açıklamaya güvenip yanlış kitleye gönderebilir.          
+  Deterministik bir kontrol ekle: açıklamada geçen ve seed'deki şehir           
+  listesinde olan her şehir kuralda da geçsin (operatör fark etmez). Bu kontrol 
+  hem eval'de hem uygulamanın segment doğrulamasında olsun; uygulamada          
+  tutarsızlık onarım döngüsüne girsin. Test et.                                 
+  5. Demo mock: -mock kuru koşusunda ve-email kırmızı, çünkü mock "en az 5      
+  sipariş"i okuyamıyor. Değerlendirenler büyük olasılıkla mock modda deneyecek. 
+  Mock sipariş sayısını yönüyle tanısın ("en az N sipariş", "N'den fazla        
+  sipariş" ve benzerleri); tanıyamadığı biçimde kriter unsupported_criteria'ya  
+  girsin. Test et.                                                              
+  6. Doğrulama: olmayan-kriter'i üç kez koştur ve üçünün de geçtiğini göster.   
+  Sonra Sonnet ile tüm seti bir kez koştur ve sonucu commit et. -mock kuru      
+  koşusu da tamamen yeşil olsun.                                                
+  7. DECISIONS'a kısa bir kayıt: hata, değişiklikten kaynaklanıp                
+  kaynaklanmadığı (kanıtıyla), kök neden, düzeltme ve yeni tutarlılık kontrolü. 
+                                                                                
+  Bitince make test çıktısını ve key sızıntı sayımlarını göster ve dur. Son     
+  mesajın kısa bir rapor olsun: her madde için ne çıktı, toplam harcama, hangi  
+  hook neyi engelledi.                                                          
+
+● Önce 0. madde: ai-sessions dosyasını tarıyorum.
+
+  Listed 1 directory, ran 6 shell commands (ctrl+o to expand)
+
+● Üç koşuda 2 başarısız, 1 geçti; hata kararsız ve harcama 0,044 $. Şimdi 2.
+  maddeye geçiyor, 183c686'nın dosyalarını eski sürüme alıp aynı brief'i üç kez
+  koşturacağım. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Eski kodda 3/3 geçerken yenisinde 1/3 geçiyor; tracked dosyaları geri aldım,
+  şimdi prompt ve şema farkına bakıyorum. · summary
+
+  Ran 6 shell commands (ctrl+o to expand)
+
+● Durum: 1–2. maddeler bitti (kayıt: eski kodda 3/3, yeni kodda 1/3; harcama
+  ≈0,09 $). Şimdi kök neden düzeltmesi: prompt'u kriter-kriter bir prosedüre
+  çeviriyorum.
+
+● Update(backend\internal\compose\prompts.go)
+  ⎿  Added 6 lines, removed 1 line
+      51  - Do not choose on the brief's behalf. If a number of orders or
+           an amount is given without saying whether it means more, less 
+          or exactly, do not pick a direction: leave that criterion out a
+          nd put it in "unsupported_criteria".
+      52  - If the brief asks for a value outside what a field allows (a 
+          period longer than %[4]d days, a city or a language that is not
+           listed), do not replace it with the nearest allowed value and 
+          do not apply it in a shortened form: leave that criterion out a
+          nd put it in "unsupported_criteria".
+      53  
+      54 -If part of the brief cannot be expressed (age, gender, product 
+         -categories, the order of events, anything outside the fields ab
+         -ove), never invent a condition for it, and never guess a city, 
+         -language, amount or time window that the brief does not state: 
+         -put it in "unsupported_criteria" as a short Turkish phrase and 
+         -keep the conditions you can express. If nothing at all can be e
+         -xpressed, return "conditions": [] (an empty array, no condition
+         -, every customer) and list the brief's criteria under "unsuppor
+         -ted_criteria"; do not put in a substitute condition to avoid an
+         - empty list. An empty "conditions" is also the right answer whe
+         -n the brief simply asks for all customers, and then "unsupporte
+         -d_criteria" stays empty. Leave "unsupported_criteria" empty whe
+         -n the whole brief is covered.                                  
+      54 +Go through the brief one criterion at a time, and decide each o
+         +ne on its own:                                                 
+      55 +- A criterion the fields above can express becomes a condition.
+         + Whether another criterion of the same brief can be expressed c
+         +hanges nothing about it: a city, a language, an amount or an ev
+         +ent the brief states always stays in the rule, also when the re
+         +st of the brief (age, gender, product categories, the order of 
+         +events, anything outside the fields above) cannot be expressed.
+      56 +- A criterion the fields cannot express becomes a short Turkish
+         + phrase in "unsupported_criteria", and nothing else: never a co
+         +ndition. A condition is not a substitute, a stand-in or a "clos
+         +est" version of it.                                            
+      57 +- Conditions describe who the customers are, never what the cam
+         +paign is about. A new collection, a discount or a holiday in th
+         +e brief is the topic of the message, not a reason for a purchas
+         +e or cart condition; only the words about who should receive it
+         + are criteria. The word "customer" alone does not mean that som
+         +eone has bought.                                               
+      58 +- If nothing at all can be expressed, return "conditions": [] (
+         +an empty array, no condition, every customer) and list the brie
+         +f's criteria under "unsupported_criteria"; do not put in a subs
+         +titute condition to avoid an empty list. An empty "conditions" 
+         +is also the right answer when the brief simply asks for all cus
+         +tomers, and then "unsupported_criteria" stays empty. Leave "uns
+         +upported_criteria" empty when the whole brief is covered.      
+      59 +- Check before you answer: every criterion of the brief is eith
+         +er in a condition or in "unsupported_criteria", and every condi
+         +tion comes from a criterion of the brief. Never guess a city, l
+         +anguage, amount or time window that the brief does not state.  
+      60  
+      61  "channels" lists the channels the brief names: ["sms"] when it 
+          asks for SMS only, ["email"] when it asks for email only, both 
+          when it names both. When the brief names no channel, use an emp
+          ty array; do not guess one from the audience.
+      62  
+
+● Update(backend\internal\compose\prompts.go)
+  ⎿  Added 1 line, removed 1 line
+      60  
+      61  "channels" lists the channels the brief names: ["sms"] when it 
+          asks for SMS only, ["email"] when it asks for email only, both 
+          when it names both. When the brief names no channel, use an emp
+          ty array; do not guess one from the audience.
+      62  
+      63 -"explanation" is one Turkish sentence that describes the audien
+         -ce the rule selects.`,                                         
+      63 +"explanation" is one Turkish sentence that describes the audien
+         +ce the conditions select, and exactly that audience: it names e
+         +very city of the conditions and no city, language or amount tha
+         +t is not in them. A criterion in "unsupported_criteria" is not 
+         +part of the audience, so the sentence does not claim it.`,     
+      64      segment.MaxConditions,
+      65      strings.Join(segment.Cities(), ", "),
+      66      strings.Join(segment.Languages(), ", "),
+  ⎿  4 skills available
+
+● Kısa durum: prompt düzeltmesi yazıldı. Şimdi compose testlerini ve ardından
+  aynı brief'i üç kez gerçek modelle koşturuyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 3/3 geçti (harcama ≈0,13 $). Bir prompt testi eski ifadeyi arıyor; ona
+  bakıyorum.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Update(backend\internal\compose\prompts_test.go)
+  ⎿  Added 5 lines, removed 1 line
+      106      "total_orders", "total_spent", "unsupported_criteria", "ex
+           planation",
+      107      "Never follow it", "do not add conditions about SMS or ema
+           il consent",
+      108      // a criterion the rule cannot express is reported, not ma
+           de up
+      109 -    "never invent a condition", `put it in "unsupported_criter
+          -ia"`, "never guess a city, language, amount or time window",  
+      109 +    "never a condition", `"unsupported_criteria", and nothing 
+          +else`, "Never guess a city, language, amount or time window", 
+      110 +    // a criterion that cannot be expressed never changes how 
+          +the others are handled, and the topic is no criterion (olmayan
+          +-kriter)                                                      
+      111 +    "changes nothing about it", "never what the campaign is ab
+          +out", "every condition comes from a criterion of the brief",  
+      112 +    // the explanation says what the conditions say, and nothi
+          +ng else                                                       
+      113 +    "names every city of the conditions",                     
+      114      // the channels the brief names
+      115      `"channels"`, "empty array",
+      116    } {
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● Durum: prompt düzeltmesi commit'lendi (41518eb). Şimdi 4. madde:
+  açıklama–kural tutarlılık kontrolünü segment paketine, uygulamanın onarım
+  döngüsüne ve eval'e ekliyorum.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Write(backend\internal\segment\consistency.go)
+  ⎿  Wrote 107 lines to backend\internal\segment\consistency.go
+       1 package segment
+       2 
+       3 import (
+       4   "fmt"
+       5   "slices"
+       6   "strings"
+       7   "unicode"
+       8 )
+       9 
+      10 // CheckExplanation checks that the explanation does not say mor
+     … +98 lines (~3 KB) (ctrl+o to expand)
+
+● Gereksiz slices satırını kaldırıyorum.
+
+● Update(backend\internal\segment\consistency.go)
+  ⎿  Removed 2 lines
+      103      from = start + len(name)
+      104    }
+      105  }
+      106 -                                                              
+      107 -var _ = slices.Contains[[]string] // keeps the import list sta
+          -ble for the vocabulary helpers in this package                
+
+● Update(backend\internal\segment\consistency.go)
+  ⎿  Removed 1 line
+      2  
+      3  import (
+      4    "fmt"
+      5 -  "slices"                                                      
+      5    "strings"
+      6    "unicode"
+      7  )
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+● Şimdi testi yazıyorum.
+
+● Write(backend\internal\segment\consistency_test.go)
+  ⎿  Wrote 81 lines to backend\internal\segment\consistency_test.go
+       1 package segment
+       2 
+       3 import (
+       4   "errors"
+       5   "strings"
+       6   "testing"
+       7 )
+       8 
+       9 func TestCheckExplanation(t *testing.T) {
+      10   t.Parallel()
+     … +71 lines (ctrl+o to expand)
+
+● Update(backend\internal\segment\consistency_test.go)
+  ⎿  Added 1 line, removed 1 line
+      22      {"the city is in the rule", "[" + city("eq", `"İstanbul"`) 
+          + "]", "İstanbul'da yaşayan müşteriler seçilir.", nil},
+      23      {"a negation counts as naming the city", "[" + city("neq", 
+          `"Ankara"`) + "]", "Ankara dışındaki müşteriler.", nil},
+      24      {"in and not_in lists", "[" + city("in", `["İzmir","Bursa"]
+          `) + "]", "İzmir ve Bursa'daki müşteriler.", nil},
+      25 -    {"one of two cities is missing", "[" + city("in", `["İzmir"
+         -]`) + "]", "İzmir ve Bursa'daki müşteriler.", []string{"İzmir",
+         - "Bursa"}[1:]},                                                
+      25 +    {"one of two cities is missing", "[" + city("in", `["İzmir"
+         +]`) + "]", "İzmir ve Bursa'daki müşteriler.", []string{"Bursa"}
+         +},                                                             
+      26      {"inside an any_of group", `[{"type":"any_of","conditions":
+          [` + city("eq", `"Ankara"`) + `,` + city("eq", `"Konya"`) + `]}
+          ]`, "Ankara veya Konya'daki müşteriler.", nil},
+      27      {"no condition at all", "[]", "Konya'daki müşteriler.", []s
+          tring{"Konya"}},
+      28      {"no city in the explanation", "[" + purchase + "]", "Son 3
+          0 günde satın alan müşteriler.", nil},
+
+● Şimdi composer ve eval bağlantısı.
+
+● Update(backend\internal\compose\compose.go)
+  ⎿  Added 4 lines
+      130        if err == nil {
+      131          err = segment.Validate(rule)
+      132        }
+      133 +      if err == nil {                                         
+      134 +        // The marketer reads the explanation: a city it names
+          + must be in the rule (the repair loop gets the problem).      
+      135 +        err = segment.CheckExplanation(rule)                  
+      136 +      }                                                       
+      137        if err != nil {
+      138          return segment.Rule{}, problemsOf(err)
+      139        }
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(backend\internal\eval\check.go)
+  ⎿  Added 1 line
+      26    CheckUnsupported  = "unsupported"
+      27    CheckWarnings     = "warnings"
+      28    CheckChannels     = "channels"
+      29 +  CheckExplanation  = "explanation_matches_rule"               
+      30    CheckContentValid = "content_valid"
+      31    CheckNoCutoff     = "no_refusal_or_cutoff"
+      32    CheckNoForbidden  = "no_forbidden_text"
+
+● Update(backend\internal\eval\check.go)
+  ⎿  Added 1 line, removed 1 line
+      35  
+      36  // Names of the checks in report order.
+      37  var (
+      38 -  SegmentChecks = []string{CheckSegmentValid, CheckRequired, Ch
+         -eckNoReversed, CheckNoInvented, CheckNoFiller, CheckUnsupported
+         -, CheckWarnings, CheckChannels}                                
+      38 +  SegmentChecks = []string{CheckSegmentValid, CheckRequired, Ch
+         +eckNoReversed, CheckNoInvented, CheckNoFiller, CheckUnsupported
+         +, CheckWarnings, CheckChannels, CheckExplanation}              
+      39    ContentChecks = []string{CheckContentValid, CheckNoCutoff, Ch
+          eckNoForbidden, CheckLanguage}
+      40  )
+      41  
+
+● Update(backend\internal\eval\check.go)
+  ⎿  Added 16 lines
+      415      check(CheckUnsupported, unsupportedProblems(rule, e)),
+      416      check(CheckWarnings, warningProblems(rule, aud, e)),
+      417      check(CheckChannels, channelProblems(rule, e)),
+      418 +    check(CheckExplanation, explanationProblems(rule)),       
+      419    }
+      420  }
+      421  
+      422 +// explanationProblems is the application's own consistency ch
+          +eck (segment.CheckExplanation: every city the explanation name
+          +s is                                                          
+      423 +// in a city condition), run again on the final rule. The appl
+          +ication already sends such a rule back to the model, so this o
+          +ne                                                            
+      424 +// can only fail when the repair loop let a rule through, whic
+          +h is what it is here to notice.                               
+      425 +func explanationProblems(rule segment.Rule) []string {        
+      426 +  errs, ok := errors.AsType[segment.ValidationErrors](segment.
+          +CheckExplanation(rule))                                       
+      427 +  if !ok {                                                    
+      428 +    return nil                                                
+      429 +  }                                                           
+      430 +  out := make([]string, len(errs))                            
+      431 +  for i, e := range errs {                                    
+      432 +    out[i] = e.Error()                                        
+      433 +  }                                                           
+      434 +  return out                                                  
+      435 +}                                                             
+      436 +                                                              
+      437  func dedupe(in []string) []string {
+      438    var out []string
+      439    for _, s := range in {
+
+● Update(backend\internal\eval\report.go)
+  ⎿  Added 1 line
+      16  var columnHeader = map[string]string{
+      17    CheckSegmentValid: "valid", CheckRequired: "required", CheckN
+          oReversed: "no-reversed", CheckNoInvented: "no-invented",
+      18    CheckNoFiller: "no-filler", CheckUnsupported: "unsupported", 
+          CheckWarnings: "warnings", CheckChannels: "channels",
+      19 +  CheckExplanation: "explanation",                             
+      20    CheckContentValid: "c-valid", CheckNoCutoff: "c-no-cutoff", C
+          heckNoForbidden: "c-no-forbidden",
+      21    CheckLanguage: "c-language",
+      22  }
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(backend\internal\compose\compose_test.go)
+  ⎿  Added 4 lines, removed 1 line
+      195      {"window too long", `{"conditions":[{"type":"event","event
+           ":"cart_add","op":"performed","within_days":400}],"unsupported
+           _criteria":[],"explanation":"x"}`, "conditions[0].within_days:
+            must be between 1 and 365"},
+      196      {"unknown event", `{"conditions":[{"type":"event","event":
+           "page_view","op":"performed","within_days":7}],"unsupported_cr
+           iteria":[],"explanation":"x"}`, "unknown event"},
+      197      {"empty explanation", `{"conditions":[{"type":"attribute",
+           "field":"city","op":"eq","value":"Ankara"}],"unsupported_crite
+           ria":[],"explanation":""}`, "explanation: must not be empty"},
+      198 -    {"blank explanation", `{"conditions":[{"type":"attribute",
+          -"field":"city","op":"eq","value":"Ankara"}],"unsupported_crite
+          -ria":[],"explanation":"   "}`, "explanation: must not be empty
+          -"},                                                           
+      198 +    // olmayan-kriter: the explanation says İstanbul, the rule
+          + has a purchase condition and no city                         
+      199 +    {"explanation names a city the rule does not have", `{"con
+          +ditions":[{"type":"event","event":"purchase","op":"performed",
+          +"within_days":30}],"unsupported_criteria":["25 yaş üstü"],"exp
+          +lanation":"İstanbul'daki müşteriler"}`, `explanation: names th
+          +e city "İstanbul", but no city condition of the rule has it`},
+      200 +    {"explanation names a second city the rule does not have",
+          + `{"conditions":[{"type":"attribute","field":"city","op":"eq",
+          +"value":"Ankara"}],"unsupported_criteria":[],"explanation":"An
+          +kara ve İzmir'deki müşteriler"}`, `names the city "İzmir"`},  
+      201 +    {"blank explanation",`{"conditions":[{"type":"attribute","
+          +field":"city","op":"eq","value":"Ankara"}],"unsupported_criter
+          +ia":[],"explanation":"   "}`, "explanation: must not be empty"
+          +},                                                            
+      202    }
+      203    for _, tt := range tests {
+      204      t.Run(tt.name, func(t *testing.T) {
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Not düşüyorum: eval testini cat >> ile eklemişim, oysa kural düzenlemelerin
+  yalnızca Edit ile yapılmasıydı. Aynı içeriği geri alıp Edit ile yeniden
+  ekliyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(backend\internal\eval\check_test.go)
+  ⎿  Added 29 lines
+      306    }
+      307  }
+      308  
+      309 +// The explanation names a city the rule does not have (olmaya
+          +n-kriter: İstanbul in the sentence, a purchase condition in th
+          +e                                                             
+      310 +// rule): the check fails and says which city. A rule that has
+          + the city passes.                                             
+      311 +func TestCheckSegment_explanationMatchesRule(t *testing.T) {  
+      312 +  t.Parallel()                                                
+      313 +  tests := []struct {                                         
+      314 +    name       string                                         
+      315 +    conditions string                                         
+      316 +    wantFail   bool                                           
+      317 +  }{                                                          
+      318 +    {"the city is missing from the rule", `[{"type":"event","e
+          +vent":"purchase","op":"performed","within_days":30}]`, true}, 
+      319 +    {"no condition at all", `[]`, true},                      
+      320 +    {"the city is in the rule", `[{"type":"attribute","field":
+          +"city","op":"neq","value":"İstanbul"}]`, false},              
+      321 +  }                                                           
+      322 +  for _, tt := range tests {                                  
+      323 +    t.Run(tt.name, func(t *testing.T) {                       
+      324 +      t.Parallel()                                            
+      325 +      rule := ruleOf(t, tt.conditions, `["25 yaş üstü"]`, `[]`
+          +)                                                             
+      326 +      rule.Explanation = "İstanbul'daki müşteriler için yeni k
+          +oleksiyon"                                                    
+      327 +      checks := CheckSegment(rule, someUsers, aloneSome(rule),
+          + Expect{FreeConditions: true})                                
+      328 +      if got := failed(checks)[CheckExplanation]; got != tt.wa
+          +ntFail {                                                      
+      329 +        t.Fatalf("%s failed = %v, want %v", CheckExplanation, 
+          +got, tt.wantFail)                                             
+      330 +      }                                                       
+      331 +      if d := detailOf(checks, CheckExplanation); tt.wantFail 
+          +&& !strings.Contains(d, `"İstanbul"`) {                       
+      332 +        t.Errorf("detail = %q, want it to name the city", d)  
+      333 +      }                                                       
+      334 +    })                                                        
+      335 +  }                                                           
+      336 +}                                                             
+      337 +                                                              
+      338  // countingAuditor says what each rule it is asked about reach
+           es, and what it was asked.
+      339  type countingAuditor struct {
+      340    asked []segment.Rule
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  Found 2 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Testler yeşil. 4. madde commit'i:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 5. madde: mock sipariş sayısı. Önce golden brief'lerdeki sipariş ifadelerine
+     ve mevcut mock testlerine bakıyorum.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Mock'u yazıyorum: yeni dosyada sipariş sayısı okuyucusu, eski "çözümlenemiyor"
+  bloğunun yerine.
+
+● Write(backend\internal\llm\mock_orders.go)
+  ⎿  Wrote 170 lines to backend\internal\llm\mock_orders.go
+      1 package llm
+      2 
+      3 import (
+      4   "fmt"
+      5   "regexp"
+      6   "slices"
+      7   "strconv"
+      8   "strings"
+      9 )
+     … +161 lines (ctrl+o to expand)
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 1 line
+      1  package llm
+      2  
+      3  import (
+      4 +  "encoding/json"                                               
+      5    "fmt"
+      6    "regexp"
+      7    "slices"
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 1 line, removed 1 line
+      89        if v, ok := parseVerb(baseOf(verbWord)); ok && v.negative
+           && slices.Contains(orderVerbStems, v.stem) {
+      90          op = flipOp(op) // "en az 5 siparişi olmayan" is the ot
+          her side of the number
+      91        }
+      92 -      cr.add(attr("total_orders", op, jsonNumber(strconv.Format
+         -Int(n, 10))), orderPhrase(op, n), fmt.Sprintf("Sipariş sayısı (
+         -%s)", label))                                                  
+      92 +      cr.add(attr("total_orders", op, json.Number(strconv.Forma
+         +tInt(n, 10))), orderPhrase(op, n), fmt.Sprintf("Sipariş sayısı 
+         +(%s)", label))                                                 
+      93      }
+      94    }
+      95    out.WriteString(b[last:])
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 4 lines
+      64      if trail != nil {
+      65        trailWord, verbWord = trail[1], trail[2]
+      66        end += len(trail[0])
+      67 +      if _, isVerb := parseVerb(baseOf(verbWord)); verbWord != 
+         +"" && !isVerb {                                                
+      68 +        end -= len(verbWord) // a word that only starts like a 
+         +verb is not part of the phrase                                 
+      69 +        verbWord = ""                                          
+      70 +      }                                                        
+      71      }
+      72  
+      73      op, clash := orderDirection(group(1), group(3), trailWord)
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Added 2 lines, removed 5 lines
+      177    events := map[string]*eventUse{} // cart_add, purchase
+      178    eventOrder := []string{}
+      179  
+      180 -  // A count of orders is a criterion the demo does not read; 
+          -say so, and keep the words out of the purchase reading.       
+      181 -  if m := orderCountRe.FindString(b); m != "" {               
+      182 -    cr.flag(fmt.Sprintf("Sipariş sayısı kriteri (%q) demo modu
+          -nda çözümlenemiyor", m))                                      
+      183 -    b = orderCountRe.ReplaceAllString(b, " ")                 
+      184 -  }                                                           
+      180 +  // A number of orders is read with its direction (mock_order
+          +s.go), or reported; the words are kept out of the purchase rea
+          +ding.                                                         
+      181 +  b = readOrderCounts(b, &cr)                                 
+      182  
+      183    // The period of the whole brief, used by an event whose cla
+           use names none.
+      184    global := findWindow(b, &cr)
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Removed 3 lines
+      34  
+      35    // An amount: 500 TL, 5.000 TL, 1,5 bin TL, 2 milyon lira.
+      36    amountRe = regexp.MustCompile(`(\d{1,3}(?:\.\d{3})+|\d+)(?:,(
+          \d{1,2}))?(?:\s*(bin|milyon))?\s*(?:tl|lira|₺)`)
+      37 -  // An order count: "3 sipariş", "5 adet alışveriş".          
+      38 -  orderCountRe = regexp.MustCompile(`\d+(?:'[a-z]+)?\s*(?:adet\
+         -s+)?(?:siparis|alisveris)\w*`)                                 
+      39 -                                                               
+      37    clauseSplitRe = regexp.MustCompile(`[;:!?()\n]|[,.]\s|[,.]$`)
+      38  )
+      39  
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Added 1 line, removed 1 line
+      536  }
+      537  
+      538  func flipOp(op string) string {
+      539 -  return map[string]string{"gte": "lt", "gt": "lte", "lte": "g
+          -t", "lt": "gte"}[op]                                          
+      539 +  return map[string]string{"gte": "lt", "gt": "lte", "lte": "g
+          +t", "lt": "gte", "eq": "neq", "neq": "eq"}[op]                
+      540  }
+      541  
+      542  // amountDirection reads the words around an amount: "üzeri", 
+           "en az" (at least), "altında", "en fazla" (at most).
+  ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
+● Update(backend\internal\llm\mock_segment_test.go)
+  ⎿  Added 27 lines, removed 1 line
+      154      {brief: "İzmir'deki müşterilere 50 TL indirim kuponu", con
+           ds: []string{"city eq İzmir"}},
+      155  
+      156      // --- other things the mock does not read are reported
+      157 -    {brief: "İzmir'deki en az 3 sipariş veren müşteriler", con
+          -ds: []string{"city eq İzmir"}, unsupported: []string{"sipariş 
+          -sayısı"}},                                                    
+      157 +    // --- a number of orders is read with its direction (the 
+          +golden brief ve-email, and the other ways to say it)          
+      158 +    {brief: "Ankara'da yaşayan ve en az 5 siparişi olan müşter
+          +ilerimize sadece e-posta ile teşekkür kampanyası göndermek ist
+          +iyorum.", conds: []string{"city eq Ankara", "total_orders gte 
+          +5"}},                                                         
+      159 +    {brief: "İzmir'deki en az 3 sipariş veren müşteriler", con
+          +ds: []string{"city eq İzmir", "total_orders gte 3"}},         
+      160 +    {brief: "5'ten fazla siparişi olan müşteriler", conds: []s
+          +tring{"total_orders gt 5"}},                                  
+      161 +    {brief: "5 siparişten fazla veren müşteriler", conds: []st
+          +ring{"total_orders gt 5"}},                                   
+      162 +    {brief: "5 sipariş ve üzeri veren müşteriler", conds: []st
+          +ring{"total_orders gte 5"}},                                  
+      163 +    {brief: "5 veya daha fazla siparişi olan müşteriler", cond
+          +s: []string{"total_orders gte 5"}},                           
+      164 +    {brief: "en az beş siparişi olan müşteriler", conds: []str
+          +ing{"total_orders gte 5"}},                                   
+      165 +    {brief: "en fazla 2 siparişi olan müşteriler", conds: []st
+          +ring{"total_orders lte 2"}},                                  
+      166 +    {brief: "3'ten az siparişi olan müşteriler", conds: []stri
+          +ng{"total_orders lt 3"}},                                     
+      167 +    {brief: "3 siparişten az veren müşteriler", conds: []strin
+          +g{"total_orders lt 3"}},                                      
+      168 +    {brief: "tam 4 siparişi olan müşteriler", conds: []string{
+          +"total_orders eq 4"}},                                        
+      169 +    {brief: "10 adet alışveriş yapmış ve üzeri müşteriler", co
+          +nds: []string{"total_orders gte 10"}},                        
+      170 +    // a negated verb is the other side of the number, not a s
+          +econd criterion                                               
+      171 +    {brief: "en az 5 siparişi olmayan müşteriler", conds: []st
+          +ring{"total_orders lt 5"}},                                   
+      172 +    {brief: "en fazla 5 sipariş vermeyen müşteriler", conds: [
+          +]string{"total_orders gt 5"}},                                
+      173 +    {brief: "tam 4 siparişi olmayan müşteriler", conds: []stri
+          +ng{"total_orders neq 4"}},                                    
+      174 +    // it works with the purchase event of the same brief, and
+          + the order words do not make a purchase event                 
+      175 +    {brief: "son 30 günde sipariş veren ve en az 3 siparişi ol
+          +an müşteriler", conds: []string{"purchase performed 30 days", 
+          +"total_orders gte 3"}},                                       
+      176 +    {brief: "en az 3 siparişi olan müşteriler", conds: []strin
+          +g{"total_orders gte 3"}},                                     
+      177 +    // no direction, two directions that disagree, or a number
+          + out of range: reported, never guessed                        
+      178 +    {brief: "3 sipariş veren müşteriler", conds: []string{catc
+          +hAll}, unsupported: []string{"sipariş sayısı", "yön belirtilme
+          +miş"}},                                                       
+      179 +    {brief: "İzmir'deki 3 siparişi olan müşteriler", conds: []
+          +string{"city eq İzmir"}, unsupported: []string{"sipariş sayısı
+          +", "yön belirtilmemiş"}},                                     
+      180 +    {brief: "en az 3'ten fazla siparişi olan müşteriler", cond
+          +s: []string{catchAll}, unsupported: []string{"sipariş sayısı",
+          + "çelişen"}},                                                 
+      181 +    {brief: "en az 99999999999 siparişi olan müşteriler", cond
+          +s: []string{catchAll}, unsupported: []string{"sipariş sayısı",
+          + "aralığın dışında"}},                                        
+      182 +    // "bir" is an article more often than a number: without a
+          + direction it is left alone, and the purchase is read as usual
+      183 +    {brief: "son 7 günde bir sipariş veren müşteriler", conds:
+          + []string{"purchase performed 7 days"}},                      
+      184      {brief: "İzmir'deki kadın müşteriler", conds: []string{"ci
+           ty eq İzmir"}, unsupported: []string{"Cinsiyet ve yaş"}},
+      185      {brief: "25-35 yaşındaki müşteriler", conds: []string{catc
+           hAll}, unsupported: []string{"Cinsiyet ve yaş"}},
+      186  
+  ⎿  Found 5 new diagnostic issues in 2 files (ctrl+o to expand)
+
+● Koşulların sırası (şehir, dil, olay, sonra sayılar) testlerde sabit; sipariş
+  koşulunu ertelenmiş eklemeye çeviriyorum.
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 2 lines, removed 1 line
+      40  
+      41  // readOrderCounts turns every number of orders in the folded b
+          rief into a total_orders condition or an unsupported criterion,
+           and
+      42  // returns the brief without the words it read, so that the pur
+          chase reading does not see them again.
+      43 -func readOrderCounts(b string, cr *criteria) string {          
+      43 +func readOrderCounts(b string, cr *criteria) (string, []func())
+         + {                                                             
+      44    var out strings.Builder
+      45 +  var add []func() // the conditions are added later, after the
+         + city, language and event ones, so the rule reads in the usual 
+         +order                                                          
+      46    last := 0
+      47    for _, loc := range orderCountRe.FindAllStringSubmatchIndex(b
+          , -1) {
+      48      group := func(i int) string {
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 3 lines, removed 2 lines
+       94        if v, ok := parseVerb(baseOf(verbWord)); ok && v.negativ
+           e && slices.Contains(orderVerbStems, v.stem) {
+       95          op = flipOp(op) // "en az 5 siparişi olmayan" is the o
+           ther side of the number
+       96        }
+       97 -      cr.add(attr("total_orders", op, json.Number(strconv.Form
+          -atInt(n, 10))), orderPhrase(op, n), fmt.Sprintf("Sipariş sayıs
+          -ı (%s)", label))                                              
+       97 +      cond, part, describe := attr("total_orders", op, json.Nu
+          +mber(strconv.FormatInt(n, 10))), orderPhrase(op, n), fmt.Sprin
+          +tf("Sipariş sayısı (%s)", label)                              
+       98 +      add = append(add, func() { cr.add(cond, part, describe) 
+          +})                                                            
+       99      }
+      100    }
+      101    out.WriteString(b[last:])
+      101 -  return out.String()                                         
+      102 +  return out.String(), add                                    
+      103  }
+      104  
+      105  // orderDirection reads the direction from the words before th
+           e number and the ones around the noun. clash is true when two 
+           of them
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Added 1 line, removed 1 line
+      175    eventOrder := []string{}
+      176  
+      177    // A number of orders is read with its direction (mock_order
+           s.go), or reported; the words are kept out of the purchase rea
+           ding.
+      178 -  b = readOrderCounts(b, &cr)                                 
+      178 +  b, orderConds := readOrderCounts(b, &cr)                    
+      179  
+      180    // The period of the whole brief, used by an event whose cla
+           use names none.
+      181    global := findWindow(b, &cr)
+
+● Update(backend\internal\llm\mock_segment.go)
+  ⎿  Added 4 lines, removed 1 line
+      388      cr.add(map[string]any{"type": "event", "event": name, "op"
+           : op, "within_days": use.days}, part, describe)
+      389    }
+      390  
+      391 -  // Amounts.                                                 
+      391 +  // Numbers of orders, then amounts.                         
+      392 +  for _, add := range orderConds {                            
+      393 +    add()                                                     
+      394 +  }                                                           
+      395    readAmounts(b, &cr)
+      396  
+      397    for _, tok := range strings.Fields(b) {
+
+● Update(backend\internal\llm\mock_segment_test.go)
+  ⎿  Added 1 line, removed 1 line
+      166      {brief: "3'ten az siparişi olan müşteriler", conds: []stri
+           ng{"total_orders lt 3"}},
+      167      {brief: "3 siparişten az veren müşteriler", conds: []strin
+           g{"total_orders lt 3"}},
+      168      {brief: "tam 4 siparişi olan müşteriler", conds: []string{
+           "total_orders eq 4"}},
+      169 -    {brief: "10 adet alışveriş yapmış ve üzeri müşteriler", co
+          -nds: []string{"total_orders gte 10"}},                        
+      169 +    {brief: "10 alışveriş ve üzeri yapan müşteriler", conds: [
+          +]string{"total_orders gte 10"}},                              
+      170      // a negated verb is the other side of the number, not a s
+           econd criterion
+      171      {brief: "en az 5 siparişi olmayan müşteriler", conds: []st
+           ring{"total_orders lt 5"}},
+      172      {brief: "en fazla 5 sipariş vermeyen müşteriler", conds: [
+           ]string{"total_orders gt 5"}},
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  Found 4 new diagnostic issues in 1 file (ctrl+o to expand)
+
+● Update(backend\internal\llm\mock_orders.go)
+  ⎿  Added 1 line, removed 1 line
+      32  
+      33    // What may follow the noun: a direction ("5 siparişten fazla
+          ", "5 sipariş ve üzeri") and the verb that goes with it
+      34    // ("siparişi olan", "sipariş vermeyen"), which is read here 
+          so that its negation is not reported on its own.
+      35 -  orderAfterRe = regexp.MustCompile(`^\s*(?:(ve\s+uzeri|ve\s+us
+         -tu|ve\s+yukari|ve\s+alti|ve\s+asagi|(?:ve|veya|ya\s+da)\s+(?:da
+         -ha\s+)?(?:fazla|cok|az)|` +                                    
+      35 +  orderAfterRe = regexp.MustCompile(`^(?:\s+(ve\s+uzeri|ve\s+us
+         +tu|ve\s+yukari|ve\s+alti|ve\s+asagi|(?:ve|veya|ya\s+da)\s+(?:da
+         +ha\s+)?(?:fazla|cok|az)|` +                                    
+      36      `ustunde|uzerinde|asan|altinda|asagisinda|fazla|cok|az)\b)?
+          (?:\s+((?:ver|ol|yap|et|al)\w*))?`)
+      37  
+      38    orderVerbStems = []string{"ver", "ol", "yap", "et", "al"}
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Go testleri yeşil. Şimdi ücretsiz -mock kuru koşusu:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Mock kuru koşusu 16/16 yeşil (ve-email dahil). 5. madde commit'i:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 6. madde: önce olmayan-kriter'i üç kez, ardından tüm seti bir kez
+     koşturuyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 3/3 geçti (toplam ≈0,18 $). Şimdi Sonnet ile tüm set, 0,35 $ tavanıyla:
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 16/16 geçti ($0,249; toplam gerçek harcama ≈ $0,43). Tam koşunun dosyalarını
+  ayırıp ara koşuların dosyalarını temizliyorum, sonra commit.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● 7. madde: DECISIONS kaydı. Son girdilerin biçimine bakıyorum.
+
+  Searched for 1 pattern, read 1 file (ctrl+o to expand)
+
+● Update(DECISIONS.md)
+  ⎿  Added 43 lines
+      1537    open, not explained, and was not fixed here because a promp
+            t change would invalidate the full run above and the session'
+            s
+      1538    spending limit did not allow another one. Session spend on 
+            the real API about $0.31 (the full run $0.263, two single-bri
+            ef
+      1539    runs $0.029, the smoke test about $0.015, estimated from it
+            s token counts).
+      1540 +  **Corrected in the next section:** "not caused by this chan
+           +ge" was concluded from putting back `prompts.go` alone; with 
+           +every                                                        
+      1541 +  file of the change put back the brief passed, so the change
+           + is the likely cause.                                        
+      1542  
+      1543 +## A criterion the rule cannot express must not replace one i
+           +t can (2026-11-15, olmayan-kriter)                           
+      1544 +- **The problem.** `olmayan-kriter` ("İstanbul'daki 25 yaş üs
+           +tü kadın müşterilere SMS ile yeni koleksiyonu tanıtalım.") on
+      1545 +  claude-sonnet-5-5 gave `purchase performed within 30d` and 
+           +no city, with `unsupported_criteria` right (age, gender). The
+      1546 +  explanation still said "İstanbul'daki müşteriler", so the s
+           +creen text and the rule disagreed, and a marketer who trusts 
+           +the                                                          
+      1547 +  sentence sends to the wrong audience (every customer who bo
+           +ught in 30 days, in every city). Three runs of the unchanged 
+           +code:                                                        
+      1548 +  2 failed this way, 1 passed.                               
+      1549 +- **Was it the change of 183c686?** Probably, not proven. All
+           + 17 files of the commit were put back to 1822051 (`git checko
+           +ut                                                           
+      1550 +  1822051 -- <files>`, then `git checkout HEAD -- <files>`; `
+           +git status` was clean afterwards): **3 of 3 runs passed**, al
+           +l with                                                       
+      1551 +  the city and the right unsupported criteria. With the chang
+           +e: 1 of 3. Three against three runs is suggestive only (one-s
+           +ided                                                         
+      1552 +  Fisher p about 0.1), and which part of the change matters (
+           +the prompt text, or the schema description "0 to N entries ..
+           +. every                                                      
+      1553 +  customer") was not separated: the previous session had put 
+           +back `prompts.go` alone, which is why it saw no difference.  
+      1554 +- **Root cause.** The old prompt had one answer for "part of 
+           +the brief cannot be expressed": a stand-in condition (languag
+           +e in                                                         
+      1555 +  tr, en). When 183c686 took the stand-in away, nothing told 
+           +the model what to do with the part it could not express excep
+           +t "keep                                                      
+      1556 +  the conditions you can express" in one long sentence, and t
+           +he model made its own stand-in out of the topic of the campai
+           +gn                                                           
+      1557 +  ("customers", "new collection" read as "bought recently") a
+           +nd dropped the city, which it could express. The prompt allow
+           +ed                                                           
+      1558 +  this: "use 30 when the brief gives no window" and no rule t
+           +hat a condition describes who the customers are.             
+      1559 +- **The fix (general, no golden brief is named in the prompt)
+           +.** The segment prompt now has the model go through the brief
+           + one                                                         
+      1560 +  criterion at a time: an expressible criterion is always a c
+           +ondition, whatever else the brief asks; an inexpressible one 
+           +is a                                                         
+      1561 +  phrase in `unsupported_criteria` and nothing else, never a 
+           +stand-in; conditions say who the customers are, not what the 
+      1562 +  campaign is about; and a closing check (every criterion is 
+           +in a condition or in `unsupported_criteria`, every condition 
+           +comes                                                        
+      1563 +  from a criterion). The explanation must name every city of 
+           +the conditions and claim no unsupported criterion. After it: 
+           +3 of 3                                                       
+      1564 +  single runs, 3 of 3 again after the rest of this work, and 
+           +the full set **16 of 16** (`eval/results/20261115-142948-clau
+           +de-sonnet-5-5.md`,                                           
+      1565 +  $0.249, no repair). That is 7 passes in 7 runs of the brief
+           +, still a smoke result and not a rate.                       
+      1566 +- **The consistency check.** `segment.CheckExplanation`: ever
+           +y city of the vocabulary that the explanation names must be i
+           +n a                                                          
+      1567 +  city condition of the rule (`eq`, `neq`, `in`, `not_in`, to
+           +p level or inside an `any_of`; the operator does not matter, 
+           +so "not in                                                   
+      1568 +  Ankara" counts as naming it). Names are compared with the T
+           +urkish letters and the case folded and a suffix allowed      
+      1569 +  ("İstanbul'daki", "ISTANBUL'da"); the match must start at a
+           + word boundary, so "Karaadana" is not Adana. The compose vali
+           +dation                                                       
+      1570 +  calls it after `Validate`, so a mismatch goes to the repair
+           + loop with a message that says what to do (add the condition 
+           +if the                                                       
+      1571 +  brief asks for the city, otherwise take it out of the expla
+           +nation). It is not part of `Validate`/`Compile` on purpose: t
+           +hose                                                         
+      1572 +  describe what a rule selects and must keep accepting stored
+           + rules. The eval has the same check as the column            
+      1573 +  `explanation_matches_rule`, on every brief. Cities are the 
+           +only vocabulary checked, because they are the only value an  
+      1574 +  explanation names that way (languages and amounts have no f
+           +ixed spelling in a sentence); the other direction (a conditio
+           +n                                                            
+      1575 +  the explanation does not mention) is not checked. This chec
+           +k would have caught the failure above, with the old prompt.  
+      1576 +- **The demo mock.** It could not read "en az 5 siparişi olan
+           +", so `ve-email` failed in `make eval EVAL_ARGS="-mock"`, the
+           + mode a                                                      
+      1577 +  reviewer without a key will try. It now reads a number of o
+           +rders with its direction ("en az N", "en fazla N", "N'den faz
+           +la",                                                         
+      1578 +  "N'den az", "N ve üzeri", "tam N", number words, a negated 
+           +verb as the other side) and puts everything else (no directio
+           +n,                                                           
+      1579 +  contradicting directions, out of range) into `unsupported_c
+           +riteria`, never guessing a direction; a bare "bir" stays an a
+           +rticle.                                                      
+      1580 +  The mock dry run is 16 of 16.                              
+      1581 +- **Spend on the real API this session: about $0.43** (the fu
+           +ll run $0.249, nine single-brief runs $0.134, all read from t
+           +he                                                           
+      1582 +  result files).                                             
+      1583 +                                                             
+      1584  ## Open issues
+      1585  
+      1586  (What was not finished, and what was decided to stay as it is
+            . "Settled" items are kept on purpose, with the reason, and w
+            ait for
+
+● Update(DECISIONS.md)
+  ⎿  Added 1 line, removed 1 line
+      1578    "N'den az", "N ve üzeri", "tam N", number words, a negated 
+            verb as the other side) and puts everything else (no directio
+            n,
+      1579    contradicting directions, out of range) into `unsupported_c
+            riteria`, never guessing a direction; a bare "bir" stays an a
+            rticle.
+      1580    The mock dry run is 16 of 16.
+      1581 -- **Spend on the real API this session: about $0.43** (the fu
+           -ll run $0.249, nine single-brief runs $0.134, all read from t
+           -he                                                           
+      1581 +- **Spend on the real API this session: about $0.43** (the fu
+           +ll run $0.249, twelve single-brief runs $0.179, all read from
+           + the                                                         
+      1582    result files).
+      1583  
+      1584  ## Open issues
+
+● Şimdi make test (Docker, tüm Go + entegrasyon + web kontrolleri):
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Çıktı tail ile kesildi ve çıkış kodu güvenilir değil; tam çıktıyı dosyaya alıp
+  çıkış kodunu doğru okuyarak tekrar koşuyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● make test yeşil (çıkış 0; web 671 test, Go tüm paketler). Hook test özetine
+  bakıp DECISIONS'ı commit'liyorum, sonra sızıntı sayımları:
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Sayımlar sıfır değil; içeriği yazdırmadan hangi dosyalarda olduklarına
+  bakıyorum (yalnızca dosya adları).
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Altı madde bitti, 7. maddede DECISIONS kaydı da commit'li. make test yeşil,
+  eval tam seti de 16/16 geçti. Gerçek API harcaması yaklaşık $0,43, yani $0,60
+  sınırının altında.
+
+  0. ai-sessions. 18-dolgu-kosul.txt kontrol script'iyle temiz çıktı, maskeleme
+  gerekmedi, olduğu gibi commit'ledim (26f988b).
+
+  1. Yeniden üretme. olmayan-kriter'i üç kez koşturdum, 2'si başarısız oldu.
+  Başarısız koşularda kural purchase performed within 30d idi ve şehir yoktu.
+  Açıklama "İstanbul'daki…" diyordu, unsupported_criteria ise doğruydu (yaş,
+  kadın). Üçüncü koşuda kural city eq İstanbul idi ve geçti.
+
+  2. Değişiklik mi? Büyük olasılıkla evet, ama kesin kanıt değil. 183c686'nın 17
+  dosyasını 1822051'e alınca 3/3 geçti, mevcut kodda 1/3 geçti. Üçe üç koşu az,
+  hangi parçanın (prompt metni mi, şema açıklaması mı) sebep olduğunu
+  ayıramadım. Geri alma sonrası git status temizdi. Geçen oturumdaki "bu
+  değişiklikten değil" sonucu yalnızca prompts.go'yu geri almaya dayanıyordu.
+  DECISIONS'a bu düzeltmeyi yazdım.
+
+  3. Kök neden ve düzeltme (41518eb).
+  - Kök neden: Eski prompt, ifade edilemeyen kısım için hazır bir yedek koşul
+    veriyordu (dil koşulu). 183c686 onu kaldırınca model kampanyanın konusundan
+    ("yeni koleksiyon", "müşteri") kendi yedek koşulunu üretti ve ifade
+    edebildiği şehri düşürdü.
+  - Düzeltme: Prompt artık kriteri tek tek ele alıyor: ifade edilebilen her
+    zaman koşul olur, edilemeyen yalnızca unsupported_criteria'ya girer, koşul
+    "kim" der "konu ne" demez. Son olarak da bir kontrol adımı var. Hiçbir altın
+    brief'e göre ayar yapılmadı.
+  - Sonuç: Düzeltmeden sonra 3/3 geçti.
+
+  4. Tutarlılık kontrolü (c2e98b5).
+  - Kontrol: segment.CheckExplanation: açıklamada geçen ve şehir listesinde olan
+    her şehir kuralda da olmalı (operatör fark etmez, any_of içi de sayılır).
+    Büyük/küçük harf ve Türkçe harfler katlanıyor, ek kabul ediliyor
+    ("İstanbul'daki"). "Karaadana" Adana sayılmıyor.
+  - Bağlantı: Uygulamada compose doğrulamasından çağrılıyor, tutarsızlık onarım
+    döngüsüne giriyor. Eval'de explanation_matches_rule sütunu var.
+  - Validate/Compile: Bilerek dokunulmadı, kayıtlı eski kurallar derlenmeye
+    devam ediyor.
+  - Test: Segment, compose ve eval için test ekledim.
+
+  5. Mock sipariş sayısı (ba32943). Mock artık "en az N", "en fazla N", "N'den
+  fazla/az", "N ve üzeri", "tam N", sayı sözcüklerini ve olumsuz fiili tanıyor.
+  Yönsüz, çelişkili veya aralık dışı sayı unsupported_criteria'ya giriyor. Yalın
+  "bir" tanımıyor (çoğu zaman artikel). -mock kuru koşusu 16/16 yeşil.
+
+  6. Doğrulama (1b59179). Son kodla olmayan-kriter 3/3 geçti. Sonnet ile tüm set
+  16/16 geçti, onarım gerekmedi, maliyet $0,249. Brief toplamda 7 koşuda 7 kez
+  geçti, bu bir oran değil, duman testi sonucudur.
+
+  7. DECISIONS (3029399). Hata, değişiklikten kaynaklanma kanıtı ve sınırı, kök
+  neden, düzeltme, yeni kontrol ve mock.
+
+  make test: çıkış 0, web 671 test, hook testleri 0 başarısız, Go tüm paketler
+  ok.
+
+  Sızıntı sayımları (yalnızca sayı, içerik yazdırılmadı):
+
+  ┌───────────────────────┬─────────────────────────────────────────────────┐
+  │        Kontrol        │                      Sonuç                      │
+  ├───────────────────────┼─────────────────────────────────────────────────┤
+  │ check-ai-sessions     │ temiz                                           │
+  ├───────────────────────┼─────────────────────────────────────────────────┤
+  │ gitleaks git          │ sızıntı yok                                     │
+  │ (geçmişin tamamı)     │                                                 │
+  ├───────────────────────┼─────────────────────────────────────────────────┤
+  │ sk-ant- içeren satır  │ 16, 12 dosyada (ai-sessions, CLAUDE.md, docs,   │
+  │                       │ kontrol script'i ve testleri, eval testi)       │
+  ├───────────────────────┼─────────────────────────────────────────────────┤
+  │                       │ 37, bunların 33'ü noreply dışı, yalnızca dosya  │
+  │ e-posta biçimli dize  │ adlarına baktım (test fixture, seed, skill      │
+  │                       │ dokümanı, DECISIONS)                            │
+  ├───────────────────────┼─────────────────────────────────────────────────┤
+  │ telefon biçimli dize  │ 4, üçü eval JSON'larındaki ondalık sayılar,     │
+  │                       │ biri kontrol script'inin testi                  │
+  └───────────────────────┴─────────────────────────────────────────────────┘
+
+  sk-ant- ve e-posta eşleşmelerinin içeriğini incelemedim; check-ai-sessions ve
+  gitleaks temiz.
+
+  Hook'lar: Hiçbir hook bir şeyi engellemedi. Pre-commit gitleaks her commit'te
+  çalıştı, sızıntı bulmadı.
+
+  Kural sapması: Bir eval testini bir kez cat >> ile eklemiştim. Bunu fark
+  edince geri aldım ve aynı içeriği Edit ile yeniden ekledim, commit'lenen hal
+  Edit'li olandır. Scratchpad'e ara sonuçları göstermek için küçük bir okuma
+  script'i yazdım, repo dışında.
+
+  Silinen dosyalar: Ara eval koşularının sonuç dosyalarını sildim (12 koşu, 24
+  dosya, hepsi izlenmeyen dosyaydı). Sayıları DECISIONS'ta.
+
+✻ Churned for 19m 48s · done 17:38
+
+※ recap: Hedef, altın setteki olmayan-kriter hatasını düzeltmekti. Yedi maddenin hepsi bitti ve commit'lendi, make test yeşil, tam set 16/16 geçti, harcama yaklaşık 0,43 $. Yapacak bir şey kalmadı, istersen push için onayını bekliyorum. (disable recaps in /config)
