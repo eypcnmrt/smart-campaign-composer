@@ -8,8 +8,9 @@ import (
 	"smartcampaign/internal/eval"
 )
 
-// A made-up key, long enough to be found in an output if anything printed it.
-const fakeKey = "sk-ant-not-a-real-key-0123456789abcdefghijklmnopqrstuvwxyz"
+// A made-up key, long enough to be found in an output if anything printed it. It is not in the shape of any real key
+// (no vendor prefix), so no secret scanner takes it for a leaked one.
+const fakeKey = "test-only-fake-key-0123456789abcdefghijklmnopqrstuvwxyz"
 
 func runWith(t *testing.T, env map[string]string, args ...string) (code int, out string) {
 	t.Helper()
