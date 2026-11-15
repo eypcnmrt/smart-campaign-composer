@@ -1357,11 +1357,53 @@ Sonnet passed the same set at 42 % of the cost in 55 % of the time, with fewer o
 different prompts and one run per brief, so this is "nothing here argues against Sonnet", not "Sonnet is as good". A fair test would
 run opus on the full set with the new prompt (about $0.52) and repeat each brief several times.
 
+### Follow-up: repair reasons, the explanation rule and both models on the final prompt (2026-11-15)
+Real API spend of this follow-up: **$0.817** of the $1.00 it was given (summed from the `usage` fields: $0.546 + $0.220 + $0.035 +
+$0.015, below). Everything below is one run per brief and model.
+
+- **Repair reasons are recorded.** `compose.Composer.OnRejected` reports every rejected answer (the last one of a failed task too);
+  the runner stores stage, attempt, field, code and message per brief (`repair_reasons` in the result JSON, a "Why answers were
+  repaired" section in the report). A content error has the validator's code (`empty`, `too_long`, ...); **a segment error has a field
+  and a message only**, because the segment validator has no codes and adding them to its 39 error sites was not worth it here.
+- **An empty or whitespace-only `explanation` is a validation error** (`segment.Decode`: "explanation: must not be empty or only
+  whitespace"), so it enters the repair loop like any other wrong answer. The demo mock always writes one (tested for empty, blank
+  and gibberish briefs). It happened again with the real model: opus returned an empty one for `son-14-gun-siparis` in the full run
+  below, and the second answer fixed it (the only segment repair of that run). Before this rule that rule would have been approved
+  with an empty audience sentence, and the content request would have got no audience line.
+- **Why `ve-email` needed a content repair (found by the reasons, sonnet run): `sms [empty]`.** The brief says "sadece e-posta", the
+  schema and `content.Validate` require all three fields to be non-empty, and the content prompt never said so, so the model left the
+  unused SMS empty. A general gap, not a brief-specific one, so the fix is one general sentence in the content prompt (all three fields
+  are required and non-empty also when the brief names one channel; the application decides which channels are sent), pinned by a
+  test. Re-run of that brief alone, once per model: both pass with no repair (opus $0.035, sonnet $0.015). Opus did not need a repair
+  on `ve-email` in its full run either, so its repairs in the earlier runs were probably the same, but the earlier result files did
+  not record the reason, so that is a guess.
+- **Both models, same 14 briefs, the segment prompt of the fix above** (the content sentence came after these two runs):
+
+  | | claude-opus-5-5 | claude-sonnet-5-5 |
+  |---|---|---|
+  | Full-set runs on this prompt | 1 | 2 (the earlier $0.219 run and this one) |
+  | Briefs passed | 14 of 14 | 14 of 14 (both runs) |
+  | Cost of the run | $0.546 | $0.220 |
+  | Tokens in / out | 71,011 / 13,096 | 68,430 / 8,352 |
+  | Model time | 175 s | 98 s |
+  | Repairs (segment / content) | 1 / 0 | 0 / 1 |
+
+  The opus run also answers the regression question: the ten briefs that passed before the prompt fix still pass (and so do the four
+  that failed), so nothing got worse in this run. One run each, so "no regression seen once". The two models are close on the checks
+  (the checks test validity and the conditions, not wording) and differ in price (sonnet 40 %) and time (sonnet 56 %); the Turkish
+  of the two models' SMS and subjects is for the owner to read, side by side, in
+  `eval/results/20261115-105633-compare-claude-opus-5-5-vs-claude-sonnet-5-5.md` (the `ve-email` re-run is in
+  `...-105913-compare-...`). The default stays `claude-opus-5-5`.
+- **`go run ./cmd/eval -compare a.json,b.json -out DIR`** writes such a comparison from two result files, with no model call and no
+  database.
+
 ### Left open by this session
-- `ve-email` needed one content repair in all three runs, on both models; the result files record how many repairs, not why. Recording
-  the validator's problems per repair would show whether the prompt or the validator is the cause.
-- An empty `explanation` passes `segment.Validate` (see `tutar-yonlu`, first run); the UI then shows an empty audience sentence.
-- The estimate before a run assumes the token counts of the smoke test; a longer prompt raises the real cost by a few percent.
+- The content step still has no say over channels: the text of a channel the campaign does not send is written anyway (see the
+  `ve-email` fix). Letting an unused field be empty would change the content contract and the UI, so it was not done.
+- A segment error has no code, only a field and a message (above); a report by code is possible for content only.
+- The estimate printed before a run uses the token counts of the smoke test: for opus it said $0.63, the run cost $0.546 (the
+  answers were shorter than in the smoke test), so it is a rough upper figure, not a forecast. The `-compare` file matches briefs by
+  id only.
 
 ## Open issues
 
