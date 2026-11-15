@@ -15,6 +15,17 @@ Everything below was downloaded into a git-ignored quarantine folder, scanned, a
 | Plugin `gopls-lsp@claude-plugins-official` (project scope, enabled in `.claude/settings.json`) | Claude Code plugin cache | https://github.com/anthropics/claude-plugins-official, `plugins/gopls-lsp` | content identical to `dceb15d50832e6adf380bedc26dde03d251324b9` | Apache-2.0 | Anthropic |
 | `gopls` v0.24.0 (not vendored; installed with `go install golang.org/x/tools/gopls@v0.24.0`) | `$GOPATH/bin` | https://github.com/golang/tools | tag `gopls/v0.24.0` | BSD-3-Clause | The Go Authors |
 
+## CI tooling (not Claude Code tooling)
+
+| Component | Used for | Pin | License |
+|---|---|---|---|
+| Docker image `rhysd/actionlint` (the official image of https://github.com/rhysd/actionlint) | checking `.github/workflows/ci.yml` (it includes shellcheck for the `run:` scripts); runs with `--network none` and the repository mounted read-only | tag `1.7.12`, digest `sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667`; use the digest, not the tag | MIT |
+| GitHub Action `actions/checkout` (official, https://github.com/actions/checkout) | the only action of `ci.yml` | tag `v6.1.0`, commit `d23441a48e516b6c34aea4fa41551a30e30af803` (taken from the tag of the official repository with `git ls-remote`) | MIT |
+
+The check, from PowerShell in the repository root:
+`docker run --rm --network none -v "${PWD}:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667`
+(no output and exit status 0 means no finding).
+
 ## Local modifications
 
 - `golang-*` skills (samber): the `allowed-tools:` line was deleted from each `SKILL.md`, so `go` and `git`

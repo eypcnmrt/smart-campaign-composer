@@ -45,6 +45,7 @@ Natural-language marketing brief -> segment rule + SMS/email content (Claude) ->
 - Tool quirk: `Write`/`Edit` turn a typed backslash-u-0-0-e-7 into the character "ç" itself (lone surrogates and a doubled backslash are left alone).
   To put a literal JSON escape in a file, type a placeholder such as `¦u00e7` and replace the `¦` with a backslash with `node` afterwards.
 - `.claude/hooks/gofmt.cjs` runs `gofmt -w` after every edit of a `.go` file (silent if gofmt is missing)
+- CI workflow check (PowerShell, repo root; no output and exit 0 is clean; image and digest in `.claude/THIRD_PARTY.md`): `docker run --rm --network none -v "${PWD}:/repo:ro" -w /repo rhysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667`. The workflow cannot run on GitHub before a push; actions are pinned to full SHAs taken with `git ls-remote`.
 - `node scripts/check-ai-sessions.cjs` - scan `ai-sessions/` for keys, e-mails, phones, home paths (masked report)
 - `gitleaks git --staged --redact` - what the pre-commit hook runs
 

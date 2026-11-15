@@ -1666,6 +1666,8 @@ without being downloaded into a quarantine folder first, scanned, and copied in 
 | Plugin `gopls-lsp` and `gopls` | `gopls` v0.24.0; the plugin is the marketplace copy, identical to `dceb15d` (the marketplace itself is not pinned by Claude Code) | Go code intelligence |
 | gitleaks | 8.30.1 (the installed one), run by `.githooks/pre-commit` on staged changes | no key in a commit; it fails closed when it is missing |
 | `ecc-agentshield` | 1.6.0, `scan` only (the modes that send content to a model were not used) | a scan of the downloaded tooling |
+| actionlint | image `rhysd/actionlint:1.7.12`, pinned by digest `sha256:b1934ee5...` (full digest in `.claude/THIRD_PARTY.md`); `--network none`, repository mounted read-only | `.github/workflows/ci.yml` is checked with it (it runs shellcheck on the `run:` scripts) |
+| `actions/checkout` | `v6.1.0`, commit `d23441a4...` (full SHA in the workflow and in `.claude/THIRD_PARTY.md`) | the only action of the CI workflow |
 | `scripts/check-ai-sessions.cjs` | in the repo, with tests | keys, e-mail addresses, phone numbers and home paths in `ai-sessions/`, reported masked |
 | Browser tests | Playwright 1.64.1 with `@axe-core/playwright` 4.14.0, image `mcr.microsoft.com/playwright:v1.64.1-noble`, **Chromium only** | `make e2e`; one engine keeps it at about two minutes (no Firefox or WebKit project) |
 | Web | Vue 3.5.44, vue-router 5.4.0, Vite 8.3.5, Vitest 5.0.5 with happy-dom 21.0.4, TypeScript 6.0.3, vue-tsc 3.3.14 | exact versions, at least two weeks old, lock file committed |
@@ -1694,6 +1696,7 @@ without being downloaded into a quarantine folder first, scanned, and copied in 
   | `alpine:3.22` | the two runtime images of the Go binaries (UID 10001) |
   | `mcr.microsoft.com/playwright:v1.64.1-noble` | the browser tests; the tag and `@playwright/test` move together |
   | `python:3.14.10-slim-trixie` | the `ui-ux-pro-max` search script, `--network none`, repository read-only |
+  | `rhysd/actionlint@sha256:b1934ee5...` (1.7.12) | the check of the CI workflow, `--network none`, repository read-only |
 
 - **Why pinned:** a tag that moves can change a result between two runs of the same command, and an image whose tag was replaced is
   an unreviewed change to what runs on the machine. `npm` additionally runs with lifecycle scripts off, with `node_modules` and
