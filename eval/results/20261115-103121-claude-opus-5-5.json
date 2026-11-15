@@ -1,0 +1,349 @@
+{
+  "model": "claude-opus-5-5",
+  "started_at": "2026-11-15T10:31:21.978786836Z",
+  "max_usd": 0.25,
+  "spent_usd": 0.15932000000000002,
+  "budget_stopped": false,
+  "briefs": [
+    {
+      "id": "sepet-terk-7-gun",
+      "covers": "added to cart and did not buy, last 7 days; email only; no attribute",
+      "brief": "Son 7 gün içinde sepete ürün ekleyip satın almayan müşterilere e-posta ile hatırlatma yapalım.",
+      "checks": [
+        {
+          "name": "segment_valid",
+          "pass": true
+        },
+        {
+          "name": "required",
+          "pass": true
+        },
+        {
+          "name": "no_reversed",
+          "pass": true
+        },
+        {
+          "name": "no_invented",
+          "pass": true
+        },
+        {
+          "name": "unsupported",
+          "pass": true
+        },
+        {
+          "name": "warnings",
+          "pass": true
+        },
+        {
+          "name": "channels",
+          "pass": true
+        },
+        {
+          "name": "content_valid",
+          "pass": true
+        },
+        {
+          "name": "no_refusal_or_cutoff",
+          "pass": true
+        },
+        {
+          "name": "no_forbidden_text",
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "rule_json": "{\"channels\":[\"email\"],\"conditions\":[{\"event\":\"cart_add\",\"op\":\"performed\",\"type\":\"event\",\"within_days\":7},{\"event\":\"purchase\",\"op\":\"not_performed\",\"type\":\"event\",\"within_days\":7}],\"explanation\":\"Son 7 gün içinde sepete ürün ekleyip aynı dönemde satın alma yapmayan müşteriler.\",\"unsupported_criteria\":[]}",
+      "audience": {
+        "matched": 868,
+        "sms": 612,
+        "email": 746,
+        "total_users": 5000
+      },
+      "content": {
+        "sms": "Merhaba {{first_name}}, sepetine eklediğin ürünler seni bekliyor. Alışverişini tamamlamak için sepetine göz atabilirsin.",
+        "email_subject": "Sepetindeki ürünler seni bekliyor",
+        "email_body": "Merhaba {{first_name}},\n\nGeçtiğimiz günlerde sepetine birkaç ürün eklediğini fark ettik. Seçtiğin ürünler hâlâ sepetinde, kaldığın yerden devam etmeni bekliyor.\n\nAlışverişini tamamlamak için hesabına giriş yapıp sepetine göz atman yeterli. Belki son bir kez incelemek ya da seçimini gözden geçirmek istersin.\n\nAklına takılan bir soru olursa ekibimiz sana yardımcı olmaktan memnuniyet duyar.\n\nKeyifli alışverişler dileriz."
+      },
+      "segment_repairs": 0,
+      "content_repairs": 0,
+      "calls": [
+        {
+          "task": "segment",
+          "input_tokens": 3891,
+          "output_tokens": 135,
+          "cost_usd": 0.018264,
+          "duration_ms": 2631
+        },
+        {
+          "task": "content",
+          "input_tokens": 892,
+          "output_tokens": 599,
+          "cost_usd": 0.015548,
+          "duration_ms": 7663,
+          "first_text_ms": 4214
+        }
+      ],
+      "input_tokens": 4783,
+      "output_tokens": 734,
+      "cost_usd": 0.033811999999999995,
+      "duration_ms": 10300
+    },
+    {
+      "id": "sozluk-siniri-500-gun",
+      "covers": "a day count beyond the vocabulary (365): no event condition, flagged as unsupported",
+      "brief": "Son 500 gün içinde sepete ürün ekleyen İstanbul'daki müşterilere SMS ile indirim kodu hatırlatması yapalım.",
+      "checks": [
+        {
+          "name": "segment_valid",
+          "pass": true
+        },
+        {
+          "name": "required",
+          "pass": true
+        },
+        {
+          "name": "no_reversed",
+          "pass": true
+        },
+        {
+          "name": "no_invented",
+          "pass": true
+        },
+        {
+          "name": "unsupported",
+          "pass": true
+        },
+        {
+          "name": "warnings",
+          "pass": true
+        },
+        {
+          "name": "channels",
+          "pass": true
+        },
+        {
+          "name": "content_valid",
+          "pass": true
+        },
+        {
+          "name": "no_refusal_or_cutoff",
+          "pass": true
+        },
+        {
+          "name": "no_forbidden_text",
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "rule_json": "{\"channels\":[\"sms\"],\"conditions\":[{\"field\":\"city\",\"op\":\"eq\",\"type\":\"attribute\",\"value\":\"İstanbul\"}],\"explanation\":\"İstanbul'da yaşayan müşteriler.\",\"unsupported_criteria\":[\"Son 500 gün içinde sepete ürün ekleme (en fazla 365 gün desteklenir)\"]}",
+      "audience": {
+        "matched": 1490,
+        "sms": 1055,
+        "email": 1259,
+        "total_users": 5000
+      },
+      "content": {
+        "sms": "Merhaba {{first_name}}, sepetinize eklediğiniz ürünleri hatırlıyor musunuz? İndirim kodunuzu kullanmayı unutmayın, alışverişinizi şimdi tamamlayın!",
+        "email_subject": "İndirim kodunuzu kullanmayı unutmayın",
+        "email_body": "Merhaba {{first_name}},\n\nBir süre önce sepetinize eklediğiniz ürünleri hatırlıyor musunuz? Size bir hatırlatma yapmak istedik: indirim kodunuz sizi bekliyor.\n\nBeğendiğiniz ürünlere yeniden göz atın ve alışverişinizi tamamlarken indirim kodunuzu kullanmayı unutmayın.\n\nHerhangi bir sorunuz olursa bize her zaman ulaşabilirsiniz.\n\nKeyifli alışverişler dileriz!"
+      },
+      "segment_repairs": 0,
+      "content_repairs": 0,
+      "calls": [
+        {
+          "task": "segment",
+          "input_tokens": 3899,
+          "output_tokens": 123,
+          "cost_usd": 0.018056,
+          "duration_ms": 2479
+        },
+        {
+          "task": "content",
+          "input_tokens": 875,
+          "output_tokens": 944,
+          "cost_usd": 0.02238,
+          "duration_ms": 9998,
+          "first_text_ms": 7344
+        }
+      ],
+      "input_tokens": 4774,
+      "output_tokens": 1067,
+      "cost_usd": 0.040436,
+      "duration_ms": 12479
+    },
+    {
+      "id": "tutar-yonlu",
+      "covers": "an amount with a direction (\"more than 2000 TL\"); SMS only",
+      "brief": "Toplam 2000 TL'den fazla harcama yapmış müşterilerimize SMS ile özel bir teşekkür gönderelim.",
+      "checks": [
+        {
+          "name": "segment_valid",
+          "pass": true
+        },
+        {
+          "name": "required",
+          "pass": true
+        },
+        {
+          "name": "no_reversed",
+          "pass": true
+        },
+        {
+          "name": "no_invented",
+          "pass": true
+        },
+        {
+          "name": "unsupported",
+          "pass": true
+        },
+        {
+          "name": "warnings",
+          "pass": true
+        },
+        {
+          "name": "channels",
+          "pass": true
+        },
+        {
+          "name": "content_valid",
+          "pass": true
+        },
+        {
+          "name": "no_refusal_or_cutoff",
+          "pass": true
+        },
+        {
+          "name": "no_forbidden_text",
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "rule_json": "{\"channels\":[\"sms\"],\"conditions\":[{\"field\":\"total_spent\",\"op\":\"gt\",\"type\":\"attribute\",\"value\":2000}],\"explanation\":\"Toplamda 2000 TL'den fazla harcama yapmış müşteriler.\",\"unsupported_criteria\":[]}",
+      "audience": {
+        "matched": 4215,
+        "sms": 2956,
+        "email": 3579,
+        "total_users": 5000
+      },
+      "content": {
+        "sms": "Merhaba {{first_name}}, bize gösterdiğin güven ve destek için çok teşekkür ederiz. Seninle olmak bizim için çok değerli!",
+        "email_subject": "{{first_name}}, sana kocaman bir teşekkür borçluyuz",
+        "email_body": "Merhaba {{first_name}},\n\nBugüne kadar bizi tercih ettiğin ve bize güvendiğin için içtenlikle teşekkür ederiz.\n\nSenin gibi müşterilerimiz sayesinde her gün daha iyisini yapmak için çalışıyoruz. Her alışverişin bizim için büyük bir anlam taşıyor.\n\nBirlikte daha nice güzel alışverişlere!\n\nSevgiyle,\nEkibimiz"
+      },
+      "segment_repairs": 0,
+      "content_repairs": 0,
+      "calls": [
+        {
+          "task": "segment",
+          "input_tokens": 3892,
+          "output_tokens": 95,
+          "cost_usd": 0.017468,
+          "duration_ms": 2321
+        },
+        {
+          "task": "content",
+          "input_tokens": 879,
+          "output_tokens": 691,
+          "cost_usd": 0.017336,
+          "duration_ms": 8620,
+          "first_text_ms": 5863
+        }
+      ],
+      "input_tokens": 4771,
+      "output_tokens": 786,
+      "cost_usd": 0.034804,
+      "duration_ms": 10943
+    },
+    {
+      "id": "tutar-yonsuz",
+      "covers": "an amount without a direction: no total_spent condition, flagged as unsupported (the language fallback is allowed)",
+      "brief": "1000 TL harcamış müşterilerimize e-posta ile bir kampanya duyuralım.",
+      "checks": [
+        {
+          "name": "segment_valid",
+          "pass": true
+        },
+        {
+          "name": "required",
+          "pass": true
+        },
+        {
+          "name": "no_reversed",
+          "pass": true
+        },
+        {
+          "name": "no_invented",
+          "pass": true
+        },
+        {
+          "name": "unsupported",
+          "pass": true
+        },
+        {
+          "name": "warnings",
+          "pass": true
+        },
+        {
+          "name": "channels",
+          "pass": true
+        },
+        {
+          "name": "content_valid",
+          "pass": true
+        },
+        {
+          "name": "no_refusal_or_cutoff",
+          "pass": true
+        },
+        {
+          "name": "no_forbidden_text",
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "rule_json": "{\"channels\":[\"email\"],\"conditions\":[{\"field\":\"language\",\"op\":\"in\",\"type\":\"attribute\",\"value\":[\"tr\",\"en\"]}],\"explanation\":\"Harcama tutarı yönü belirtilmediğinden tüm müşterileri kapsayan, e-posta ile ulaşılacak bir segment.\",\"unsupported_criteria\":[\"1000 TL harcama (fazla, az veya tam olduğu belirtilmemiş)\"]}",
+      "audience": {
+        "matched": 5000,
+        "sms": 3523,
+        "email": 4239,
+        "total_users": 5000
+      },
+      "content": {
+        "sms": "Merhaba {{first_name}}, bizi tercih ettiğiniz için teşekkürler! Size özel yeni kampanyamız başladı, ayrıntılar e-posta kutunuzda.",
+        "email_subject": "{{first_name}}, size özel kampanyamız başladı",
+        "email_body": "Merhaba {{first_name}},\n\nBizi tercih ettiğiniz ve alışverişlerinizde bize güvendiğiniz için çok teşekkür ederiz.\n\nDeğerli müşterilerimiz için hazırladığımız yeni kampanyamız başladı. Kampanya ayrıntılarını ve koşullarını web sitemizde ya da mağazalarımızda bulabilirsiniz.\n\nSorularınız olursa müşteri hizmetlerimiz size yardımcı olmaktan memnuniyet duyar.\n\nSevgiyle,\nEkibimiz"
+      },
+      "segment_repairs": 0,
+      "content_repairs": 1,
+      "calls": [
+        {
+          "task": "segment",
+          "input_tokens": 3877,
+          "output_tokens": 150,
+          "cost_usd": 0.018508,
+          "duration_ms": 2294
+        },
+        {
+          "task": "content",
+          "input_tokens": 887,
+          "output_tokens": 506,
+          "cost_usd": 0.013668,
+          "duration_ms": 8000,
+          "first_text_ms": 6349
+        },
+        {
+          "task": "content",
+          "input_tokens": 1128,
+          "output_tokens": 679,
+          "cost_usd": 0.018092,
+          "duration_ms": 7519,
+          "first_text_ms": 4915
+        }
+      ],
+      "input_tokens": 5892,
+      "output_tokens": 1335,
+      "cost_usd": 0.05026799999999999,
+      "duration_ms": 17815
+    }
+  ]
+}
