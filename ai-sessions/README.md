@@ -7,32 +7,33 @@ Planning and prompt drafting were also discussed in a separate chat outside thes
 
 ## The exports
 
-| File | Topic | Added to the repository | Model in the header |
-|---|---|---|---|
-| [`01-ortam-kurulumu.txt`](01-ortam-kurulumu.txt) | checking and installing the tools on the Windows machine (Node.js, Go, make, Docker Desktop; publisher and checksum shown before each install) | 2026-11-11 | Sonnet 5.5 |
-| [`02-gereksinim-analizi.txt`](02-gereksinim-analizi.txt) | analysing the case requirements and writing the plan (`docs/PLAN.md`) | 2026-11-11 | Opus 5.5 |
-| [`03-guvenlik-temeli.txt`](03-guvenlik-temeli.txt) | the security foundation: guard hook, gitleaks pre-commit, session scanner | 2026-11-11 | Sonnet 5.5 |
-| [`04-arac-kurulumu.txt`](04-arac-kurulumu.txt) | installing the Go, Vue and review skills and agents (quarantine, scan, pin) | 2026-11-13 | Sonnet 5.5 |
-| [`05-segment-dsl.txt`](05-segment-dsl.txt) | the segment rule language: validation, parameterized SQL, JSON schema | 2026-11-13 | Opus 5.5 |
-| [`06-llm-katmani.txt`](06-llm-katmani.txt) | the LLM layer: client, streaming extractor, repair loop, prompts | 2026-11-14 | Opus 5.5 |
-| [`07-kuyruk-worker.txt`](07-kuyruk-worker.txt) | database, seed, mock provider, queue and worker | 2026-11-14 | Sonnet 5.5 |
-| [`08-kampanya-api.txt`](08-kampanya-api.txt) | the campaign state machine, approval and the HTTP API | 2026-11-14 | Opus 5.5 |
-| [`09-tasarim-skilleri.txt`](09-tasarim-skilleri.txt) | installing the two design skills | 2026-11-14 | Sonnet 5.5 |
-| [`10-frontend.txt`](10-frontend.txt) | the web app, from the design direction to the delivery dashboard | 2026-11-14 | Opus 5.5 |
-| [`11-dogrulama-utf8.txt`](11-dogrulama-utf8.txt) | verification and the UTF-8 problem found with a Windows shell | 2026-11-14 | Sonnet 5.5 |
-| [`12-gece-frontend.txt`](12-gece-frontend.txt) | the unattended overnight round on the web app and the browser tests | 2026-11-14 | Sonnet 5.5 |
-| [`13-acik-konular.txt`](13-acik-konular.txt) | the closing session: open issues, the demo mock, the screenshots | 2026-11-14 | Sonnet 5.5 |
-| [`14-devir-testi.txt`](14-devir-testi.txt) | the flaky worker hand-over test (101 requests in one second at the hand-over: root cause and fix), a flaky late-reply test, and a stray `backend;C` folder made by Git Bash | 2026-11-15 | Sonnet 5.5 |
-| [`15-gercek-api-eval.txt`](15-gercek-api-eval.txt) | the first use of the real API: smoke test and the golden-set eval | 2026-11-15 | Opus 5.5 |
-| [`16-eval-kapanis.txt`](16-eval-kapanis.txt) | closing the eval: repair reasons, both models on the final prompt | 2026-11-15 | Sonnet 5.5 |
-| [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to Sonnet as the default model | 2026-11-15 | Sonnet 5.5 |
-| [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condition: a rule without a condition means every user | 2026-11-15 | Sonnet 5.5 |
-| [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criterion the rule cannot express must not replace one it can | 2026-11-15 | Sonnet 5.5 |
-| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: reviewing the README, DECISIONS and this folder's README | 2026-11-15 | Opus 5.5 |
+| File | Topic | Added to the repository |
+|---|---|---|
+| [`01-ortam-kurulumu.txt`](01-ortam-kurulumu.txt) | checking and installing the tools on the Windows machine (Node.js, Go, make, Docker Desktop; publisher and checksum shown before each install) | 2026-11-11 |
+| [`02-gereksinim-analizi.txt`](02-gereksinim-analizi.txt) | analysing the case requirements and writing the plan (`docs/PLAN.md`) | 2026-11-11 |
+| [`03-guvenlik-temeli.txt`](03-guvenlik-temeli.txt) | the security foundation: guard hook, gitleaks pre-commit, session scanner | 2026-11-11 |
+| [`04-arac-kurulumu.txt`](04-arac-kurulumu.txt) | installing the Go, Vue and review skills and agents (quarantine, scan, pin) | 2026-11-13 |
+| [`05-segment-dsl.txt`](05-segment-dsl.txt) | the segment rule language: validation, parameterized SQL, JSON schema | 2026-11-13 |
+| [`06-llm-katmani.txt`](06-llm-katmani.txt) | the LLM layer: client, streaming extractor, repair loop, prompts | 2026-11-14 |
+| [`07-kuyruk-worker.txt`](07-kuyruk-worker.txt) | database, seed, mock provider, queue and worker | 2026-11-14 |
+| [`08-kampanya-api.txt`](08-kampanya-api.txt) | the campaign state machine, approval and the HTTP API | 2026-11-14 |
+| [`09-tasarim-skilleri.txt`](09-tasarim-skilleri.txt) | installing the two design skills | 2026-11-14 |
+| [`10-frontend.txt`](10-frontend.txt) | the web app, from the design direction to the delivery dashboard | 2026-11-14 |
+| [`11-dogrulama-utf8.txt`](11-dogrulama-utf8.txt) | verification and the UTF-8 problem found with a Windows shell | 2026-11-14 |
+| [`12-gece-frontend.txt`](12-gece-frontend.txt) | the unattended overnight round on the web app and the browser tests | 2026-11-14 |
+| [`13-acik-konular.txt`](13-acik-konular.txt) | the closing session: open issues, the demo mock, the screenshots | 2026-11-14 |
+| [`14-devir-testi.txt`](14-devir-testi.txt) | the flaky worker hand-over test (101 requests in one second at the hand-over: root cause and fix), a flaky late-reply test, and a stray `backend;C` folder made by Git Bash | 2026-11-15 |
+| [`15-gercek-api-eval.txt`](15-gercek-api-eval.txt) | the first use of the real API: smoke test and the golden-set eval | 2026-11-15 |
+| [`16-eval-kapanis.txt`](16-eval-kapanis.txt) | closing the eval: repair reasons, both models on the final prompt | 2026-11-15 |
+| [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to Sonnet as the default model | 2026-11-15 |
+| [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condition: a rule without a condition means every user | 2026-11-15 |
+| [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criterion the rule cannot express must not replace one it can | 2026-11-15 |
+| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: reviewing the README, DECISIONS and this folder's README | 2026-11-15 |
 
-The date is the day the file was added to the repository (`git log`), and the model is the one named in the header of the export,
-that is the model the session started with; the project settings use a plan-then-execute model setting, so a session can have used
-the other one for part of its work. The decisions that came out of these sessions are in [`../DECISIONS.md`](../DECISIONS.md).
+The date is the day the file was added to the repository (`git log`). There is no model column on purpose: the header of an export names
+only the model the session started with, and the project uses a plan-then-execute model setting (`opusplan`: plan mode runs on Opus,
+normal mode on Sonnet), so the header does not show which model did the work. The decisions that came out of these sessions are in
+[`../DECISIONS.md`](../DECISIONS.md).
 
 ## How the exports were made
 

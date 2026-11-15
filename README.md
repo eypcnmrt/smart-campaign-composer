@@ -111,8 +111,8 @@ Opus is one setting away: `ANTHROPIC_MODEL=claude-opus-5-5` in `.env` (and `EVAL
 
 ## How it was built
 
-A written plan ([docs/PLAN.md](docs/PLAN.md), in Turkish) came first. The code was then written in 19 Claude Code sessions, all
-exported in full to [`ai-sessions/`](ai-sessions/) (index and masking rules in [`ai-sessions/README.md`](ai-sessions/README.md)).
+A written plan ([docs/PLAN.md](docs/PLAN.md), in Turkish) came first. The code was then written in a series of Claude Code sessions, all
+exported in full to [`ai-sessions/`](ai-sessions/) (the list, and the masking rules, are in [`ai-sessions/README.md`](ai-sessions/README.md)).
 The sessions ran in bypass-permissions mode, balanced by a `PreToolUse` guard hook (no reading of `.env`, no environment dumps, no
 force push, no `--no-verify`, no deleting outside the project) and a gitleaks pre-commit hook. The golden-set eval, run against the
 real API, found and drove several fixes to the prompts and the validation; each is written down in DECISIONS.md.
