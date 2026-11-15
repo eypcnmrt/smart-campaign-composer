@@ -28,6 +28,7 @@ Planning and prompt drafting were also discussed in a separate chat outside thes
 | [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to Sonnet as the default model | 2026-11-15 | Sonnet 5.5 |
 | [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condition: a rule without a condition means every user | 2026-11-15 | Sonnet 5.5 |
 | [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criterion the rule cannot express must not replace one it can | 2026-11-15 | Sonnet 5.5 |
+| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: reviewing the README, DECISIONS and this folder's README | 2026-11-15 | Opus 5.5 |
 
 The date is the day the file was added to the repository (`git log`), and the model is the one named in the header of the export,
 that is the model the session started with; the project settings use a plan-then-execute model setting, so a session can have used
@@ -58,7 +59,7 @@ almost every session and in every path; reporting them would only bury a real fi
 
 What was masked in the committed files: the fake seed data that looked like contact data (the `+90000…` numbers and `example.com`
 addresses of exports 08 and 09, which are fake but trip the phone and e-mail rules) and a name of an environment variable that the
-key rule took for a value (`ANTH…[17 chars]` in the same exports). All the other exports were clean when scanned. No key-shaped
+key rule took for a value (`ANTH…[17 chars]` in the same exports). In export 20 two lines were masked: a diff line that showed the old made-up test key (which was in the shape of a real key) and the address pattern that an older version of this README quoted as an example. All the other exports were clean when scanned. No key-shaped
 string was found in any export: the key sits in the dotenv file only, and the guard hook stops a session from reading that file.
 Exports 15 to 19 were written after the real key was in use, and the tracked files were also checked by count (`sk-ant-` followed
 by 20 characters: 0 matches).
