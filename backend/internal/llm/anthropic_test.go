@@ -385,6 +385,26 @@ func TestAnthropic_Complete_stopReasons(t *testing.T) {
 	}
 }
 
+// A refused or cut-off answer is billed, so its tokens must reach the caller even though its text must not.
+func TestAnthropic_Complete_failedAnswerKeepsItsUsage(t *testing.T) {
+	t.Parallel()
+	for _, stop := range []string{"max_tokens", "refusal"} {
+		t.Run(stop, func(t *testing.T) {
+			t.Parallel()
+			api := newFakeAPI(t, func(_ int, w http.ResponseWriter, _ *http.Request) {
+				writeJSON(t, w, 200, messageBody("claude-opus-5-5", stop, nil, textBlock("partial")))
+			})
+			resp, err := api.client(Config{}).Complete(t.Context(), Request{User: "u"})
+			if err == nil {
+				t.Fatal("no error")
+			}
+			if resp.Text != "" || resp.InputTokens != 12 || resp.OutputTokens != 34 || resp.Model != "claude-opus-5-5" {
+				t.Errorf("Response = %+v, want the usage (12 in, 34 out) and no text", resp)
+			}
+		})
+	}
+}
+
 func TestAnthropic_Complete_refusalDetails(t *testing.T) {
 	t.Parallel()
 	api := newFakeAPI(t, func(_ int, w http.ResponseWriter, _ *http.Request) {

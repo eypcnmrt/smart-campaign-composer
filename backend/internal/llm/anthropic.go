@@ -163,38 +163,44 @@ func (a *Anthropic) Stream(ctx context.Context, req Request, onText func(string)
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return Response{}, mapError(err)
+		return usageOnly(&msg), mapError(err) // what arrived before the break was billed
 	}
 	return result(&msg)
 }
 
-// result turns a finished message into a Response, or into the error its stop
-// reason stands for. A refusal is checked before the content is read: the
-// content is empty or partial then.
-func result(msg *anthropic.BetaMessage) (Response, error) {
-	switch msg.StopReason {
-	case anthropic.BetaStopReasonEndTurn, anthropic.BetaStopReasonStopSequence:
-	case anthropic.BetaStopReasonRefusal:
-		return Response{}, &RefusalError{
-			Category:    string(msg.StopDetails.Category),
-			Explanation: msg.StopDetails.Explanation,
-		}
-	case "":
-		// The stream ended before the message said why: a cut connection, not a decision of the model.
-		return Response{}, fmt.Errorf("anthropic: the stream ended before a stop reason: %w", ErrUnavailable)
-	case anthropic.BetaStopReasonMaxTokens, anthropic.BetaStopReasonModelContextWindowExceeded:
-		return Response{}, fmt.Errorf("anthropic: stop reason %q after %d output tokens: %w",
-			msg.StopReason, msg.Usage.OutputTokens, ErrMaxTokens)
-	default:
-		return Response{}, fmt.Errorf("anthropic: stop reason %q: %w", msg.StopReason, ErrUnexpectedStop)
-	}
-
-	resp := Response{
+// usageOnly is the Response of a call that failed after the model had answered: no text, but the tokens, which are billed
+// all the same. The layer above uses them for the log and for a budget; it never reads a failed answer.
+func usageOnly(msg *anthropic.BetaMessage) Response {
+	return Response{
 		Model:        string(msg.Model),
 		ServedBy:     string(msg.Model),
 		InputTokens:  msg.Usage.InputTokens,
 		OutputTokens: msg.Usage.OutputTokens,
 	}
+}
+
+// result turns a finished message into a Response, or into the error its stop
+// reason stands for. A refusal is checked before the content is read: the
+// content is empty or partial then. A failed result carries the usage and no text.
+func result(msg *anthropic.BetaMessage) (Response, error) {
+	switch msg.StopReason {
+	case anthropic.BetaStopReasonEndTurn, anthropic.BetaStopReasonStopSequence:
+	case anthropic.BetaStopReasonRefusal:
+		return usageOnly(msg), &RefusalError{
+			Category:    string(msg.StopDetails.Category),
+			Explanation: msg.StopDetails.Explanation,
+		}
+	case "":
+		// The stream ended before the message said why: a cut connection, not a decision of the model.
+		return usageOnly(msg), fmt.Errorf("anthropic: the stream ended before a stop reason: %w", ErrUnavailable)
+	case anthropic.BetaStopReasonMaxTokens, anthropic.BetaStopReasonModelContextWindowExceeded:
+		return usageOnly(msg), fmt.Errorf("anthropic: stop reason %q after %d output tokens: %w",
+			msg.StopReason, msg.Usage.OutputTokens, ErrMaxTokens)
+	default:
+		return usageOnly(msg), fmt.Errorf("anthropic: stop reason %q: %w", msg.StopReason, ErrUnexpectedStop)
+	}
+
+	resp := usageOnly(msg)
 	var text strings.Builder
 	for _, block := range msg.Content {
 		switch b := block.AsAny().(type) {

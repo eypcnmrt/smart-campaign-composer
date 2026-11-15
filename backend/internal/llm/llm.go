@@ -68,6 +68,8 @@ type Response struct {
 	FallbackUsed bool   // a fallback model continued or replaced the answer
 	InputTokens  int64
 	OutputTokens int64
+	// A Client that returns an error may still return a Response with the model and the tokens (never text): a refused
+	// or cut-off answer is billed, and Metered counts it.
 }
 
 // Client sends requests to a model.

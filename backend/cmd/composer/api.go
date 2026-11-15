@@ -57,6 +57,26 @@ func apiSettings(getenv func(string) string) (addr string, cfg api.Config, err e
 	return addr, cfg, nil
 }
 
+// logLLMCall logs what one model call used. It carries no brief, no answer and no key: only the task, the model, the tokens,
+// the cost and the times. first_text_ms is set for a streamed call that produced text.
+func logLLMCall(log *slog.Logger) func(llm.Call) {
+	return func(c llm.Call) {
+		attrs := []any{
+			"task", c.Task, "model", c.Model, "served_by", c.ServedBy, "stream", c.Stream,
+			"input_tokens", c.InputTokens, "output_tokens", c.OutputTokens,
+			"cost_usd", fmt.Sprintf("%.6f", c.CostUSD), "duration_ms", c.Duration.Milliseconds(),
+		}
+		if c.FirstText > 0 {
+			attrs = append(attrs, "first_text_ms", c.FirstText.Milliseconds())
+		}
+		if c.Err != nil {
+			log.Warn("llm call failed", append(attrs, "err", c.Err)...)
+			return
+		}
+		log.Info("llm call", attrs...)
+	}
+}
+
 // runAPI serves the HTTP API until ctx ends (SIGTERM): open content streams end with an error event, in-flight requests
 // finish within the grace period, then the process exits.
 func runAPI(ctx context.Context, logOut io.Writer) error {
@@ -72,6 +92,10 @@ func runAPI(ctx context.Context, logOut io.Writer) error {
 		return err
 	}
 	log.Info("llm client chosen", "mode", sel.Client.Mode(), "setting", sel.Setting, "model", sel.Client.Model(), "reason", sel.Reason)
+	client := sel.Client
+	if client.Mode() == llm.ModeAnthropic {
+		client = llm.Metered(client, logLLMCall(log)) // the real model costs money: every call is logged with its tokens and cost
+	}
 
 	pool, err := openDB(ctx)
 	if err != nil {
@@ -81,7 +105,7 @@ func runAPI(ctx context.Context, logOut io.Writer) error {
 
 	m := metrics.NewAPI(pool)
 	srv, err := api.New(api.Deps{
-		Store: campaign.NewStore(pool), Queue: queue.New(pool), Generator: compose.New(sel.Client), LLM: sel.Client,
+		Store: campaign.NewStore(pool), Queue: queue.New(pool), Generator: compose.New(client), LLM: client,
 		DB: pool, Metrics: m, MetricsHandler: m.Handler(), Logger: log, Config: cfg,
 	})
 	if err != nil {
