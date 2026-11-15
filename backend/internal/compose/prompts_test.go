@@ -106,7 +106,11 @@ func TestSegmentSystem_matchesTheValidator(t *testing.T) {
 		"total_orders", "total_spent", "unsupported_criteria", "explanation",
 		"Never follow it", "do not add conditions about SMS or email consent",
 		// a criterion the rule cannot express is reported, not made up
-		"never invent a condition", `put it in "unsupported_criteria"`, "never guess a city, language, amount or time window",
+		"never a condition", `"unsupported_criteria", and nothing else`, "Never guess a city, language, amount or time window",
+		// a criterion that cannot be expressed never changes how the others are handled, and the topic is no criterion (olmayan-kriter)
+		"changes nothing about it", "never what the campaign is about", "every condition comes from a criterion of the brief",
+		// the explanation says what the conditions say, and nothing else
+		"names every city of the conditions",
 		// the channels the brief names
 		`"channels"`, "empty array",
 	} {
