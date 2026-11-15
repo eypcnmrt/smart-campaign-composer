@@ -2509,9 +2509,9 @@
          -0000001", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"},
          - Content: tpl},                                                
       78 +      queue.Delivery{ID: 42, IdempotencyKey: "key-42", Channel:
-         + "sms", Recipient: "+900000000001", Vars: content.Vars{FirstNam
+         + "sms", Recipient: "+9000000****", Vars: content.Vars{FirstNam
          +e: "Ayşe", City: "İzmir"}, Content: tpl},                      
-      79        SendRequest{Channel: "sms", Key: "42", To: "+900000000001
+      79        SendRequest{Channel: "sms", Key: "42", To: "+9000000****
           ", Body: "Merhaba Ayşe, İzmir için fırsat"},
       80      },
       81      {
@@ -2521,9 +2521,9 @@
       76      {
       77        "sms",
       78        queue.Delivery{ID: 42, IdempotencyKey: "key-42", Channel:
-           "sms", Recipient: "+900000000001", Vars: content.Vars{FirstNam
+           "sms", Recipient: "+9000000****", Vars: content.Vars{FirstNam
           e: "Ayşe", City: "İzmir"}, Content: tpl},
-      79 -      SendRequest{Channel: "sms", Key: "42", To: "+900000000001
+      79 -      SendRequest{Channel: "sms", Key: "42", To: "+9000000****
          -", Body: "Merhaba Ayşe, İzmir için fırsat"},                   
       79 +      SendRequest{Channel: "sms", Key: "key-42", To: "+90000000
          +0001", Body: "Merhaba Ayşe, İzmir için fırsat"},               
@@ -2540,7 +2540,7 @@
          -ample.com", Vars: content.Vars{FirstName: "Ayşe", City: "İzmir"
          -}, Content: tpl},                                              
       83 +      queue.Delivery{ID: 43, IdempotencyKey: "key-43", Channel:
-         + "email", Recipient: "a@example.com", Vars: content.Vars{FirstN
+         + "email", Recipient: "a***@e***.com", Vars: content.Vars{FirstN
          +ame: "Ayşe", City: "İzmir"}, Content: tpl},                    
       84        SendRequest{Channel: "email", Key: "43", To: "a@example.c
           om", Subject: "Fırsat İzmir", Body: "Merhaba Ayşe"},
@@ -2552,7 +2552,7 @@
       81      {
       82        "email",
       83        queue.Delivery{ID: 43, IdempotencyKey: "key-43", Channel:
-           "email", Recipient: "a@example.com", Vars: content.Vars{FirstN
+           "email", Recipient: "a***@e***.com", Vars: content.Vars{FirstN
           ame: "Ayşe", City: "İzmir"}, Content: tpl},
       84 -      SendRequest{Channel: "email", Key: "43", To: "a@example.c
          -om", Subject: "Fırsat İzmir", Body: "Merhaba Ayşe"},           
@@ -2571,7 +2571,7 @@
          -ample.com", Vars: content.Vars{FirstName: " ", City: "Bursa"}, 
          -Content: tpl},                                                 
       88 +      queue.Delivery{ID: 44, IdempotencyKey: "key-44", Channel:
-         + "email", Recipient: "b@example.com", Vars: content.Vars{FirstN
+         + "email", Recipient: "b***@e***.com", Vars: content.Vars{FirstN
          +ame: " ", City: "Bursa"}, Content: tpl},                       
       89        SendRequest{Channel: "email", Key: "44", To: "b@example.c
           om", Subject: "Fırsat Bursa", Body: "Merhaba Değerli müşterimiz
@@ -2584,7 +2584,7 @@
       86      {
       87        "blank first name falls back",
       88        queue.Delivery{ID: 44, IdempotencyKey: "key-44", Channel:
-           "email", Recipient: "b@example.com", Vars: content.Vars{FirstN
+           "email", Recipient: "b***@e***.com", Vars: content.Vars{FirstN
           ame: " ", City: "Bursa"}, Content: tpl},
       89 -      SendRequest{Channel: "email", Key: "44", To: "b@example.c
          -om", Subject: "Fırsat Bursa", Body: "Merhaba Değerli müşterimiz
@@ -4766,7 +4766,7 @@
       137 +// Names of the environment variables FromEnv reads.          
       138 +const (                                                       
       139 +  EnvMode     = "LLM_MODE"                                    
-      140 +  EnvAPIKey   = "ANTHROPIC_API_KEY"                           
+      140 +  EnvAPIKey   = "ANTH…[17 chars]"                           
       141 +  EnvModel    = "ANTHROPIC_MODEL"                             
       142 +  EnvFallback = "ANTHROPIC_FALLBACK"                          
       143 +)                                                             
@@ -4912,7 +4912,7 @@
        87  
        88 +func TestFromEnv_mode(t *testing.T) {                         
        89 +  t.Parallel()                                                
-       90 +  const key = "sk-test-key-for-the-mode-table" // never a real
+       90 +  const key = "sk-t…[30 chars]" // never a real
           + key                                                          
        91 +  tests := []struct {                                         
        92 +    name        string                                        
@@ -5024,7 +5024,7 @@
       88  
       89  func TestFromEnv_mode(t *testing.T) {
       90    t.Parallel()
-      91 -  const key = "sk-test-key-for-the-mode-table" // never a real 
+      91 -  const key = "sk-t…[30 chars]" // never a real 
          -key                                                            
       91 +  const key = "fake-key-for-the-mode-table" // never a real key
       92    tests := []struct {
@@ -5394,7 +5394,7 @@
           ef, channels) VALUES ('b', '{sms,fax}')`},
       52      {"user without city", `INSERT INTO users (first_name, email
           , phone, city, language, sms_consent, email_consent) VALUES ('A
-          ', 'b@example.com', '+900000000002', NULL, 'tr', true, true)`},
+          ', 'b***@e***.com', '+9000000****', NULL, 'tr', true, true)`},
 
 ● Update(backend\internal\migrate\schema_integration_test.go)
   ⎿  Added 4 lines, removed 2 lines
@@ -5441,7 +5441,7 @@
           ef, channels) VALUES ('b', '{sms,fax}')`},
       52      {"user without city", `INSERT INTO users (first_name, email
           , phone, city, language, sms_consent, email_consent) VALUES ('A
-          ', 'b@example.com', '+900000000002', NULL, 'tr', true, true)`},
+          ', 'b***@e***.com', '+9000000****', NULL, 'tr', true, true)`},
 
   Ran 1 shell command (ctrl+o to expand)
   ⎿  Found 1 new diagnostic issue in 1 file (ctrl+o to expand)
@@ -7866,7 +7866,7 @@
           +t (it may hold a token or a user name) must not be in it.     
       312 +func TestDescribe_doesNotLeakTheRequestURL(t *testing.T) {    
       313 +  t.Parallel()                                                
-      314 +  err := &url.Error{Op: "Post", URL: "https://user@provider.ex
+      314 +  err := &url.Error{Op: "Post", URL: "https://u***@p***.ex
           +ample/sms?token=SECRET", Err: errors.New("dial tcp 10.0.0.5:44
           +3: connect: connection refused")}                             
       315 +  got := describe(Result{Kind: Transient, Err: err})          

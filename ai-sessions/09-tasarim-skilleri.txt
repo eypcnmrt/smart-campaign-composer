@@ -1816,8 +1816,8 @@
   Ne bitti
 
   - Aşama 0 (35c562e): 08-kampanya-api.txt tarandı. 16 bulgunun hepsi sentetik
-    test verisi (example.com, +90000000000x, sk-test-key-for-the-mode-table,
-    ANTHROPIC_API_KEY sabit adı, user@provider.ex); gerçek sızıntı yok. Commit
+    test verisi (example.com, +9000000****, sk-t…[30 chars],
+    ANTHROPIC_API_KEY sabit adı, u***@p***.ex); gerçek sızıntı yok. Commit
     edildi.
   - Aşama 1 (5c0cfaf): frontend-design ve ui-ux-pro-max kuruldu.
     - İkisi de sabit commit'ten, repo dışındaki geçici karantina klasöründen
