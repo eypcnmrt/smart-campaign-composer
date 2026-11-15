@@ -1,10 +1,50 @@
 # Decisions
 
-Short records: what was decided, why, and what was considered instead. Product assumptions
-(segment scope, limits, consent, delivery semantics) are in `docs/PLAN.md` section 2 and move
-here when the README is written.
+Short records: what was decided, why, and what was considered instead. The product assumptions
+(segment scope, limits, consent, delivery semantics) are in `docs/PLAN.md` section 2 (in Turkish); the
+decisions below are the ones made while building. The README ([README.md](README.md)) is the way in; this file is the reasoning.
+Sections are in the order the work happened, so a later section can replace a rule of an earlier one: where that happens the
+earlier text says so ("Superseded", "replaces").
+
+## Contents
+
+- **The model and the rule language:** [LLM layer](#llm-layer) · [Content](#content) · [Streaming](#streaming) ·
+  [LLM client](#llm-client) · [Repair loop and prompts](#repair-loop-and-prompts)
+- **Data and delivery:** [Database and seed](#database-and-seed) · [Mock provider](#mock-provider) ·
+  [Queue and worker](#queue-and-worker) · [Campaign API](#campaign-api)
+- **Running and the web app:** [Docker and the test commands](#docker-and-the-test-commands) · [Web app](#web-app)
+- **Reviews and later sessions:** [Fixed after the review](#fixed-after-the-review) ·
+  [Fixed after the second review](#fixed-after-the-second-review-the-api-stage) ·
+  [The overnight session](#the-overnight-session-after-the-browser-round) · [The closing session](#the-closing-session-open-issues-of-the-overnight-session-and-the-screenshots)
+- **The real model:** [The real-model session](#the-real-model-session-smoke-test-and-golden-set-2026-11-15) ·
+  [The model decision](#the-model-decision-2026-11-15-after-reading-the-comparison) ·
+  [A rule without a condition](#a-rule-without-a-condition-means-every-user-2026-11-15-found-by-hand-in-the-browser) ·
+  [A criterion the rule cannot express](#a-criterion-the-rule-cannot-express-must-not-replace-one-it-can-2026-11-15-olmayan-kriter)
+- **How it was built:** [Tools](#tools) · [Working environment](#working-environment) · [Permission mode and hooks](#permission-mode-and-hooks)
+- **What is next:** [Future work](#future-work) · [Open issues](#open-issues)
 
 ## LLM layer
+
+### The segment rule is AND-of-OR (CNF), two levels, no recursion
+- **Decision:** a segment rule is a list of conditions that are **ANDed**; each element is one condition (`attribute` or `event`) or
+  an **OR group** (`any_of`) of single conditions. In logic terms the rule is a conjunction of clauses (**AND-of-OR, CNF**). An OR
+  group cannot contain another group, and there is no `not` node: negation is an operator (`neq`, `not_in`, `not_performed`).
+  Fields are `city`, `language`, `total_orders`, `total_spent`; events are `cart_add` and `purchase` (`performed` or
+  `not_performed`, within 1 to 365 days). At most 10 conditions at the top and 10 in a group. Consent is not part of the rule: the
+  system always applies it. This is the name used everywhere in this file and in the README: "AND-of-OR (CNF)"; "OR group" means
+  an `any_of`.
+- **Why:** structured outputs accept no recursive JSON schema (the claude-api notes, "JSON Schema Limitations"), so a nested
+  and/or/not tree could not be guaranteed by the schema, and the alternative was free JSON checked only by the backend. Two levels
+  cover most campaign segments, keep Claude's output inside a shape the API guarantees, and keep the validator and the SQL
+  compiler small and fully testable. Negation as an operator gives the same power with less ambiguity (no double negation), and
+  any other expression can be written as a CNF: `(A and B) or C` is `(A or C) and (B or C)`.
+- **What it costs:** converting to CNF multiplies conditions, so a large expression can pass the limit of 10; and the order of
+  events cannot be said ("added to the cart *after* ...": PLAN assumption 1b). A brief that runs into either gets
+  `unsupported_criteria`, never a guess.
+- **Alternative:** a recursive tree with free JSON output validated in Go only (rejected above), or SQL written by the model
+  (never: see "The brief is untrusted data").
+- The rule reaches the database only as parameterized SQL (`EXISTS` / `NOT EXISTS` for events, column names from a whitelist map,
+  every value a `$n`).
 
 ### Segment JSON schema is generated from the vocabulary and checked both ways
 - **Decision:** `segment.Schema()` builds the structured-output schema from the same field,
@@ -112,8 +152,8 @@ here when the README is written.
 - **Known limit, kept on purpose:** with `auto` and no usable key the api serves the demo mock. A key that is blank, misspelled or
   not passed through compose therefore looks like a working system until someone reads the start-up log or the badge. It is made
   visible in three places: the api logs `llm client chosen` with `mode=mock`, `setting=auto` and the reason ("no ANTHROPIC_API_KEY
-  is set, so the demo mock is used") at every start; `GET /api/config` returns `llm_mode: "mock"` (and `model: "mock"`); and the UI
-  will show a "Mock LLM" badge from that field (the UI is the next stage, the field is there now). `LLM_MODE=anthropic` is the strict
+  is set, so the demo mock is used") at every start; `GET /api/config` returns `llm_mode: "mock"` (and `model: "mock"`); and the
+  web app shows a yellow "Mock LLM" badge from that field (`LlmBadge`). `LLM_MODE=anthropic` is the strict
   setting: it exits at start-up without a key.
 - **Why it stays a fallback:** the case requires `docker compose up` to work for someone who has no key and no dotenv file, and a
   start-up failure there would be the worse failure. The mock cannot cost money or reach the real API, so the risk of the fallback is
@@ -125,7 +165,8 @@ here when the README is written.
   (adaptive when omitted on Claude Sonnet 5.5 and Claude Opus 5.5; an explicit `disabled` is a 400 on both), so effort is the
   only control, and it is always sent because the defaults differ (`high` on Sonnet 5.5, `medium` on Opus 5.5). No assistant
   prefill, forced tool choice or sampling parameters, which these models reject with a 400. `max_tokens` is 16000 (segment) and 64000 (content),
-  with whole-call deadlines of 90 s and 4 min.
+  with deadlines of 90 s and 4 min for one call, SDK retries included (a whole generation, repairs included, has 2 and 5 minutes:
+  see "Generation limits").
 - **Why:** thinking tokens count toward `max_tokens`, and a cut-off answer is a failed call that costs more
   than a large limit ever does. Streaming is used for the large limit so a long answer does not hit an
   HTTP timeout. The deadline covers the SDK's retries as well, so a hanging provider cannot hold a request.
@@ -211,8 +252,9 @@ here when the README is written.
 - **Decision:** cities, languages, the condition limit and the window (`segment`), and the SMS, subject and
   body limits and the variable names (`content`) are read from the packages that validate them; tests
   check that the prompts mention them. The prompt tells the model to leave suffixes off `{{city}}` and to
-  avoid emoji in SMS, and to fall back to a catch-all condition plus `unsupported_criteria` when nothing in
-  the brief can be expressed, so the rule is never empty.
+  avoid emoji in SMS. *Superseded:* it also used to tell the model to fall back to a catch-all condition when nothing in the
+  brief can be expressed, so the rule was never empty; that fallback is gone ("A rule without a condition means every user":
+  an empty list is the rule, and the criterion goes to `unsupported_criteria` alone).
 - **Why:** a prompt that lists 11 cities while the validator accepts 12 is a bug that only shows up as
   repairs in production.
 - **Alternative:** hand-written lists in the prompt text.
@@ -237,7 +279,7 @@ here when the README is written.
 - **Why:** the assignment wants `docker compose up` to need nothing but Docker, and the runner is ~150 lines
   that are covered by tests (failed file rolls back, concurrent runners apply once, modified file detected).
 - **Alternative:** golang-migrate or Atlas. Better tooling (down migrations, dirty-state handling), but another
-  dependency and another binary in the image for a forward-only schema of two files.
+  dependency and another binary in the image for a forward-only schema (two files then, nine now).
 
 ### The state machine is a CHECK on status plus data invariants, not a trigger
 - **Decision:** `campaigns.status` is limited to the seven states of docs/PLAN.md section 1, and the data a state
@@ -505,7 +547,8 @@ here when the README is written.
   brief does not state, put it in `unsupported_criteria`", and that the catch-all rule is for a brief with nothing
   expressible (`unsupported_criteria` empty only when the brief simply asks for all customers). The demo mock has both
   scenarios: nothing recognised (catch-all rule plus an unsupported criterion) and an explicit "tüm müşteriler" (catch-all, no
-  unsupported criterion).
+  unsupported criterion). *Superseded in part:* the "catch-all rule" is no longer a made-up condition but a rule without any
+  (`"conditions": []`, "A rule without a condition means every user"); the warning and the acknowledgement are as described here.
 - **Why:** the model has to put some condition in the rule, so a brief with nothing expressible produced a match-all rule and
   the only signal was a list the UI might not show. The count is the check that cannot be talked around: the model's own
   `unsupported_criteria` is advisory, whereas "the rule reaches every user" is a fact read from the database. An explicit
@@ -729,7 +772,9 @@ here when the README is written.
 - **Decision:** `docker-compose.test.yml` has a throwaway PostgreSQL (tmpfs, `fsync=off`), a `golang:1.27` container
   that runs `gofmt -l`, `go vet -tags=integration` and `go test -race -tags=integration ./...` with the source mounted
   read-only, and a `node:22-alpine` container for the hook and scanner tests. `scripts/test.sh` runs them and always
-  removes the containers and volumes afterwards. About 75 s on a warm cache.
+  removes the containers and volumes afterwards. (It was about 75 s on a warm cache when it only ran Go and the hook tests; the web
+  checks of "The toolchain runs only in a pinned container" came later and the worker package alone takes about 90 s, so it is a few
+  minutes now.)
   In the guard hook tests, the cases whose paths are drive letters (`C:\x`) run only on Windows: on Linux such a path
   is an ordinary relative name, so the guard cannot see it is outside the project. The guard itself is unchanged.
 - **Why:** the evaluator has Docker and make only (docs/PLAN.md section 2, assumption 15). A separate file keeps the
@@ -989,7 +1034,8 @@ reporting and in the stream's write path.
   send do not change width every second. `sent_at` is the time the worker *recorded* success, which is when the provider's answer
   arrived, not the provider's own clock.
 - **Summary:** `summary = {duration_seconds, retried_messages, total_attempts}` (it had an average and a peak of both channels together until
-  the closing session, see "Speeds are per channel"). Duration is approval to completion (null until completed).
+  the closing session, see "Speeds are per channel"). Duration is approval to completion (null until completed; the per-channel
+  `timeline.duration_seconds` is first to last accepted message, a different figure).
   *Retried* means more than one attempt (`attempts > 1`); the attempt that an outage gave back (see "A circuit breaker per channel")
   does not count, which is why the outage scenario shows no retries. Total attempts is `sum(attempts)`.
 - **Index (migration 0008, `INCLUDE (attempts)` added by 0009):** `deliveries_sent_at_idx (campaign_id, sent_at, channel) INCLUDE (attempts) WHERE status = 'sent'`. The first and last send time are
@@ -1287,7 +1333,8 @@ fields of the answers and the price table below, not read from the Console).
   up to 90 sent per second and channel (the 100/s cap counts attempts, and one in ten fails on the demo provider), and the other 43 s
   are backoff, 7.5-15 s after a first failure (a 429's 1 s `Retry-After` is shorter, so it does not shorten that) and 15-30 s after a
   second, with 7 of the 647 messages (1 %, as 10 % squared predicts) needing a third attempt that landed at 46 s; the 7.5 messages per
-  second the stats show are the 351 emails over the whole 47 s, not the speed of sending.
+  second the stats show are the 351 emails over the whole 47 s, not the speed of sending. (That figure was misleading next to the
+  cap of 100/s and is replaced by the first-attempt speed: "The speed of a channel is the first-attempt speed".)
 - **The two model calls:**
 
   | Call | Tokens in / out | Cost | Time |
@@ -1308,7 +1355,8 @@ fields of the answers and the price table below, not read from the Console).
   Before, the tokens of a `max_tokens` or `refusal` answer vanished, and a budget would have been blind to exactly the expensive case.
 
 ### The golden set: scope and limit
-- **What it is:** 14 Turkish briefs (`eval/golden.json`): one criterion; AND of an attribute and a number; AND of two attributes; OR in
+- **What it is:** 14 Turkish briefs when it was written (16 now: `dogum-gunu` and `magaza-ziyareti` were added in "A rule without a
+  condition means every user"; the current run is in `eval/results/20261115-142948-claude-sonnet-5-5.md`) (`eval/golden.json`): one criterion; AND of an attribute and a number; AND of two attributes; OR in
   one group; a negative action; added to cart and did not buy; "son N gün"; a period beyond the vocabulary (500 days); "recently"
   without a number; an amount with and without a direction; criteria the data does not have (age, gender); a brief for everyone; an
   instruction inside the brief; SMS only, email only, both channels, and no channel named.
@@ -1553,7 +1601,7 @@ limit $0.50). Everything is one run per brief and model, as before.
   rule has `purchase performed within 30d` instead of the city (its explanation still says İstanbul), so `required` and
   `no_invented` fail. It came out the same when that brief was run again, and also with the previous prompt text put back (the
   run was not written to `eval/results/`), so it is not caused by this change; it passed in the run of the same afternoon. It is
-  open, not explained, and was not fixed here because a prompt change would invalidate the full run above and the session's
+  open, not explained (closed in the next section), and was not fixed here because a prompt change would invalidate the full run above and the session's
   spending limit did not allow another one. Session spend on the real API about $0.31 (the full run $0.263, two single-brief
   runs $0.029, the smoke test about $0.015, estimated from its token counts).
   **Corrected in the next section:** "not caused by this change" was concluded from putting back `prompts.go` alone; with every
@@ -1599,6 +1647,145 @@ limit $0.50). Everything is one run per brief and model, as before.
   The mock dry run is 16 of 16.
 - **Spend on the real API this session: about $0.43** (the full run $0.249, twelve single-brief runs $0.179, all read from the
   result files).
+
+## Tools
+
+What was used to build this, with the versions that are pinned. Sources, full commit SHAs, licenses and the local changes to each
+file are in `.claude/THIRD_PARTY.md`; how each was downloaded and scanned is in `docs/ai-tooling.md`. Nothing was installed
+without being downloaded into a quarantine folder first, scanned, and copied in as the pinned commit.
+
+| Tool | Version / pin | What it was for |
+|---|---|---|
+| Claude Code | the CLI of the day (the model names are in each export's header) | the sessions in `ai-sessions/` |
+| Skills `golang-error-handling`, `golang-concurrency`, `golang-database`, `golang-testing` (samber/cc-skills-golang) | `d68d80a` | the Go backend: errors, the worker's concurrency, PostgreSQL access, tests (their `allowed-tools` lines were removed so they pre-approve nothing) |
+| Skills `vue`, `vitest` (antfu/skills) | `2b26163` | the web app and its unit tests |
+| Skill `verification-before-completion` (obra/superpowers) | `22f0b46` | "run the check before saying it is done" |
+| Skills `frontend-design` (anthropics/skills) and `ui-ux-pro-max` (nextlevelbuilder) | `41bbe19`, `6ae86f6` | design direction and the searchable palette / font / UX data behind `design-system/MASTER.md` (the search script runs in a pinned Python container, no network) |
+| Skill `claude-api` (shipped with Claude Code, not vendored) | the one of the session | the facts about the models: parameters that are a 400, prices, structured outputs |
+| Agents `silent-failure-hunter` (anthropics/claude-plugins-official) and `repo-publication-auditor` (davila7/claude-code-templates) | `dceb15d`, `4036c90` | two reviews of silent failures (see "Fixed after the second review"), and the pre-publication audit of history, author addresses and key-shaped strings |
+| Plugin `gopls-lsp` and `gopls` | `gopls` v0.24.0; the plugin is the marketplace copy, identical to `dceb15d` (the marketplace itself is not pinned by Claude Code) | Go code intelligence |
+| gitleaks | 8.30.1 (the installed one), run by `.githooks/pre-commit` on staged changes | no key in a commit; it fails closed when it is missing |
+| `ecc-agentshield` | 1.6.0, `scan` only (the modes that send content to a model were not used) | a scan of the downloaded tooling |
+| `scripts/check-ai-sessions.cjs` | in the repo, with tests | keys, e-mail addresses, phone numbers and home paths in `ai-sessions/`, reported masked |
+| Browser tests | Playwright 1.64.1 with `@axe-core/playwright` 4.14.0, image `mcr.microsoft.com/playwright:v1.64.1-noble`, **Chromium only** | `make e2e`; one engine keeps it at about two minutes (no Firefox or WebKit project) |
+| Web | Vue 3.5.44, vue-router 5.4.0, Vite 8.3.5, Vitest 5.0.5 with happy-dom 21.0.4, TypeScript 6.0.3, vue-tsc 3.3.14 | exact versions, at least two weeks old, lock file committed |
+| Backend | Go 1.27, `anthropic-sdk-go/v2` v2.9.0, chi v5.5.0, pgx v5.13.0, `prometheus/client_golang` v1.25.0 | exact versions in `go.mod` / `go.sum` |
+
+**Not installed, on purpose:** the `security-guidance` plugin (an unpinned package that sends diffs to a model; the built-in
+`/security-review` was used), Postgres MCP servers (a known read-only bypass; `psql` in the container instead), Snyk agent-scan
+(uploads content), the other skills of the design repository and its `npx` installer. The reasons are in `docs/ai-tooling.md`.
+
+## Working environment
+
+- **Windows 11 with Docker Desktop; everything that runs code runs in a container.** Windows Application Control blocks new
+  binaries now and then (`vet.exe`, a fresh test binary), and package code from the internet should not run on the machine that
+  holds the sessions. So Go, npm, the browser tests and the Python search script of the design skill each have a pinned image,
+  and the host has Docker, `make`, Git and Node only (Node for the hook tests and `check-ai-sessions`, which are small scripts of
+  this repository).
+- **The pinned images:**
+
+  | Image | Used for |
+  |---|---|
+  | `golang:1.27` (the eval service pins it by digest, `sha256:ec47ea37...`) | Go tests, vet, gofmt, fuzzing, the build |
+  | `node:24.14.0-alpine` | `scripts/web.sh`, `scripts/test-web.sh`, the web build, `scripts/e2e-npm.sh` |
+  | `node:22-alpine` | the hook and scanner tests in `make test` |
+  | `postgres:17.6-alpine` | the database (a full version tag, so the seed and the queue behave the same everywhere) |
+  | `nginxinc/nginx-unprivileged:1.30.6-alpine` | the web container (UID 101, read-only, capabilities dropped) |
+  | `alpine:3.22` | the two runtime images of the Go binaries (UID 10001) |
+  | `mcr.microsoft.com/playwright:v1.64.1-noble` | the browser tests; the tag and `@playwright/test` move together |
+  | `python:3.14.10-slim-trixie` | the `ui-ux-pro-max` search script, `--network none`, repository read-only |
+
+- **Why pinned:** a tag that moves can change a result between two runs of the same command, and an image whose tag was replaced is
+  an unreviewed change to what runs on the machine. `npm` additionally runs with lifecycle scripts off, with `node_modules` and
+  the cache in named volumes, and `npm audit --audit-level=high` is part of `make test`.
+- **Known rough edges of this setup:** Git Bash rewrites the path in a `docker run -v` argument and Docker then creates a junk folder
+  such as `backend;C` in the repository (the commands in `CLAUDE.md` are for PowerShell; in Git Bash `MSYS_NO_PATHCONV=1` and
+  `$(pwd -W)` are needed); the editor tools turn a typed `ç` into the letter itself (a placeholder and a `node` replacement keep the
+  escape literal: see "Shared fixtures keep Go and TypeScript honest"); `-race` needs a C compiler, which only the containers have.
+
+## Permission mode and hooks
+
+- **The sessions ran with `--dangerously-skip-permissions`** (bypass mode): nothing asks before a command runs, so the work could
+  go on unattended overnight. That is only acceptable because of what is checked around it, and hooks run even in bypass mode:
+  - **`.claude/hooks/guard.cjs`**, a `PreToolUse` hook on `Read`, `Grep`, `Bash` and `PowerShell`. It exits 2 (blocks) and says one
+    static line, never the value it matched; any error inside it blocks too (fail closed). It stops: reading a dotenv file (any
+    spelling: quotes, wrappers, encoded commands), dumping the environment (`env`, `printenv`, `set`, `Get-ChildItem env:`,
+    `docker compose config`), `git push --force`, bypassing git hooks (`--no-verify`, changing `core.hooksPath`), deleting outside the
+    project folder, and a command it cannot verify as safe (deleting or nesting too opaque). It is a lexical check, not a sandbox,
+    and says so: it does not stop a program that reads a file on its own.
+  - **`.claude/settings.json`** denies `Read` of the dotenv files, turns the claude.ai connectors off, and runs **`gofmt.cjs`** after
+    each edit of a `.go` file.
+  - **`.githooks/pre-commit`** runs gitleaks on the staged changes and fails closed. **`scripts/check-ai-sessions.cjs`** is run
+    before every export is committed.
+  - The rules the guard cannot enforce are in `CLAUDE.md` (never read `.env`; `LLM_MODE=mock` on every compose up; no
+    `--no-verify`), and the owner's session prompts repeat them.
+- **What the guard really stopped** (each one reported to the owner and none worked around; the list is what the reports of the
+  sessions say, and the exports in `ai-sessions/` hold the transcripts):
+  - The guard hook stopped four commands during the API stage and none was worked around: a `rm` of a temporary copy in `/tmp`
+    (outside the project; the copy was left, it is a test file without secrets), and three commands whose text contained a dotenv
+    file name or the words of the blocked compose subcommand (a directory listing filtered for the name, and two scripts that edited
+    documentation). The documentation edits were made with the editor tool instead, without the blocked wording.
+  - The guard hook stopped two commands while the design skills were installed. (1) A staging command that copied the downloaded
+    files into a scan folder and deleted the skill's `scripts/tests/` there with a recursive `rm`: it was redone without any
+    deletion (`tar --exclude`), so the guard was not bypassed, but the rule behind it still means the quarantine folder (a temporary
+    directory outside the repository, as the install policy asks) cannot be deleted by a session; it was left in place. (2) A shell
+    heredoc that appended the scan results to `docs/ai-tooling.md`, probably because the text names commands such as `rm -rf`: the
+    same text was written with the editor tool, with those words described instead of spelled. Also, a first scan of the install set
+    with AgentShield reported "0 files scanned" for skills (it does not read skill folders), which `docs/ai-tooling.md` says plainly.
+  - **Web app stage: one commit was stopped by the guard hook, by its wording.** The message of the scaffold commit contained a
+    literal dotenv file name (it said the app has no such files for Vite), and the guard reads any command that spells one as an
+    attempt to read secrets. It was not worked around: the session told the owner, the owner allowed rewording the message (the
+    guard itself, the hooks and `--no-verify` stayed as they are), and the same commit was made with the words changed. The same
+    rule is why the web documentation says "no Vite env files" instead of naming them.
+  - **UTF-8 check: one command was stopped by the guard hook.** A `grep` over the API test files whose pattern contained the bare
+    word for the process environment was read as an attempt to dump it. It was not retried in another form; the files were read
+    with the editor's read tool instead (they hold no secrets) and the owner is told in the session report.
+  - **The real-model session (export 15): two commands.** Early in the session a command was stopped as "reading dotenv files is
+    blocked" (the transcript shows the block and not the command; the session's final report did not mention it, only the second
+    one, so this line comes from the transcript, not from the report; the key's presence was checked through `/api/config`, see
+    "Smoke test through the web app"). Later a `rm -f` of a log in `/tmp` was stopped ("deleting outside the project folder is
+    blocked"); the step was dropped and the log written to the scratch folder instead.
+  - **This documentation day: one command, a false alarm.** A read-only command that listed tool versions and also printed one git
+    setting of the hooks folder was stopped as "bypassing git hooks"; nothing was changed by it. The command was run again without that
+    part, and the guard was not touched.
+  - **No command was stopped** in the closing session, the eval close-out, the Sonnet transition, the filler-condition session and
+    the olmayan-kriter session (exports 16 to 19); the sessions' reports say the guard was not asked anything it refused.
+- **Where a session went against an instruction** (each said so in its own report; the deviations are small and none touched a
+  rule of the guard): the instruction was to edit files with the `Edit` tool, and twice a session edited with something else: in the
+  eval close-out session (export 16) the first edit of `compose.go` was made with a `node` script, and in the Sonnet transition session
+  (export 17) one edit of `run_test.go` was made with `sed`. In both the content was checked by the tests afterwards and the rest of
+  the edits went back to `Edit`. The same sessions list smaller slips of their own: a `docker run` from Git Bash that failed on path
+  conversion (redone in PowerShell), an empty `eval/results/backend` folder left behind by a command run in the wrong directory (looked at, found
+  empty, removed), and a first `compose up --build` of the web image that timed out on the network (only the api and the worker
+  were rebuilt, as the web app had not changed). Also: a session concluded "not caused by this change" from putting back one
+  file when the whole change had to be put back ("A criterion the rule cannot express..." has the correction), which is an
+  overconfident conclusion, not a rule broken.
+- **Known limits of the guard:** it checks the text of a command, so a program that reads a file by itself is not stopped, and it
+  has false alarms (a dotenv name or the word for the environment inside a commit message or a `grep` pattern; a read of a git
+  setting). The answer to a false alarm is to reword, or to use the `Read` / `Grep` tools for a read, never to turn the guard off.
+  The test cases with Windows drive paths run only on Windows (see "Docker and the test commands"): the guard has no Linux
+  counterpart for them. Nothing was blocked in a way that needed a dotenv change: the optional compose settings were added to
+  `.env.example` as comments and no variable is required.
+- Every web command ran in the pinned node container (`scripts/web.sh`, `scripts/test-web.sh`); no package code ran on the host.
+
+## Future work
+
+- **Model routing.** Sonnet first; when the validation still fails after the repair loop, run the same task once on Opus. Today a
+  task that fails after its two repairs is a controlled error (`ErrRepairExhausted`) and the marketer tries again. Routing would be
+  measured with the same golden set (`make eval`, `EVAL_MODEL=` picks the first model; the runner would need the second step): how
+  many briefs move to Opus, what the cost per run becomes against $0.249 for Sonnet alone and about $0.55 for Opus alone, and
+  whether any brief that fails on both still fails (a failure of the prompt, not of the model). **It was not built** because the
+  eval showed no gap to close: Sonnet passed 16 of 16 with no repair in the last run, so the only thing routing could show today is
+  its own overhead. It becomes worth building when a larger or harder set shows failures that Opus fixes; until then it would be
+  code for a case that was never observed.
+- Several runs per brief, so that a pass rate and not a single draw is reported; wording of the texts scored by a person with a fixed
+  rubric (the checks do not read tone).
+- A register for the text ("sen" or "siz"): Sonnet mixes both between briefs and nothing in the prompt says which is wanted.
+- Rules that need more than AND-of-OR (event order, age and gender data, birthdays): a richer rule language means a richer
+  structured-output schema or a validated free form (see "The segment rule is AND-of-OR (CNF)").
+- Delivery receipts and a real provider; authentication and several tenants (PLAN, out of scope).
+- A client timeout and a keep-alive check on the content stream, and a delete endpoint for damaged campaigns (both under
+  "Open issues").
 
 ## Open issues
 
@@ -1685,30 +1872,6 @@ fixes are covered by Vitest tests (happy-dom). What a real browser has been run 
 browser tests cover, and what they do not").
 
 ### Environment
-- The guard hook stopped four commands during the API stage and none was worked around: a `rm` of a temporary copy in `/tmp`
-  (outside the project; the copy was left, it is a test file without secrets), and three commands whose text contained a dotenv
-  file name or the words of the blocked compose subcommand (a directory listing filtered for the name, and two scripts that edited
-  documentation). The documentation edits were made with the editor tool instead, without the blocked wording.
-- The guard test cases with Windows drive paths run only on Windows (see "Docker and the test commands"). The guard has no
-  Linux counterpart for them.
-- Nothing was blocked by a hook in a way that needs a dotenv change: the optional compose settings were added to
-  `.env.example` as comments; no variable is required.
-- The guard hook stopped two commands while the design skills were installed. (1) A staging command that copied the downloaded
-  files into a scan folder and deleted the skill's `scripts/tests/` there with a recursive `rm`: it was redone without any
-  deletion (`tar --exclude`), so the guard was not bypassed, but the rule behind it still means the quarantine folder (a temporary
-  directory outside the repository, as the install policy asks) cannot be deleted by a session; it was left in place. (2) A shell
-  heredoc that appended the scan results to `docs/ai-tooling.md`, probably because the text names commands such as `rm -rf`: the
-  same text was written with the editor tool, with those words described instead of spelled. Also, a first scan of the install set
-  with AgentShield reported "0 files scanned" for skills (it does not read skill folders), which `docs/ai-tooling.md` says plainly.
-- **Web app stage: one commit was stopped by the guard hook, by its wording.** The message of the scaffold commit contained a
-  literal dotenv file name (it said the app has no such files for Vite), and the guard reads any command that spells one as an
-  attempt to read secrets. It was not worked around: the session told the owner, the owner allowed rewording the message (the
-  guard itself, the hooks and `--no-verify` stayed as they are), and the same commit was made with the words changed. The same
-  rule is why the web documentation says "no Vite env files" instead of naming them.
-- Every web command ran in the pinned node container (`scripts/web.sh`, `scripts/test-web.sh`); no package code ran on the host.
-- **UTF-8 check: one command was stopped by the guard hook.** A `grep` over the API test files whose pattern contained the bare
-  word for the process environment was read as an attempt to dump it. It was not retried in another form; the files were read
-  with the editor's read tool instead (they hold no secrets) and the owner is told in the session report.
-- **Closing session: no command was stopped by a hook.** Every Go and npm command ran in the containers of CLAUDE.md; the guard was
-  not asked anything it refused, and nothing was worked around. A flaky provider test (a 50 ms client timeout that a loaded machine
-  missed) failed once in a full run and was hardened, see "The demo provider fails a little by default".
+The log of what the guard hook stopped moved to "Permission mode and hooks". The closing session had no stopped command; a flaky
+provider test (a 50 ms client timeout that a loaded machine missed) failed once in a full run and was hardened, see "The demo
+provider fails a little by default".
