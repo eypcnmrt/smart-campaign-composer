@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"smartcampaign/internal/campaign"
+	"smartcampaign/internal/compose"
 	"smartcampaign/internal/llm"
 	"smartcampaign/internal/segment"
 )
@@ -43,6 +44,13 @@ func TestRunner_scoresABriefAndCountsRepairs(t *testing.T) {
 	}
 	if b.SegmentRepairs != 1 || b.ContentRepairs != 0 || len(b.Calls) != 3 {
 		t.Errorf("repairs = %d/%d with %d calls, want 1/0 with 3", b.SegmentRepairs, b.ContentRepairs, len(b.Calls))
+	}
+	if len(b.RepairReasons) != 1 || b.RepairReasons[0].Stage != compose.StageSegment || b.RepairReasons[0].Attempt != 1 ||
+		len(b.RepairReasons[0].Problems) != 1 || !strings.Contains(b.RepairReasons[0].Problems[0].Message, "malformed") {
+		t.Errorf("repair reasons = %+v, want one rejected segment answer (malformed JSON)", b.RepairReasons)
+	}
+	if md := res.Markdown(); !strings.Contains(md, "Why answers were repaired") || !strings.Contains(md, "**izmir** segment attempt 1") {
+		t.Errorf("the report does not list the repair reason:\n%s", md)
 	}
 	if b.Content == nil || b.Content.SMS == "" || b.RuleJSON != goodRule {
 		t.Errorf("the evidence is missing: %+v", b)

@@ -107,13 +107,16 @@ type BriefResult struct {
 	Audience campaign.Audience `json:"audience"`
 	Content  *content.Content  `json:"content,omitempty"`
 
-	SegmentRepairs int          `json:"segment_repairs"` // requests after the first one
-	ContentRepairs int          `json:"content_repairs"`
-	Calls          []CallRecord `json:"calls"`
-	InputTokens    int64        `json:"input_tokens"`
-	OutputTokens   int64        `json:"output_tokens"`
-	CostUSD        float64      `json:"cost_usd"`
-	DurationMS     int64        `json:"duration_ms"`
+	SegmentRepairs int `json:"segment_repairs"` // requests after the first one
+	ContentRepairs int `json:"content_repairs"`
+	// RepairReasons is why each answer was rejected, in order: the stage, the attempt, and the validator's field and code
+	// (a segment error has no code, only the field and the message). Together with the answer after it, it is the repair.
+	RepairReasons []compose.Rejection `json:"repair_reasons,omitempty"`
+	Calls         []CallRecord        `json:"calls"`
+	InputTokens   int64               `json:"input_tokens"`
+	OutputTokens  int64               `json:"output_tokens"`
+	CostUSD       float64             `json:"cost_usd"`
+	DurationMS    int64               `json:"duration_ms"`
 }
 
 // Result is a whole run.
@@ -167,6 +170,7 @@ type Runner struct {
 
 	mu    sync.Mutex
 	calls []CallRecord // the calls of the brief in progress
+	rejs  []compose.Rejection
 }
 
 // NewRunner builds a runner around client, which the application's compose package drives with its own prompts and repair
@@ -177,6 +181,11 @@ func NewRunner(client llm.Client, auditor Auditor, cfg Config) *Runner {
 	}
 	r := &Runner{cfg: cfg, budget: NewBudget(cfg.MaxUSD), auditor: auditor}
 	r.composer = compose.New(guarded{Client: llm.Metered(client, r.onCall), budget: r.budget})
+	r.composer.OnRejected(func(rej compose.Rejection) {
+		r.mu.Lock()
+		r.rejs = append(r.rejs, rej)
+		r.mu.Unlock()
+	})
 	return r
 }
 
@@ -232,6 +241,7 @@ func (r *Runner) Run(ctx context.Context, briefs []Brief, progress io.Writer) (R
 func (r *Runner) runBrief(ctx context.Context, b Brief) (BriefResult, error) {
 	r.mu.Lock()
 	r.calls = nil
+	r.rejs = nil
 	r.mu.Unlock()
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(ctx, r.cfg.BriefTimeout)
@@ -270,6 +280,7 @@ func (r *Runner) runBrief(ctx context.Context, b Brief) (BriefResult, error) {
 
 	r.mu.Lock()
 	br.Calls = append([]CallRecord(nil), r.calls...)
+	br.RepairReasons = append([]compose.Rejection(nil), r.rejs...)
 	r.mu.Unlock()
 	var segCalls, contentCalls int
 	for _, c := range br.Calls {

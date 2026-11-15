@@ -53,11 +53,46 @@ func (e *GenerationError) Is(target error) bool { return target == ErrRepairExha
 
 // Composer generates segments and content with a Client.
 type Composer struct {
-	client llm.Client
+	client   llm.Client
+	rejected func(Rejection)
 }
 
 // New returns a Composer.
 func New(client llm.Client) *Composer { return &Composer{client: client} }
+
+// Problem is one reason an answer was rejected. Path is the field (a JSON path); Code is the validator's stable code and is
+// empty where the validator has none (the segment rule's errors have a path and a message only); Message is the English text
+// that also goes into the repair prompt.
+type Problem struct {
+	Path    string `json:"path,omitempty"`
+	Code    string `json:"code,omitempty"`
+	Message string `json:"message"`
+}
+
+// String is the line the repair prompt carries.
+func (p Problem) String() string {
+	if p.Path == "" {
+		return p.Message
+	}
+	return p.Path + ": " + p.Message
+}
+
+// Rejection is an answer that failed validation and was (or, after the last attempt, would have been) sent back.
+type Rejection struct {
+	Stage    string // StageSegment or StageContent
+	Attempt  int    // 1-based: the attempt whose answer was rejected
+	Problems []Problem
+}
+
+// OnRejected sets fn, called for every rejected answer, the last one of a failed task included. It is for evaluation and
+// logs; fn must not block and runs on the goroutine that generates. Set it before the first use of the Composer.
+func (c *Composer) OnRejected(fn func(Rejection)) { c.rejected = fn }
+
+func (c *Composer) reject(stage string, attempt int, problems []Problem) {
+	if c.rejected != nil {
+		c.rejected(Rejection{Stage: stage, Attempt: attempt, Problems: problems})
+	}
+}
 
 // SegmentResult is a validated segment rule.
 type SegmentResult struct {
@@ -81,7 +116,7 @@ func (c *Composer) Segment(ctx context.Context, brief string) (SegmentResult, er
 		Brief:  brief,
 	}
 	var last llm.Response
-	rule, attempts, err := repair(ctx, StageSegment,
+	rule, attempts, err := repair(ctx, StageSegment, c.reject,
 		func(ctx context.Context, prev *failure) (string, error) {
 			if prev != nil {
 				req.User = repairUser(task, prev.output, prev.problems)
@@ -90,7 +125,7 @@ func (c *Composer) Segment(ctx context.Context, brief string) (SegmentResult, er
 			last = resp
 			return resp.Text, err
 		},
-		func(text string) (segment.Rule, []string) {
+		func(text string) (segment.Rule, []Problem) {
 			rule, err := segment.Decode([]byte(text))
 			if err == nil {
 				err = segment.Validate(rule)
@@ -168,7 +203,7 @@ func (c *Composer) Content(ctx context.Context, in ContentInput, onEvent func(Ev
 	}
 	var last llm.Response
 	attempt := 0
-	result, attempts, err := repair(ctx, StageContent,
+	result, attempts, err := repair(ctx, StageContent, c.reject,
 		func(ctx context.Context, prev *failure) (string, error) {
 			attempt++
 			if prev != nil {
@@ -196,7 +231,7 @@ func (c *Composer) Content(ctx context.Context, in ContentInput, onEvent func(Ev
 			last = resp
 			return resp.Text, err
 		},
-		func(text string) (content.Content, []string) {
+		func(text string) (content.Content, []Problem) {
 			parsed, err := content.Parse([]byte(text))
 			if err == nil {
 				err = content.Validate(parsed)
@@ -228,8 +263,9 @@ type failure struct {
 func repair[T any](
 	ctx context.Context,
 	stage string,
+	rejected func(stage string, attempt int, problems []Problem),
 	ask func(ctx context.Context, prev *failure) (string, error),
-	check func(text string) (T, []string),
+	check func(text string) (T, []Problem),
 ) (T, int, error) {
 	var zero T
 	var prev *failure
@@ -250,29 +286,39 @@ func repair[T any](
 		if len(problems) == 0 {
 			return value, attempt, nil
 		}
-		prev = &failure{output: text, problems: problems}
+		rejected(stage, attempt, problems)
+		prev = &failure{output: text, problems: problemLines(problems)}
 	}
 	return zero, MaxRepairs + 1, &GenerationError{
 		Stage: stage, Attempts: MaxRepairs + 1, Problems: prev.problems, LastOutput: prev.output,
 	}
 }
 
-// problemsOf lists what is wrong, one "path: message" per entry, for the repair
-// prompt. A syntax error has no path and is described as a whole.
-func problemsOf(err error) []string {
+// problemsOf lists what is wrong, one problem per entry. A syntax error has no
+// path and is described as a whole.
+func problemsOf(err error) []Problem {
 	if v, ok := errors.AsType[segment.ValidationErrors](err); ok {
-		return lines(v)
+		out := make([]Problem, len(v))
+		for i, e := range v {
+			out[i] = Problem{Path: e.Path, Message: e.Msg}
+		}
+		return out
 	}
 	if v, ok := errors.AsType[content.ValidationErrors](err); ok {
-		return lines(v)
+		out := make([]Problem, len(v))
+		for i, e := range v {
+			out[i] = Problem{Path: e.Path, Code: e.Code, Message: e.Msg}
+		}
+		return out
 	}
-	return []string{err.Error()}
+	return []Problem{{Message: err.Error()}}
 }
 
-func lines[E error](errs []E) []string {
-	out := make([]string, len(errs))
-	for i, e := range errs {
-		out[i] = e.Error()
+// problemLines is the "path: message" list the repair prompt and GenerationError carry.
+func problemLines(ps []Problem) []string {
+	out := make([]string, len(ps))
+	for i, p := range ps {
+		out[i] = p.String()
 	}
 	return out
 }

@@ -48,6 +48,36 @@ func anyContains(problems []string, want string) bool {
 	return slices.ContainsFunc(problems, func(p string) bool { return strings.Contains(p, want) })
 }
 
+func TestComposer_OnRejected(t *testing.T) {
+	t.Parallel()
+	var got []Rejection
+	tooLong := mustJSON(map[string]string{"sms": strings.Repeat("a", 161), "email_subject": "s", "email_body": "b"})
+	client := llm.NewScripted(
+		llm.Reply(`{"conditions":[],"unsupported_criteria":[]}`), llm.Reply(validRule), // segment: no explanation, then fine
+		llm.Reply(tooLong), llm.Reply(tooLong), llm.Reply(tooLong), // content: never fixed, so the last answer counts, too
+	)
+	c := New(client)
+	c.OnRejected(func(r Rejection) { got = append(got, r) })
+	if _, err := c.Segment(t.Context(), brief); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.Content(t.Context(), ContentInput{Brief: brief}, nil); !errors.Is(err, ErrRepairExhausted) {
+		t.Fatalf("Content() error = %v, want ErrRepairExhausted", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("%d rejections, want 4 (1 segment, 3 content): %+v", len(got), got)
+	}
+	if seg := got[0]; seg.Stage != StageSegment || seg.Attempt != 1 || len(seg.Problems) == 0 || seg.Problems[0].Path != "explanation" || seg.Problems[0].Code != "" {
+		t.Errorf("segment rejection = %+v, want attempt 1 on explanation without a code", seg)
+	}
+	for i, r := range got[1:] {
+		if r.Stage != StageContent || r.Attempt != i+1 || len(r.Problems) != 1 || r.Problems[0].Path != "sms" || r.Problems[0].Code != content.CodeTooLong {
+			t.Errorf("content rejection %d = %+v, want sms / too_long", i, r)
+		}
+	}
+	// No observer is fine, too (every other test).
+}
+
 func TestComposer_Segment(t *testing.T) {
 	t.Parallel()
 	client := llm.NewScripted(llm.Reply(validRule))
@@ -648,7 +678,7 @@ func TestProblemsOf(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			if got := problemsOf(tt.err); !slices.Equal(got, tt.want) {
+			if got := problemLines(problemsOf(tt.err)); !slices.Equal(got, tt.want) {
 				t.Errorf("problemsOf() = %q, want %q", got, tt.want)
 			}
 		})

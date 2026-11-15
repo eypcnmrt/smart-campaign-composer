@@ -70,6 +70,10 @@ func (r Result) Markdown() string {
 	}
 	fmt.Fprintf(&sb, "\n✓ passed, ✗ failed, · not run. `repairs s/c` is segment/content. `c-` columns are the content checks; the limits they enforce are the\napplication's own (SMS 160, subject 80, body 2000 characters, only {{first_name}} and {{city}}).\n")
 
+	if repairs := r.repairLines(); len(repairs) > 0 {
+		fmt.Fprintf(&sb, "\n## Why answers were repaired\n\nOne line per rejected answer: stage and attempt, then the validator's field (code, where the validator has one: segment\nerrors have a field and a message only) and message.\n\n%s\n", strings.Join(repairs, "\n"))
+	}
+
 	var failures []string
 	for _, b := range r.Briefs {
 		for _, c := range b.Checks {
@@ -82,6 +86,26 @@ func (r Result) Markdown() string {
 		fmt.Fprintf(&sb, "\n## Failed checks\n\n%s\n", strings.Join(failures, "\n"))
 	}
 	return sb.String()
+}
+
+// repairLines describes every rejected answer of the run, one line each.
+func (r Result) repairLines() []string {
+	var out []string
+	for _, b := range r.Briefs {
+		for _, rej := range b.RepairReasons {
+			for _, p := range rej.Problems {
+				field := p.Path
+				if field == "" {
+					field = "(whole answer)"
+				}
+				if p.Code != "" {
+					field += " [" + p.Code + "]"
+				}
+				out = append(out, fmt.Sprintf("- **%s** %s attempt %d: `%s` %s", b.ID, rej.Stage, rej.Attempt, field, clip(p.Message, 200)))
+			}
+		}
+	}
+	return out
 }
 
 var unsafeName = regexp.MustCompile(`[^a-zA-Z0-9.-]+`)
