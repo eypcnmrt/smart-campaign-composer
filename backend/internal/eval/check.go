@@ -463,12 +463,18 @@ func CheckContent(c content.Content, err error, e Expect) []Check {
 const turkishLetters = "çğıİöşüÇĞÖŞÜ"
 
 // turkishLetterProblems names, per field, the Turkish-only letters found in text that should be English. It does not echo the
-// text. A city written the Turkish way ("İzmir") is one such letter too; the prompt asks for {{city}} instead of a name.
+// text. The names of the cities of the vocabulary are taken out first: "İzmir" is a proper noun, spelled that way in English
+// text too (the real model wrote "customers in İzmir and Antalya" in an English SMS), and it is not a sign of the wrong language.
 func turkishLetterProblems(c content.Content) []string {
+	cities := segment.Cities()
 	var out []string
 	for _, f := range []struct{ name, text string }{{content.FieldSMS, c.SMS}, {content.FieldEmailSubject, c.EmailSubject}, {content.FieldEmailBody, c.EmailBody}} {
+		text := f.text
+		for _, city := range cities {
+			text = strings.ReplaceAll(text, city, "")
+		}
 		var letters []string
-		for _, r := range f.text {
+		for _, r := range text {
 			if s := string(r); strings.Contains(turkishLetters, s) && !slices.Contains(letters, s) {
 				letters = append(letters, s)
 			}
