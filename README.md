@@ -91,13 +91,25 @@ Docker and `make` are enough; Go and npm run in pinned containers, never on the 
 
 | Command | What it does | Time |
 |---|---|---|
-| `make test` | gofmt, `go vet`, `go test -race` with PostgreSQL integration tests, hook and script tests, the web checks (`npm audit`, `vue-tsc`, Vitest). No API key. | a few minutes (the slowest package, the worker, takes about 90 s) |
-| `make e2e` | Playwright browser tests against the real stack with the mock model, in a project of its own that is removed afterwards. `SCREENSHOTS=1` rewrites `docs/screenshots/`. | about 2 minutes |
-| `make soak` | 5,000 messages through the real containers with a chaos provider; fails on a double send, a broken 100/s cap or an early retry. | about 3–4 minutes (the default backoff starts at 15 s) |
+| `make test` | gofmt, `go vet`, `go test -race` with PostgreSQL integration tests, hook and script tests, the web checks (`npm audit`, `vue-tsc`, Vitest). No API key. | about 160 s (161 s measured; the slowest package, the worker, takes about 90 s) |
+| `make e2e` | Playwright browser tests against the real stack with the mock model, in a project of its own that is removed afterwards. `SCREENSHOTS=1` rewrites `docs/screenshots/`. | about 2 minutes (116 to 125 s in three runs) |
+| `make soak` | 5,000 messages through the real containers with a chaos provider; fails on a double send, a broken 100/s cap or an early retry. | about 4 minutes (236 s measured, 3 min 39 s of it the run itself; the default backoff starts at 15 s) |
 | `make eval LLM_MODE=anthropic` | the golden set (`eval/golden.json`, 16 Turkish briefs) against the **real** model, scored by deterministic checks, no model as judge. **Costs money** (about $0.25 on the default model); it refuses to start without `LLM_MODE=anthropic` and a key, and stops at `EVAL_MAX_USD` (default `1.00`). | about 100 s |
-| `make eval EVAL_ARGS="-mock"` | the same set against the demo model (16 of 16 pass): free, writes no result file. | about 75 s (the demo model streams slowly on purpose) |
+| `make eval EVAL_ARGS="-mock"` | the same set against the demo model (16 of 16 pass): free, writes no result file. | about 75 s (74 s measured; the demo model streams slowly on purpose) |
 
 `make test` and `make e2e` need no key and spend nothing. Results of earlier real runs are in [`eval/results/`](eval/results/).
+
+The times were measured on a clean clone of this repository (no dotenv file, `git clone` into a temporary folder), on a Windows
+machine with Docker Desktop, with the images of the third-party containers already pulled and the Docker build cache warm; the
+first `docker compose up -d` of that clone took 19 s on a warm build cache, and a first build with empty caches takes longer
+(not measured). Expect more on a slower machine.
+
+**CI** (`.github/workflows/ci.yml`, on a push to `main`, on pull requests and by hand) runs `make test`, then `docker compose up`
+without a dotenv file (it checks that `/api/config` says `llm_mode: mock`) and `make e2e`. It has no secret and no API key, and
+`LLM_MODE=mock` is set in the file. `make soak` and `make eval` are not part of it. On Linux 8 of the 125 hook and script tests are
+skipped, in `make test` and in CI alike: 4 tests of the guard hook that use Windows drive paths (`C:\...`, which only mean something on
+Windows) and 4 tests of the gofmt hook (the Node image has no `gofmt`; `gofmt` itself is checked in the Go container). The first four run
+under `node --test` on Windows, the other four wherever `gofmt` is installed.
 
 ## Model choice
 

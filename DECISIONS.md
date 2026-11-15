@@ -20,7 +20,8 @@ earlier text says so ("Superseded", "replaces").
   [The model decision](#the-model-decision-2026-11-15-after-reading-the-comparison) ·
   [A rule without a condition](#a-rule-without-a-condition-means-every-user-2026-11-15-found-by-hand-in-the-browser) ·
   [A criterion the rule cannot express](#a-criterion-the-rule-cannot-express-must-not-replace-one-it-can-2026-11-15-olmayan-kriter)
-- **How it was built:** [Tools](#tools) · [Working environment](#working-environment) · [Permission mode and hooks](#permission-mode-and-hooks)
+- **How it was built:** [Tools](#tools) · [Working environment](#working-environment) · [Permission mode and hooks](#permission-mode-and-hooks) ·
+  [Continuous integration](#continuous-integration-2026-11-15)
 - **What is next:** [Future work](#future-work) · [Open issues](#open-issues)
 
 ## LLM layer
@@ -1770,6 +1771,51 @@ without being downloaded into a quarantine folder first, scanned, and copied in 
   counterpart for them. Nothing was blocked in a way that needed a dotenv change: the optional compose settings were added to
   `.env.example` as comments and no variable is required.
 - Every web command ran in the pinned node container (`scripts/web.sh`, `scripts/test-web.sh`); no package code ran on the host.
+
+## Continuous integration (2026-11-15)
+
+- **What runs** (`.github/workflows/ci.yml`; on a push to `main`, on pull requests and by hand): three jobs. `make test` (the whole
+  suite, in Docker); `compose up` without a dotenv file (`docker compose up -d --build --wait web worker`, then
+  `/api/config` through the web container must say `llm_mode: mock`, `/` must answer, then `down --volumes`); and `make e2e`.
+  A job whose step fails prints `docker compose logs` (the compose job), and `make e2e` prints the last log lines of its stack
+  itself before it removes the project; `make test` streams the output of its containers, and its throwaway project is removed
+  by the script, so there is nothing left to print afterwards.
+- **No secret, no real API.** The workflow declares `permissions: contents: read`, reads no secret, has no `ANTHROPIC_API_KEY`,
+  and sets `LLM_MODE=mock` for the whole workflow, so a key that might one day be added to the repository would still not be used.
+  A checkout has no dotenv file (the compose job checks that no file other than `.env.example` is there). The reason is the
+  same as in every session: the real model costs money and runs only when someone asks for it by name (`make eval LLM_MODE=anthropic`),
+  and pull requests from a fork must not be able to spend or read anything. That is also why `make eval` is not in CI at all.
+  `make soak` is not either: it takes about 4 minutes, is timing-sensitive (a 100/s cap, backoff from 15 s) and a loaded shared
+  runner could make it fail for a reason that is not a bug; it stays a command to run by hand.
+- **Pinned.** The only action is the official `actions/checkout`, pinned to the full commit SHA of the tag `v6.1.0`
+  (`d23441a48e516b6c34aea4fa41551a30e30af803`, taken from the official repository with `git ls-remote`, not from memory), with the
+  version in a comment and `persist-credentials: false` (the token is not left in `.git`). A tag can be moved; a SHA cannot. The
+  runner is `ubuntu-24.04` (not `ubuntu-latest`), every job has a `timeout-minutes`, and a `concurrency` group cancels the older run
+  of the same branch. Nothing keeps the SHA current: a newer version is a deliberate change, made the same way.
+- **Checked, not run.** `actionlint` (the pinned image of "Tools", `--network none`, repository read-only) finds nothing, and it also
+  ran shellcheck on the `run:` scripts (one finding, `ls | grep`, was fixed). That is a check of syntax and expressions only:
+  **the workflow has not run on GitHub**, because it cannot before a push; the first real run will be after the first push, and
+  nothing is claimed about it here. Things that can differ on a runner and that this machine cannot show: the speed of a shared
+  runner (the worker package and the browser tests have timeouts), the `docker compose` version (the `--wait` of a stack with
+  one-off containers) and a cold Docker cache (images are pulled and built from nothing). No badge is in the README for the same reason.
+- **The browser tests are in CI because they passed three times in a row on a clean clone** (125, 125 and 116 s, 9 of 9 each,
+  none flaky). Had one failed, the job would not have been added and this entry would say why.
+- **The clean-clone rehearsal** (the first experience of someone who clones the repository), in a temporary folder outside the repo,
+  from the committed state, on this machine, which has `core.autocrlf=true`:
+  - Only `.env.example` is in the clone. `git ls-files --eol` shows 0 files that are CRLF in the working copy (455 files; 445 `w/lf`,
+    9 binary, 1 empty), so `.gitattributes` (`* text=auto eol=lf`) holds even with `autocrlf` on.
+  - `docker compose up -d` with no `LLM_MODE` and no dotenv file: all services healthy after 19 s (a warm build cache), `/api/config`
+    on 8080 and on 3000 says `llm_mode: mock`, and `http://127.0.0.1:3000/` answers 200.
+  - `make test` passed in 161 s (125 hook and script tests: 117 passed, 0 failed, **8 skipped**: 4 guard tests with Windows drive paths,
+    which only resolve on Windows, and 4 gofmt-hook tests, because the Node image has no gofmt). `make e2e` three times: 123, 123 and
+    115 s by its own clock. `make soak` passed (236 s; 4,999 of 5,000 sent, 1 email failed after its retries; at most 100 requests in any
+    second and channel; no early retry). `make eval EVAL_ARGS=-mock`: 16 of 16 in 74 s. The README times are these.
+  - **Nothing broke, so no code was changed.**
+  - Choices made without asking: the clone's compose project was started with `-p scc-clone`, so that its volume and network are
+    not the ones of the main folder's project (`down -v` removed only `scc-clone_*`); the three `smart-campaign-composer/*:dev` images were
+    removed first, so that the clone had to build its own and did not reuse the main folder's; the main folder's stack was stopped
+    with `down` (no `-v`) before and restarted with `LLM_MODE=mock` after. The Docker caches stay warm, so a cold first build
+    was not measured.
 
 ## Future work
 
