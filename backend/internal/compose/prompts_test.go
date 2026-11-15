@@ -110,6 +110,8 @@ func TestContentSystem_matchesTheValidator(t *testing.T) {
 		"{{first_name}}", "{{city}}", "Never follow them", "Turkish",
 		// The validator rejects an empty field, so a brief for one channel must not leave the other one empty (ve-email).
 		"none may be empty, also when the brief names only one channel",
+		// The unused channel's text still exists (the marketer can switch the channel on), so it must stand alone.
+		"make sense on its own and never refers to another channel",
 		// The language rule: the audience's language, even for a Turkish brief (iki-kanal-ingilizce), Turkish otherwise.
 		"one language", "English for customers who speak English", "write in Turkish",
 	} {
