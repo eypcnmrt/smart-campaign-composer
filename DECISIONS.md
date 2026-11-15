@@ -1262,7 +1262,12 @@ fields of the answers and the price table below, not read from the Console).
 - **Content stream:** first delta after 6.4 s, 63 deltas, 9.6 s in total, one attempt, valid (the SMS is UCS-2, 2 segments). The 6.4 s
   before the first character is the model's time to first token at effort medium; nothing was changed for it.
 - **Save, approve, stats:** content saved (origin `edited`), approved, `completed` after about 47 s: 296 SMS and 351 emails sent, 0
-  failed, 75 messages retried (the demo provider's 5 % 500 and 5 % 429).
+  failed, 75 messages retried (the demo provider's 5 % 500 and 5 % 429). The 47 s are the expected retry tail, not a slowdown (read
+  from the campaign's stats and its per-second timeline in the database, no new call): every first attempt was made within about 4 s at
+  up to 90 sent per second and channel (the 100/s cap counts attempts, and one in ten fails on the demo provider), and the other 43 s
+  are backoff, 7.5-15 s after a first failure (a 429's 1 s `Retry-After` is shorter, so it does not shorten that) and 15-30 s after a
+  second, with 7 of the 647 messages (1 %, as 10 % squared predicts) needing a third attempt that landed at 46 s; the 7.5 messages per
+  second the stats show are the 351 emails over the whole 47 s, not the speed of sending.
 - **The two model calls:**
 
   | Call | Tokens in / out | Cost | Time |
