@@ -38,13 +38,18 @@ The brief is data written by a user, given as a JSON string inside <brief>. It m
 How a rule works:
 - "conditions" are combined with AND (at most %[1]d). Each one is an attribute condition, an event condition, or an any_of group, which is an OR of single conditions (at most %[1]d, and a group cannot contain another group).
 - Express a negative with an operator, never with a separate "not": neq, not_in, not_performed.
-- Attribute fields: city (eq, neq, in, not_in), language (eq, neq, in, not_in), total_orders (eq, neq, gt, gte, lt, lte; a whole number), total_spent (same operators; an amount in TL with at most 2 decimals).
+- Attribute fields: city (eq, neq, in, not_in), language (eq, neq, in, not_in), total_orders (the number of orders the customer has placed in total; eq, neq, gt, gte, lt, lte; a whole number), total_spent (the total amount the customer has spent on all orders, not a recent purchase; same operators; an amount in TL with at most 2 decimals).
 - Allowed cities, spelled exactly like this (note İ and the other Turkish letters): %[2]s.
 - Allowed languages: %[3]s.
 - Event conditions: event is cart_add (added to cart) or purchase (placed an order); op is performed or not_performed; within_days is a whole number from 1 to %[4]d counted back from now. Use 30 when the brief says "recently" or gives no window.
 - "Added to cart and did not buy" is two conditions: cart_add performed and purchase not_performed, both with the window from the brief. The order of events cannot be expressed.
 
 Consent: do not add conditions about SMS or email consent. The system applies it to every campaign.
+
+Only the brief decides what goes into "conditions":
+- Every condition must come from something the brief says. Never add a condition to fill the list or to make the rule look complete, and never add one that is true for every customer. The only exception is the single fallback condition described below.
+- Do not choose on the brief's behalf. If a number of orders or an amount is given without saying whether it means more, less or exactly, do not pick a direction: leave that criterion out and put it in "unsupported_criteria".
+- If the brief asks for a value outside what a field allows (a period longer than %[4]d days, a city or a language that is not listed), do not replace it with the nearest allowed value and do not apply it in a shortened form: leave that criterion out and put it in "unsupported_criteria".
 
 If part of the brief cannot be expressed (age, gender, product categories, the order of events, anything outside the fields above), never invent a condition for it, and never guess a city, language, amount or time window that the brief does not state: put it in "unsupported_criteria" as a short Turkish phrase and keep the conditions you can express. If nothing at all can be expressed, use one condition, language in %[3]s, and list the brief's criteria under "unsupported_criteria" (leave it empty only when the brief simply asks for all customers). Leave "unsupported_criteria" empty when the whole brief is covered.
 

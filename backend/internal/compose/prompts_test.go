@@ -50,6 +50,27 @@ func TestQuote(t *testing.T) {
 
 // The system prompt must state the vocabulary and limits the validator
 // enforces, taken from the same source, or the model is told the wrong rules.
+// The three rules that the first golden-set run showed to be missing, and the meaning of the two numeric fields.
+func TestSegmentSystem_saysWhatTheBriefDecides(t *testing.T) {
+	t.Parallel()
+	system := segmentSystem()
+	for _, want := range []string{
+		"the number of orders the customer has placed in total",
+		"the total amount the customer has spent on all orders",
+		"Never add a condition to fill the list",
+		"do not pick a direction",
+		"do not replace it with the nearest allowed value",
+		"a period longer than 365 days",
+	} {
+		if !strings.Contains(system, want) {
+			t.Errorf("the segment prompt lacks %q", want)
+		}
+	}
+	if strings.Contains(system, "%!") {
+		t.Errorf("a formatting verb was not filled in:\n%s", system)
+	}
+}
+
 func TestSegmentSystem_matchesTheValidator(t *testing.T) {
 	t.Parallel()
 	system := segmentSystem()
