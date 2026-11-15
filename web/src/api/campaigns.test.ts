@@ -159,7 +159,8 @@ describe('a response that does not match the contract is a bad_response', () => 
     ['a rate limit that is not a number', { rate_limit: '100' }],
     ['a timeline without buckets', { timeline: { start: 'x', bucket_seconds: 1 } }],
     ['a timeline with a bucket width of zero', { timeline: { start: 'x', bucket_seconds: 0, accepted: [1] } }],
-    ['a timeline with an average that is not a number', { timeline: { start: 'x', bucket_seconds: 1, accepted: [1], average_per_second: 'fast' } }],
+    ['a timeline with a first-attempt speed that is not a number', { timeline: { start: 'x', bucket_seconds: 1, accepted: [1], first_attempt_per_second: 'fast' } }],
+    ['a timeline with a negative duration', { timeline: { start: 'x', bucket_seconds: 1, accepted: [1], duration_seconds: -1 } }],
     ['a timeline with a negative count', { timeline: { start: 'x', bucket_seconds: 1, accepted: [-1] } }],
     ['a timeline far longer than the server sends', { timeline: { start: 'x', bucket_seconds: 1, accepted: new Array(5000).fill(1) } }],
   ])('statistics with %s', async (_name, extra) => {

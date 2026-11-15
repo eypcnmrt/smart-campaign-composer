@@ -982,8 +982,8 @@ reporting and in the stream's write path.
 - **Rate cap:** the worker writes its configured `RatePerSecond` into `worker_channel_status.rate_per_second` with each heartbeat
   (migration 0007; NULL = not reported); stats return it as `rate_limit` per channel and the dashboard draws that value. When it is
   missing there is no line and no caption (the page no longer has a number of its own). Standby workers report nothing, as before.
-- **Timeline:** `channels.<ch>.timeline = {start, bucket_seconds, accepted[], average_per_second}` (the average was added in "Speeds are
-  per channel"): messages whose delivery was recorded as sent in each
+- **Timeline:** `channels.<ch>.timeline = {start, bucket_seconds, accepted[], first_attempt_per_second, duration_seconds}` (the two
+  figures replaced the single average in "The speed of a channel is the first-attempt speed"): messages whose delivery was recorded as sent in each
   bucket, from the second of the approval to the last message (or to now while sending, by the database clock). **At most 600
   buckets**: a campaign longer than that is counted in the narrowest of 2, 5, 10, 30 s ... buckets that fit, so the bars of a long
   send do not change width every second. `sent_at` is the time the worker *recorded* success, which is when the provider's answer
@@ -992,7 +992,7 @@ reporting and in the stream's write path.
   the closing session, see "Speeds are per channel"). Duration is approval to completion (null until completed).
   *Retried* means more than one attempt (`attempts > 1`); the attempt that an outage gave back (see "A circuit breaker per channel")
   does not count, which is why the outage scenario shows no retries. Total attempts is `sum(attempts)`.
-- **Index (migration 0008):** `deliveries_sent_at_idx (campaign_id, sent_at, channel) WHERE status = 'sent'`. The first and last send time are
+- **Index (migration 0008, `INCLUDE (attempts)` added by 0009):** `deliveries_sent_at_idx (campaign_id, sent_at, channel) INCLUDE (attempts) WHERE status = 'sent'`. The first and last send time are
   the two ends of the index; the counts per bucket read the index alone. The EXPLAIN test shows both plans (`go test -run Index -v`).
   *Known limit of the test:* on a fresh test database the visibility map is empty and the planner cannot tell this index from the
   stats index (costs within a few percent), so the last subtest drops the stats index first and shows that the sent-at index alone
@@ -1110,6 +1110,25 @@ reporting and in the stream's write path.
   `bad_response`, as before.
 - **Choice:** removing the two summary fields rather than keeping and relabelling them ("iki kanalın toplamı"): nothing needs a total
   speed, and a number that has to be explained is a number that gets misread. The e2e test now reads the figures from each channel card.
+- **Superseded in part:** the per-channel "Ortalama" described here is replaced by the next section (the per-channel idea stays).
+
+### The speed of a channel is the first-attempt speed
+- **Problem (found reading the send summary after a send with the default demo provider):** "average N messages per second" was
+  all messages of the channel divided by the time from its first to its last message. With retries that time includes the backoff
+  (the first wait is 15 s): 351 e-mails in 47 s read 7.5/s next to a cap of 100/s, although the worker had sent at about the cap and
+  only the last few messages waited for their retry. The figure looked like a broken or idle worker.
+- **Decision:** two figures per channel instead of one, both from the same index-only query. `first_attempt_per_second`: the
+  messages the provider accepted on their first request (`attempts = 1`) over the time from the first to the last of them (at least
+  a second): the speed of the sending itself. `duration_seconds`: first to last accepted message of the channel, retries included.
+  The card shows "İlk denemede: N/s" next to the cap and the peak, and the total as a line of its own ("Toplam: 351 mesaj, 47 sn
+  (yeniden denemeler dahil)"), so that a time is not read as a speed. `attempts = 1` means one claimed request ended in an answer
+  that was accepted; an attempt that an outage gave back does not count (see "A circuit breaker per channel"), the confirmation
+  request is attempt 6.
+- **Cost:** migration 0009 recreates `deliveries_sent_at_idx` with `attempts` as a payload column (`INCLUDE`), so the timeline is
+  still an index-only scan (the EXPLAIN test checks it). The index is a little wider; it was built in the migration's transaction,
+  which is fine at this size and would be a `CREATE INDEX CONCURRENTLY` job in a large production table.
+- **Limit:** a message that needed a retry is not in the speed at all, so a send in which most messages were retried shows a low
+  or zero first-attempt speed. That is true: the channel was not sending fast, it was waiting.
 
 ### The demo mock never turns a criterion around and never drops one without saying so
 - **Problem:** evaluators will most likely try the demo model. It read "sepete ürün eklemeyen" as people who *did* add to the cart,
@@ -1590,7 +1609,7 @@ nobody. "Closed" items say where they were closed. What is left open is the low-
 - **The stats response has a strict contract.** A malformed optional `timeline` or `summary` rejects the whole response
   (`bad_response`) and the screen says "Güncel durum alınamıyor" although the counts were fine. Kept: the client and the server are
   deployed together, so a shape the client does not understand is a version mismatch, and it must be seen, not smoothed over by
-  dropping the part that does not fit. (A field that older servers did not send, like `timeline.average_per_second`, is optional;
+  dropping the part that does not fit. (A field that older servers did not send, like `timeline.first_attempt_per_second`, is optional;
   a field that is there and wrong is not.)
 - **The chart says "kabul edilen" and buckets by `sent_at`.** `sent_at` is the time the worker *recorded* the answer, not the provider's
   clock, so a bar can be over the cap while the provider's own rate was not. Kept: "kaydedilen" would be vaguer for a marketer, and what

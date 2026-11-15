@@ -2,7 +2,7 @@
 import { computed, useId } from 'vue'
 import type { Timeline } from '@/api/types'
 import { chartOf, chartText } from '@/domain/delivery'
-import { formatDuration, formatRate } from '@/domain/format'
+import { formatDuration, formatNumber, formatRate } from '@/domain/format'
 
 // The messages the provider accepted, second by second, as bars, with the channel's rate limit as a line. A small SVG without a
 // chart library: each bar is one bucket of the server's timeline. While the delivery runs the chart grows to the right with
@@ -48,8 +48,11 @@ const span = computed(() => formatDuration(chart.value.seconds))
     </div>
     <p class="chart__caption">
       <template v-if="limit !== null"><span class="chart__key" aria-hidden="true" />Sınır: <span class="num">{{ formatRate(limit) }}</span>/s · </template>
-      <template v-if="chart.average !== null">Ortalama: <span class="num">{{ formatRate(chart.average) }}</span>/s · </template>
+      <template v-if="chart.firstAttemptRate !== null">İlk denemede: <span class="num">{{ formatRate(chart.firstAttemptRate) }}</span>/s · </template>
       En yoğun: <span class="num">{{ formatRate(chart.peak) }}</span>/s
+    </p>
+    <p v-if="chart.duration !== null" class="chart__total">
+      Toplam: <span class="num">{{ formatNumber(chart.total) }}</span> mesaj, <span class="num">{{ formatDuration(chart.duration) }}</span> (yeniden denemeler dahil)
     </p>
   </figure>
 </template>
@@ -99,7 +102,8 @@ const span = computed(() => formatDuration(chart.value.seconds))
   font-size: var(--text-xs);
 }
 
-.chart__caption {
+.chart__caption,
+.chart__total {
   color: var(--text-soft);
   font-size: var(--text-sm);
 }

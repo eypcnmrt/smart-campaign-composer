@@ -41,15 +41,24 @@ describe('RateChart', () => {
     expect(unknown.text()).not.toContain('Sınır')
   })
 
-  it('gives the channel’s own average next to its peak and its cap', () => {
+  it('gives the channel’s own first-attempt speed next to its peak and its cap, and the total time apart', () => {
     const wrapper = mount(RateChart, {
-      props: { timeline: { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 40, 100, 100, 20], average_per_second: 86.7 }, limit: 100, label: 'SMS' },
+      props: {
+        timeline: { start: '2026-11-14T12:00:00Z', bucket_seconds: 1, accepted: [0, 40, 100, 100, 20], first_attempt_per_second: 95.8, duration_seconds: 47.2 },
+        limit: 100,
+        label: 'SMS',
+      },
     })
-    expect(wrapper.get('.chart__caption').text()).toContain('Ortalama: 86,7/s')
+    expect(wrapper.get('.chart__caption').text()).toContain('İlk denemede: 95,8/s')
     expect(wrapper.get('.chart__caption').text()).toContain('En yoğun: 100/s')
-    expect(wrapper.get('svg').attributes('aria-label')).toContain('ortalama saniyede 86,7 mesaj, en yoğun saniyede 100 mesaj')
-    // an older server sends no average: the caption simply has none
-    expect(render([0, 40]).get('.chart__caption').text()).not.toContain('Ortalama')
+    // the whole time, retries included, is a figure of its own, so that it is not read as a speed next to the cap
+    expect(wrapper.get('.chart__total').text()).toBe('Toplam: 260 mesaj, 47 sn (yeniden denemeler dahil)')
+    expect(wrapper.get('svg').attributes('aria-label')).toContain('ilk denemede saniyede 95,8 mesaj, en yoğun saniyede 100 mesaj')
+    expect(wrapper.get('svg').attributes('aria-label')).toContain('Yeniden denemeler dahil toplam 47 sn.')
+    // an older server sends neither: the caption simply has none
+    const old = render([0, 40])
+    expect(old.get('.chart__caption').text()).not.toContain('İlk denemede')
+    expect(old.find('.chart__total').exists()).toBe(false)
   })
 
   it('has a text summary for a screen reader and the figures in words next to it', () => {

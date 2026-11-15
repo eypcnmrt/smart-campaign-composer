@@ -103,7 +103,8 @@ function isTimeline(t: unknown): boolean {
     Array.isArray(t.accepted) &&
     t.accepted.length <= MAX_BUCKETS &&
     t.accepted.every((n) => typeof n === 'number' && n >= 0) &&
-    optional(t.average_per_second, (a) => typeof a === 'number' && a >= 0)
+    optional(t.first_attempt_per_second, (a) => typeof a === 'number' && a >= 0) &&
+    optional(t.duration_seconds, (d) => typeof d === 'number' && d >= 0)
   )
 }
 

@@ -1,5 +1,5 @@
 import type { CampaignStatus, ChannelCounts, Timeline } from '@/api/types'
-import { formatNumber, formatRate } from './format'
+import { formatDuration, formatNumber, formatRate } from './format'
 import type { Tone } from '@/components/ui/StatusIcon.vue'
 
 // Figures of the delivery dashboard that are not about drawing: how far a channel is, what its rate is, and how a campaign
@@ -100,8 +100,10 @@ export interface ChartModel {
   /** The limit in messages per second, or null when the worker never reported one. */
   limit: number | null
   peak: number
-  /** The channel's average rate from its first to its last message, or null when the server did not say. */
-  average: number | null
+  /** The speed of the sending itself (messages accepted on the first request), or null when the server did not say or nothing was sent. */
+  firstAttemptRate: number | null
+  /** Seconds from the channel's first to its last accepted message, retries included, or null when the server did not say. */
+  duration: number | null
   total: number
   /** Seconds the chart spans. */
   seconds: number
@@ -110,7 +112,10 @@ export interface ChartModel {
 export const MIN_SLOTS = 12
 
 /** The bars of a channel's timeline against its limit: pure numbers, so the drawing does no arithmetic. */
-export function chartOf(timeline: Pick<Timeline, 'bucket_seconds' | 'accepted' | 'average_per_second'>, limit: number | null): ChartModel {
+export function chartOf(
+  timeline: Pick<Timeline, 'bucket_seconds' | 'accepted' | 'first_attempt_per_second' | 'duration_seconds'>,
+  limit: number | null,
+): ChartModel {
   const width = timeline.bucket_seconds
   const bars = timeline.accepted.map((n, slot) => ({ slot, rate: n / width }))
   const peak = bars.reduce((m, b) => Math.max(m, b.rate), 0)
@@ -121,7 +126,8 @@ export function chartOf(timeline: Pick<Timeline, 'bucket_seconds' | 'accepted' |
     bars,
     limit,
     peak,
-    average: total === 0 ? null : (timeline.average_per_second ?? null),
+    firstAttemptRate: total === 0 ? null : (timeline.first_attempt_per_second ?? null),
+    duration: total === 0 ? null : (timeline.duration_seconds ?? null),
     total,
     seconds: bars.length * width,
   }
@@ -130,7 +136,8 @@ export function chartOf(timeline: Pick<Timeline, 'bucket_seconds' | 'accepted' |
 /** The chart in words, for a screen reader (the drawing itself is not read). */
 export function chartText(label: string, chart: ChartModel): string {
   const limit = chart.limit === null ? '' : ` Sınır: saniyede ${formatRate(chart.limit)} mesaj.`
-  const average = chart.average === null ? '' : `ortalama saniyede ${formatRate(chart.average)} mesaj, `
+  const firstAttempt = chart.firstAttemptRate === null ? '' : `ilk denemede saniyede ${formatRate(chart.firstAttemptRate)} mesaj, `
+  const total = chart.duration === null ? '' : ` Yeniden denemeler dahil toplam ${formatDuration(chart.duration)}.`
   if (chart.total === 0) return `${label}: henüz kabul edilen mesaj yok.${limit}`
-  return `${label}: ${formatNumber(chart.seconds)} saniyede ${formatNumber(chart.total)} mesaj kabul edildi; ${average}en yoğun saniyede ${formatRate(chart.peak)} mesaj.${limit}`
+  return `${label}: ${formatNumber(chart.seconds)} saniyede ${formatNumber(chart.total)} mesaj kabul edildi; ${firstAttempt}en yoğun saniyede ${formatRate(chart.peak)} mesaj.${limit}${total}`
 }

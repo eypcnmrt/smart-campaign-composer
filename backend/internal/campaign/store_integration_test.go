@@ -811,16 +811,23 @@ func TestStore_statsTimelineAndSummary(t *testing.T) {
 	if sum.DurationSeconds != nil {
 		t.Fatalf("duration of a campaign that is not completed = %v, want none", *sum.DurationSeconds)
 	}
-	// The rates are per channel (each has its own cap): five sms in the 1.4 s from 0.5 to 1.9, two e-mails in 0.1 s (counted
-	// as at least a second).
-	if got := smsTL.AveragePerSecond; got < 3.56 || got > 3.58 {
-		t.Fatalf("sms average = %v, want 5 / 1.4 = 3.57", got)
+	// The rates are per channel (each has its own cap). The first-attempt speed leaves out the message that was retried: four sms
+	// in the 1.3 s from 0.6 to 1.9 (the retried one was sent at 0.5), one e-mail on its first request (the one sent at 1.2 took
+	// three), counted as at least a second. The duration is first to last of all of them, retries included.
+	if got := smsTL.FirstAttemptPerSecond; got < 3.07 || got > 3.08 {
+		t.Fatalf("sms first-attempt speed = %v, want 4 / 1.3 = 3.08", got)
 	}
-	if got := emailTL.AveragePerSecond; got != 2 {
-		t.Fatalf("email average = %v, want 2 (two messages in less than a second)", got)
+	if got := emailTL.FirstAttemptPerSecond; got != 1 {
+		t.Fatalf("email first-attempt speed = %v, want 1 (one message in less than a second)", got)
 	}
-	if stats.Channels["sms"].Timeline.AveragePerSecond == stats.Channels["email"].Timeline.AveragePerSecond {
-		t.Fatal("the two channels have one average: it must be per channel")
+	if got := smsTL.DurationSeconds; got < 1.39 || got > 1.41 {
+		t.Fatalf("sms duration = %v, want 1.4 (0.5 to 1.9)", got)
+	}
+	if got := emailTL.DurationSeconds; got < 0.09 || got > 0.11 {
+		t.Fatalf("email duration = %v, want 0.1 (1.2 to 1.3)", got)
+	}
+	if smsTL.FirstAttemptPerSecond == emailTL.FirstAttemptPerSecond {
+		t.Fatal("the two channels have one speed: it must be per channel")
 	}
 	// 5 sms: 2+1+1+1+1, 2 email: 3+1
 	if sum.RetriedMessages != 2 || sum.TotalAttempts != 10 {

@@ -80,13 +80,15 @@ test('brief to a finished delivery', async ({ page }) => {
   for (const channel of ['sms', 'email']) {
     const caption = (await page.locator(`[data-channel="${channel}"] .chart__caption`).innerText()).replace(/\s+/g, ' ')
     const figure = (re: RegExp) => Number(re.exec(caption)?.[1]?.replace(/\./g, '').replace(',', '.'))
-    const average = figure(/Ortalama: ([\d.,]+)\/s/)
+    const firstAttempt = figure(/İlk denemede: ([\d.,]+)\/s/)
     const peak = figure(/En yoğun: ([\d.,]+)\/s/)
-    expect(average, `the average of ${channel}`).toBeGreaterThan(0)
+    expect(firstAttempt, `the first-attempt speed of ${channel}`).toBeGreaterThan(0)
     expect(peak, `the peak of ${channel}`).toBeGreaterThan(0)
     // buckets are by the time the answer was recorded, so a little over the cap is not a broken cap; double would be one
     expect(peak, `${channel} is capped at 100/s`).toBeLessThanOrEqual(110)
-    expect(average, `${channel} is capped at 100/s`).toBeLessThanOrEqual(110)
+    expect(firstAttempt, `${channel} is capped at 100/s`).toBeLessThanOrEqual(110)
+    // the total time, retries included, is not a speed: it has its own line
+    await expect(page.locator(`[data-channel="${channel}"] .chart__total`)).toContainText(/Toplam: .* mesaj, .*yeniden denemeler dahil/)
   }
   await shot(page, '05-delivery-completed')
 })

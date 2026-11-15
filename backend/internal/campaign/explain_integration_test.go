@@ -173,7 +173,8 @@ func TestIndex_servesTheStatsQueryAndTheCompletionCheck(t *testing.T) {
 			t.Fatalf("the redundant (campaign_id, status) index still exists (%d, %v)", n, err)
 		}
 	})
-	// The counts per second are answered from deliveries_sent_at_idx alone: it holds campaign, time and channel, and only sent rows.
+	// The counts per second are answered from deliveries_sent_at_idx alone: it holds campaign, time and channel (and attempts as a
+	// payload column, for the first-attempt figures), and only sent rows.
 	// The stats index also fits "campaign and status", and on a test database whose visibility map is empty the planner cannot tell
 	// the two apart (its costs are within a few percent), so this check, which must come after the others, takes that one away and
 	// shows that the sent-at index by itself can answer the query without touching the table.

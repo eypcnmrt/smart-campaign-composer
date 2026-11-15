@@ -176,8 +176,10 @@ export interface Timeline {
   start: string
   bucket_seconds: number
   accepted: number[]
-  /** Messages of this channel per second from its first to its last one (at least a second); each channel has its own cap, so the rate is per channel. */
-  average_per_second?: number
+  /** Messages accepted on their first request per second, from the first to the last of them (at least a second): the speed of the sending itself, without the wait of retries. Per channel, as each has its own cap. */
+  first_attempt_per_second?: number
+  /** Seconds from the first to the last message the provider accepted on this channel, retries included. */
+  duration_seconds?: number
 }
 
 /** The send as a whole (null before the approval). */

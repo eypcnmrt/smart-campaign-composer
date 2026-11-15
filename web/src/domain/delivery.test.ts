@@ -123,7 +123,14 @@ describe('chartOf', () => {
     const chart = chartOf({ bucket_seconds: 2, accepted: [200, 100, 0] }, 100)
     expect(chart.bars.map((b) => b.rate)).toEqual([100, 50, 0])
     expect(chart.peak).toBe(100)
-    expect(chart.average).toBeNull() // no average from the server (an older one) or nothing sent: none is made up
+    // no figures from the server (an older one): none is made up
+    expect(chart.firstAttemptRate).toBeNull()
+    expect(chart.duration).toBeNull()
+    const sent = chartOf({ bucket_seconds: 1, accepted: [10], first_attempt_per_second: 8, duration_seconds: 20 }, 100)
+    expect([sent.firstAttemptRate, sent.duration]).toEqual([8, 20])
+    // nothing sent: nothing to say about its speed either
+    const none = chartOf({ bucket_seconds: 1, accepted: [0], first_attempt_per_second: 0, duration_seconds: 0 }, 100)
+    expect([none.firstAttemptRate, none.duration]).toEqual([null, null])
     expect(chart.total).toBe(300)
     expect(chart.seconds).toBe(6)
     expect(chart.max).toBeCloseTo(115)
