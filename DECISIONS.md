@@ -88,7 +88,8 @@ here when the README is written.
   `llm.Client` (`Complete`, `Stream`, `Mode`, `Model`). Everything else in the backend sees only the
   interface. `llm.FromEnv` chooses the client (see "LLM_MODE" below) and `Mode()` says which
   (the "Mock LLM" badge). No other credential source is consulted, so a machine that happens to be logged in elsewhere
-  cannot spend money without the key being set. The model comes from `ANTHROPIC_MODEL`, default `claude-opus-5-5`.
+  cannot spend money without the key being set. The model comes from `ANTHROPIC_MODEL`, default `claude-sonnet-5-5` (it was `claude-opus-5-5` until the model decision of
+  2026-11-15, "The default model" below).
 - **Why:** the SDK's request and streaming types change between releases and the API surface for this
   model family moved recently (thinking, effort, fallbacks), so the version is fixed and the bindings
   were read from the SDK source rather than guessed. The interface is what lets every test run without a
@@ -121,9 +122,9 @@ here when the README is written.
 ### One structured-output request per task, effort set explicitly, nothing the model rejects
 - **Decision:** segment: one non-streaming request, `output_config.format` = the schema, effort `low`.
   Content: streaming, same mechanism with the content schema, effort `medium`. Thinking is left unset
-  (always on and adaptive on Claude Opus 5.5), so effort is the only control, and it is always sent
-  because the model's default is `medium`. No assistant prefill, forced tool choice or sampling
-  parameters, which this model rejects with a 400. `max_tokens` is 16000 (segment) and 64000 (content),
+  (adaptive when omitted on Claude Sonnet 5.5 and Claude Opus 5.5; an explicit `disabled` is a 400 on both), so effort is the
+  only control, and it is always sent because the defaults differ (`high` on Sonnet 5.5, `medium` on Opus 5.5). No assistant
+  prefill, forced tool choice or sampling parameters, which these models reject with a 400. `max_tokens` is 16000 (segment) and 64000 (content),
   with whole-call deadlines of 90 s and 4 min.
 - **Why:** thinking tokens count toward `max_tokens`, and a cut-off answer is a failed call that costs more
   than a large limit ever does. Streaming is used for the large limit so a long answer does not hit an
@@ -1343,7 +1344,7 @@ First full run, claude-opus-5-5: **10 of 14** pass ($0.518, 182 s). The four fai
   run again with the new prompt (the Sonnet run below used the new prompt and passed all 14, which is indirect evidence for opus only).
   `tutar-yonlu` may have been a bad draw rather than a prompt gap.
 
-### Model comparison (the default stays claude-opus-5-5; the decision is the owner's)
+### Model comparison (the decision came later: "The default model")
 | | claude-opus-5-5 | claude-sonnet-5-5 |
 |---|---|---|
 | Prompt | before the fix (4 failed briefs re-run after it) | after the fix |
@@ -1393,17 +1394,112 @@ $0.015, below). Everything below is one run per brief and model.
   (the checks test validity and the conditions, not wording) and differ in price (sonnet 40 %) and time (sonnet 56 %); the Turkish
   of the two models' SMS and subjects is for the owner to read, side by side, in
   `eval/results/20261115-105633-compare-claude-opus-5-5-vs-claude-sonnet-5-5.md` (the `ve-email` re-run is in
-  `...-105913-compare-...`). The default stays `claude-opus-5-5`.
+  `...-105913-compare-...`). The default was still `claude-opus-5-5` at that point; the owner decided afterwards (see "The default
+  model" below).
 - **`go run ./cmd/eval -compare a.json,b.json -out DIR`** writes such a comparison from two result files, with no model call and no
   database.
 
 ### Left open by this session
 - The content step still has no say over channels: the text of a channel the campaign does not send is written anyway (see the
   `ve-email` fix). Letting an unused field be empty would change the content contract and the UI, so it was not done.
+  (Looked at again in "The text of an unused channel", below: the channels can be changed after the text is written, so the text
+  has to exist; what changed is the prompt sentence.)
 - A segment error has no code, only a field and a message (above); a report by code is possible for content only.
 - The estimate printed before a run uses the token counts of the smoke test: for opus it said $0.63, the run cost $0.546 (the
   answers were shorter than in the smoke test), so it is a rough upper figure, not a forecast. The `-compare` file matches briefs by
   id only.
+
+## The model decision (2026-11-15, after reading the comparison)
+
+The owner read the side-by-side comparison of the two models and decided on `claude-sonnet-5-5` as the default. Two problems that the
+reading showed were closed first (the next two sections), then the default was changed and checked against the real API.
+
+Real API spend of this session: **$0.22** (summed from the `usage` fields: $0.0139 for the smoke test, $0.2059 for the full set;
+limit $0.50). Everything is one run per brief and model, as before.
+
+### The default model
+- **Decision:** `llm.DefaultModel` is `claude-sonnet-5-5` (also `.env.example`, `CLAUDE.md`, the `Makefile` header, `scripts/eval.sh`,
+  the eval default, `docs/PLAN.md`). `ANTHROPIC_MODEL=claude-opus-5-5` selects Opus; `make eval ... EVAL_MODEL=claude-opus-5-5`
+  evaluates it. The price table knows both; a model it does not know is charged, and estimated before an eval, at the dearest price
+  in the table (the default is no longer the dearest, so the old "estimate at the default's price" would have guessed low).
+- **What the decision rests on:** the owner read the Turkish SMS texts and subject lines of both models side by side
+  (`eval/results/20261115-105633-compare-claude-opus-5-5-vs-claude-sonnet-5-5.md`) and compared them as a reader of Turkish.
+  The checks cannot do that: they test validity and conditions, not wording or tone. The numbers below are the cost and speed side
+  of the same choice, not its quality evidence.
+- **Request parameters on Sonnet 5.5 (checked with the claude-api skill's migration notes):** the request sends no `thinking` field
+  (adaptive when omitted; `disabled` would be a 400), `output_config.effort` `low` (segment) and `medium` (content), both valid and
+  set explicitly because the levels were recalibrated, `output_config.format` for the JSON, the server-side fallback with
+  `fallbacks: "default"` (the form the notes prefer for Sonnet 5.5), and no sampling parameters, prefill or forced `tool_choice`
+  (each a 400 there). The live runs below accepted every request, so this is checked against the API as well as the notes.
+- **Numbers (golden set, 14 briefs; Opus is the last run before this session):**
+
+  | | claude-opus-5-5 | claude-sonnet-5-5 |
+  |---|---|---|
+  | Full-set runs | 2 (10 of 14 before the segment-prompt fix, then 14 of 14) | 3 (14 of 14 each) |
+  | Run compared | `...-105323`: prompt of the segment fix, before the content-prompt sentences | `...-130426`: the prompt of this session (language, channels) |
+  | Briefs passed | 14 of 14 | 14 of 14 |
+  | Cost of the run | $0.546 | $0.206 (38 %) |
+  | Tokens in / out | 71,011 / 13,096 | 70,415 / 6,508 |
+  | Model time of the run | 175 s | 81 s (46 %) |
+  | Time to the first text of a content call (mean) | 6.3 s | 1.0 s |
+  | Content call, total (mean) | 10.1 s | 3.7 s |
+  | Repairs (segment / content) | 1 / 0 | 0 / 0 |
+
+  The two earlier Sonnet runs (`...-103525`, `...-105633`) cost $0.219 and $0.220, took 101 s and 98 s, first text 1.9 s, one content
+  repair each. **Opus was not run again on this session's prompt** (a full run is about $0.55, more than the whole limit), so the
+  columns are not the same prompt: the cost and time gap is a model gap plus a prompt difference of two sentences, and the 14 of 14
+  of Opus on the newest prompt is not shown. Smoke test through the web app on Sonnet (one campaign, the English-audience brief):
+  segment 6.2 s, **first character of the content 1.8 s** at the client (1.4 s at the server), content done in 3.3 s, one attempt,
+  approved, `completed` 36 s after approval (91 SMS and 111 emails sent, 0 failed; the tail is the demo provider's retry backoff, as
+  explained in the earlier smoke test). Opus's smoke test had a first character after 6.4 s.
+- **Limits:** one run per brief and model is smoke level (a ✓ is "right this once"); the checks do not score wording; the owner's
+  reading covered the texts of the earlier comparison, not every run. Sonnet mixes the informal "sen" and the formal "siz" between
+  briefs (for example "tercih ettiğin" in `ve-email` and "tercih ettiğiniz" in `tutar-yonlu`); nothing in the prompt asks for one
+  register, and nobody has decided which is wanted.
+
+### The text follows the audience's language
+- **What was found, and how:** in the comparison file, for `iki-kanal-ingilizce` ("İngilizce konuşan müşterilere"), Sonnet wrote the
+  SMS and the e-mail in Turkish and Opus in English. **All the golden-set checks had passed for both**: the problem was found by a
+  person reading the texts, not by a deterministic check, because no check looked at the language.
+- **First, that the rule is right:** the segment of that brief selects `city in [İzmir, Antalya]` and `language eq en` (in the Sonnet
+  and the Opus result files and in the live smoke test), so the audience really is English-speaking and the Turkish text was the
+  mistake.
+- **Fix (general, no brief-specific wording):** the content prompt says to write all three fields in the language of the readers:
+  when the audience description says the segment is customers of one language, or the brief says which language the audience
+  speaks, write in it (English for customers who speak English, also for a Turkish brief); otherwise, and when the audience mixes
+  languages, Turkish, unless the brief asks for another language. The content step sees the brief and the one-sentence audience
+  description (the rule's `explanation`), not the rule itself: if a model's explanation left the language out, the prompt would
+  have only the brief to go on. That has not happened in any run so far.
+- **Turned into a check:** `content_language` (golden-set field `content_language: "en"`, report column `c-language`): the SMS,
+  the subject and the body contain none of ç ğ ı İ ö ş ü Ç Ğ Ö Ş Ü. `iki-kanal-ingilizce` expects it. The first version would
+  have failed for the wrong reason: in the live smoke test, before the full run, Sonnet wrote "customers in İzmir and Antalya" in
+  an English SMS (found by reading that text, then fixed before the full run). A city is a proper
+  noun, so the names of the vocabulary's cities are removed before the letters are looked for (tested both ways: a city alone
+  passes, a city next to a Turkish phrase still fails).
+- **The demo mock follows the rule** (English text when its reading of the brief selects exactly one language, `en`; Turkish
+  otherwise), so `make eval EVAL_ARGS="-mock"` passes the check for this brief.
+- **Result:** Sonnet on the new prompt, `iki-kanal-ingilizce`: English SMS, subject and body with `{{city}}`, all checks passed, in
+  the full run and in the smoke test.
+- **Limits of the check:** it can say a text is not English only by Turkish-only letters, so a Turkish text written without any of
+  them would pass, and it knows only `en`. It is a tripwire for this failure, not a language detector. One brief covers it.
+
+### The text of an unused channel
+- **Question:** the content step also writes and validates the text of a channel the brief did not ask for ("sadece SMS" gave an
+  e-mail subject "our campaign is in your SMS"). Can the channels change after the text exists?
+- **Answer, from the code:** yes. `set_channels` is allowed in `audience_ready` and in `content_ready` (`campaign/state.go`), the
+  store keeps the content when the channels or the segment change (`store_integration_test.go`, "a new segment keeps the content
+  and the marketer's channels"), and the audience step of the web app has the channel toggles. The channels start from the brief
+  and then belong to the marketer. So the text of an unused channel can become the text of a used one, and it has to exist and be
+  valid. **Today's behaviour stays** (all three fields required, non-empty, validated; the application decides what is sent); the
+  alternative (validate only the selected channels, change the UI and the sending) would break exactly that switch.
+- **What was wrong was the prompt sentence,** which asked for the other channel's text "in the same spirit" and invited a pointer
+  to the channel that was named. Now it says the marketer can still switch the other channel on, so write a complete text for it;
+  every field must make sense on its own and never refer to another channel or field (no "details in your email", no "we texted
+  you"); the text of a channel the brief did not name is an ordinary message for the same campaign. A test pins the wording.
+- **Result:** in the full Sonnet run the SMS and the subject of all eight single-channel briefs read as ordinary messages (for
+  example the SMS of the e-mail-only `sepet-terk-7-gun`: "sepetinizdeki ürünler sizi bekliyor"), none pointing at the other
+  channel. That is a reading by the author of this session of the SMS and the subjects, not a check: a deterministic check for
+  cross-references would need a list of Turkish phrases, and the bodies were not read one by one.
 
 ## Open issues
 
