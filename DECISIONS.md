@@ -1246,6 +1246,118 @@ reporting and in the stream's write path.
 - **Evidence:** before 4 failures in 40 runs; after 50 of 50 (`-race -count=50`); the late-reply test 30 of 30 (`-race -count=30`,
   0.30 s each); `make test` and `make soak` (5,000 messages, at most 100 requests in any second and channel) pass.
 
+## The real-model session (smoke test and golden set, 2026-11-15)
+
+Everything before this session ran against the demo mock or a fake API server. This session used the real API (claude-opus-5-5) for
+a smoke test and for the golden-set evaluation (`make eval`). Spent in total: **$0.97** of a $2.50 limit (summed from the `usage`
+fields of the answers and the price table below, not read from the Console).
+
+### Smoke test through the web app
+- **Setup:** `LLM_MODE=anthropic docker compose up -d --build`, every request through `http://127.0.0.1:3000/api` with curl.
+  `/api/config` said `llm_mode=anthropic`, `model=claude-opus-5-5`: the only check that the key was loaded (the key itself was never
+  read or printed).
+- **Brief:** "Son 14 gün içinde sepete ürün ekleyip satın almayan İstanbul'daki müşterilere SMS ve e-posta ile %15 indirim kampanyası...".
+- **Segment:** right on the first answer: `city eq İstanbul`, `cart_add performed 14`, `purchase not_performed 14`, channels sms and
+  email, no unsupported criteria, no warning. 411 of 5,000 users matched (296 with SMS consent, 351 with email consent).
+- **Content stream:** first delta after 6.4 s, 63 deltas, 9.6 s in total, one attempt, valid (the SMS is UCS-2, 2 segments). The 6.4 s
+  before the first character is the model's time to first token at effort medium; nothing was changed for it.
+- **Save, approve, stats:** content saved (origin `edited`), approved, `completed` after about 47 s: 296 SMS and 351 emails sent, 0
+  failed, 75 messages retried (the demo provider's 5 % 500 and 5 % 429).
+- **The two model calls:**
+
+  | Call | Tokens in / out | Cost | Time |
+  |---|---|---|---|
+  | segment (complete) | 3,637 / 169 | $0.0179 | 4.7 s |
+  | content (stream) | 916 / 775 | $0.0192 | 9.7 s (first text 6.4 s) |
+
+- **Leak check, by count only:** `sk-ant` in all compose logs 0, in `ai-sessions/14` 0, in `eval/results` 0.
+- **Back to the mock:** `LLM_MODE=mock docker compose up -d`, `/api/config` says `llm_mode=mock`.
+
+### Every real call is metered; the prices live in one table
+- **Decision:** `llm.Metered` wraps the real client and reports tokens, cost, time and (streams) the time to the first text of every
+  call; the api logs one `llm call` line (no brief, no answer, no key). The mock is not wrapped. Prices are in `llm/pricing.go` with
+  their source and date (checked 2026-11-15: opus-5-5 $4 / $20, sonnet-5-5 $2 / $10 per million tokens, no prompt caching in use).
+- **A model that is not in the table is charged at the dearest price,** and a fallback is charged at the dearer of the two models: a
+  budget guard that guessed low would let a run overspend.
+- **A refused or cut-off answer is billed,** so `Complete` and `Stream` now return its usage (never its text) together with the error.
+  Before, the tokens of a `max_tokens` or `refusal` answer vanished, and a budget would have been blind to exactly the expensive case.
+
+### The golden set: scope and limit
+- **What it is:** 14 Turkish briefs (`eval/golden.json`): one criterion; AND of an attribute and a number; AND of two attributes; OR in
+  one group; a negative action; added to cart and did not buy; "son N gün"; a period beyond the vocabulary (500 days); "recently"
+  without a number; an amount with and without a direction; criteria the data does not have (age, gender); a brief for everyone; an
+  instruction inside the brief; SMS only, email only, both channels, and no channel named.
+- **What it is not:** each brief runs **once** per model. This is smoke level, not statistical power: a ✓ means "right this once", a ✗
+  may be sampling noise, and the pass rates of two models over 14 single runs are not a ranking. Content quality (tone, facts) is not
+  scored, only validity; the text is in the result JSON for a person to read. No long briefs, no other languages.
+- **Not done:** the plan also had a comparison of the matched user *set* with a reference rule per brief. The conditions and the
+  counts were enough for these briefs, and a reference rule per brief would have been a second place to keep correct.
+
+### Scoring: deterministic checks only, no model as a judge
+- **Segment:** `segment_valid` (decode and validate); `required` (every condition the brief asks for is there; a city list is compared
+  as the set of values it selects, so `in` and an OR group are the same); `no_reversed` (no forbidden condition, and no extra condition
+  on a field or event the brief asks about); `no_invented` (no condition the brief does not justify, no extra value); `unsupported`
+  (empty or not, as expected); `warnings` (the codes of `campaign.Warnings`, computed from the counts in the seeded database exactly as
+  the api does); `channels` (the exact set, an empty list meaning "the brief names none").
+- **Content:** `content_valid` is the application's own validation (`content.Parse` and `Validate`: 160 / 80 / 2000 characters, only
+  `{{first_name}}` and `{{city}}`) after at most two repairs; `no_refusal_or_cutoff`; `no_forbidden_text` (the injection brief must not
+  put `password` into the text). The number of repairs is the number of requests of a task minus one, from the metering.
+- **The runner has no prompts of its own:** it drives `compose.Composer` (the application's prompts and repair loop) through the
+  metered client, so what is scored is what a marketer gets.
+
+### Budget guard
+- **`EVAL_MAX_USD` (default 1.00):** the real cost of every call is added up after the call; once the limit is reached no further call
+  is sent (also not the repairs of the brief in progress), the rest of the briefs are reported as skipped and the exit code is 3. A
+  call that is already running is not cut, so a run can end above the limit by that call (one segment answer is at most 16,000 output
+  tokens, $0.32 on opus-5-5).
+- **Before it starts it prints** the planned calls (2 per brief), the most it could make (6 per brief) and two estimates from the
+  token counts of the smoke test. Measured: one brief cost $0.037, so the whole set was estimated at $0.52; it cost $0.518.
+- **It starts only when asked for by name:** `scripts/eval.sh` and the binary both refuse without `LLM_MODE=anthropic` (and the client
+  refuses without a key); `EVAL_ARGS="-mock"` is a free dry run and writes no results. The compose default stays `LLM_MODE=auto`
+  (a reviewer who puts a key in the dotenv file expects the real model); instead every `compose up` of this repo's own sessions and
+  scripts gives `LLM_MODE=mock` explicitly (CLAUDE.md). The eval service uses the Go image pinned by digest.
+
+### Problems found with the real model, and the fix
+First full run, claude-opus-5-5: **10 of 14** pass ($0.518, 182 s). The four failures were the model's, not the checks':
+
+| Brief | What the model did |
+|---|---|
+| sepet-terk-7-gun | added `total_orders gte 0`, a condition that is true for everyone, next to the right two |
+| sozluk-siniri-500-gun | applied 365 days for "500 gün" and said so in `unsupported_criteria` (a shortened condition applied anyway) |
+| tutar-yonsuz | chose a direction (`gte`) for an amount that has none, and flagged nothing |
+| tutar-yonlu | dropped the amount, used `purchase performed 30d` instead, and returned an empty `explanation` |
+
+- **Fix (one general change to the segment prompt, no brief-specific wording):** the two numeric fields are now defined
+  (`total_orders` = orders placed in total, `total_spent` = the total amount spent on all orders), and three rules were added: every
+  condition must come from the brief (no padding, nothing true for everyone except the one prescribed fallback); no direction is chosen
+  for a number or an amount that has none (it goes to `unsupported_criteria`); a value outside what a field allows is flagged, not
+  replaced by the nearest allowed one. A test pins the wording.
+- **Before and after, only the failed briefs, once each ($0.16):** 4 of 4 pass (`sepet-terk-7-gun`, `sozluk-siniri-500-gun`,
+  `tutar-yonlu`, `tutar-yonsuz`; the last needed one content repair).
+- **Limits of that proof:** one run each, so "did not fail again once" is not "fixed". The ten briefs that passed before were not
+  run again with the new prompt (the Sonnet run below used the new prompt and passed all 14, which is indirect evidence for opus only).
+  `tutar-yonlu` may have been a bad draw rather than a prompt gap.
+
+### Model comparison (the default stays claude-opus-5-5; the decision is the owner's)
+| | claude-opus-5-5 | claude-sonnet-5-5 |
+|---|---|---|
+| Prompt | before the fix (4 failed briefs re-run after it) | after the fix |
+| Briefs passed | 10 of 14; 14 of 14 counting the re-run | 14 of 14 |
+| Cost of the full set | $0.518 (+ $0.159 for the re-run) | $0.219 |
+| Tokens in / out | 64,366 / 13,021 | 68,428 / 8,211 |
+| Model time | 182 s | 101 s |
+| Repairs (segment / content) | 0 / 1 | 0 / 1 |
+
+Sonnet passed the same set at 42 % of the cost in 55 % of the time, with fewer output tokens (less thinking). The two columns used
+different prompts and one run per brief, so this is "nothing here argues against Sonnet", not "Sonnet is as good". A fair test would
+run opus on the full set with the new prompt (about $0.52) and repeat each brief several times.
+
+### Left open by this session
+- `ve-email` needed one content repair in all three runs, on both models; the result files record how many repairs, not why. Recording
+  the validator's problems per repair would show whether the prompt or the validator is the cause.
+- An empty `explanation` passes `segment.Validate` (see `tutar-yonlu`, first run); the UI then shows an empty audience sentence.
+- The estimate before a run assumes the token counts of the smoke test; a longer prompt raises the real cost by a few percent.
+
 ## Open issues
 
 (What was not finished, and what was decided to stay as it is. "Settled" items are kept on purpose, with the reason, and wait for
