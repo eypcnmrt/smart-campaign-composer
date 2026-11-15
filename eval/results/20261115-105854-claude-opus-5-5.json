@@ -1,0 +1,92 @@
+{
+  "model": "claude-opus-5-5",
+  "started_at": "2026-11-15T10:58:54.716345312Z",
+  "max_usd": 0.12,
+  "spent_usd": 0.035339999999999996,
+  "budget_stopped": false,
+  "briefs": [
+    {
+      "id": "ve-email",
+      "covers": "two criteria joined by AND (attribute + number); email only",
+      "brief": "Ankara'da yaşayan ve en az 5 siparişi olan müşterilerimize sadece e-posta ile teşekkür kampanyası göndermek istiyorum.",
+      "checks": [
+        {
+          "name": "segment_valid",
+          "pass": true
+        },
+        {
+          "name": "required",
+          "pass": true
+        },
+        {
+          "name": "no_reversed",
+          "pass": true
+        },
+        {
+          "name": "no_invented",
+          "pass": true
+        },
+        {
+          "name": "unsupported",
+          "pass": true
+        },
+        {
+          "name": "warnings",
+          "pass": true
+        },
+        {
+          "name": "channels",
+          "pass": true
+        },
+        {
+          "name": "content_valid",
+          "pass": true
+        },
+        {
+          "name": "no_refusal_or_cutoff",
+          "pass": true
+        },
+        {
+          "name": "no_forbidden_text",
+          "pass": true
+        }
+      ],
+      "pass": true,
+      "rule_json": "{\"channels\":[\"email\"],\"conditions\":[{\"field\":\"city\",\"op\":\"eq\",\"type\":\"attribute\",\"value\":\"Ankara\"},{\"field\":\"total_orders\",\"op\":\"gte\",\"type\":\"attribute\",\"value\":5}],\"explanation\":\"Ankara'da yaşayan ve toplamda en az 5 sipariş vermiş müşteriler.\",\"unsupported_criteria\":[]}",
+      "audience": {
+        "matched": 299,
+        "sms": 207,
+        "email": 252,
+        "total_users": 5000
+      },
+      "content": {
+        "sms": "Merhaba {{first_name}}, bizi tekrar tekrar tercih ettiğin için çok teşekkür ederiz. Desteğin bizim için çok değerli. İyi ki varsın!",
+        "email_subject": "Teşekkürler {{first_name}}, iyi ki bizimlesin!",
+        "email_body": "Merhaba {{first_name}},\n\nBu e-postayı sana yalnızca bir şey söylemek için yazıyoruz: teşekkür ederiz!\n\nBizden defalarca alışveriş yapman ve bize tekrar tekrar güvenmen bizim için çok değerli. Her siparişin, işimizi daha iyi yapmamız için bize güç veriyor.\n\nAnkara'daki müşterilerimizle kurduğumuz bu bağ bizi gerçekten mutlu ediyor. Seni aramızda görmek bizim için büyük bir şans.\n\nBir sorun, öneri ya da paylaşmak istediğin bir düşünce olursa bu e-postayı yanıtlaman yeterli. Mesajını okumaktan memnuniyet duyarız.\n\nİyi ki varsın!\n\nSevgiyle,\nEkibimiz"
+      },
+      "segment_repairs": 0,
+      "content_repairs": 0,
+      "calls": [
+        {
+          "task": "segment",
+          "input_tokens": 3903,
+          "output_tokens": 129,
+          "cost_usd": 0.018192,
+          "duration_ms": 2560
+        },
+        {
+          "task": "content",
+          "input_tokens": 952,
+          "output_tokens": 667,
+          "cost_usd": 0.017148,
+          "duration_ms": 8251,
+          "first_text_ms": 3752
+        }
+      ],
+      "input_tokens": 4855,
+      "output_tokens": 796,
+      "cost_usd": 0.035339999999999996,
+      "duration_ms": 10814
+    }
+  ]
+}
