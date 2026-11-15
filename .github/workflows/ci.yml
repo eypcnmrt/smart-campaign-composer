@@ -70,3 +70,17 @@ jobs:
       - name: Stop the stack and remove its volume
         if: always()
         run: docker compose down --volumes --remove-orphans
+
+  e2e:
+    # Added after the browser tests passed three times in a row on a clean clone (DECISIONS.md, "Continuous integration").
+    # scripts/e2e.sh prints the last log lines of the stack itself when a run fails, then removes its compose project.
+    name: make e2e
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: make e2e
+        run: make e2e
