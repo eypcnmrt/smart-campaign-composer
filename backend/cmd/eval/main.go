@@ -44,8 +44,12 @@ func run(ctx context.Context, args []string, osGetenv func(string) string, stdou
 	out := fs.String("out", "eval/results", `directory for the result files; "none" writes nothing`)
 	model := fs.String("model", "", "model to evaluate (default: ANTHROPIC_MODEL, then "+llm.DefaultModel+")")
 	mock := fs.Bool("mock", false, "use the demo model: a free dry run of the runner, results are not written")
+	compare := fs.String("compare", "", "two result JSON files, comma-separated: write their comparison to -out and exit (no model call, no database)")
 	if err := fs.Parse(args); err != nil {
 		return 2
+	}
+	if *compare != "" {
+		return runCompare(*compare, *out, stdout, stderr)
 	}
 
 	maxUSD := defaultMaxUSD
@@ -134,6 +138,31 @@ func run(ctx context.Context, args []string, osGetenv func(string) string, stdou
 		fmt.Fprintf(stderr, "eval: stopped by the budget after $%.4f\n", res.SpentUSD)
 		return 3
 	}
+	return 0
+}
+
+// runCompare writes the side-by-side comparison of two result files into out.
+func runCompare(files, out string, stdout, stderr io.Writer) int {
+	paths := strings.Split(files, ",")
+	if len(paths) != 2 || out == "none" {
+		fmt.Fprintln(stderr, "eval: -compare takes exactly two result files, a,b, and needs a real -out directory")
+		return 2
+	}
+	var res [2]eval.Result
+	for i, p := range paths {
+		r, err := eval.LoadResult(strings.TrimSpace(p))
+		if err != nil {
+			fmt.Fprintf(stderr, "eval: %v\n", err)
+			return 2
+		}
+		res[i] = r
+	}
+	path, err := eval.WriteCompare(out, res[0], res[1])
+	if err != nil {
+		fmt.Fprintf(stderr, "eval: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "written: %s\n", path)
 	return 0
 }
 

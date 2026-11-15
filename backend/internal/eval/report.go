@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"smartcampaign/internal/compose"
 )
 
 // columns of the table: a short header for every check.
@@ -88,20 +90,25 @@ func (r Result) Markdown() string {
 	return sb.String()
 }
 
+// fieldOf names where a problem is: the field, and the validator's code when it has one.
+func fieldOf(p compose.Problem) string {
+	field := p.Path
+	if field == "" {
+		field = "(whole answer)"
+	}
+	if p.Code != "" {
+		field += " [" + p.Code + "]"
+	}
+	return field
+}
+
 // repairLines describes every rejected answer of the run, one line each.
 func (r Result) repairLines() []string {
 	var out []string
 	for _, b := range r.Briefs {
 		for _, rej := range b.RepairReasons {
 			for _, p := range rej.Problems {
-				field := p.Path
-				if field == "" {
-					field = "(whole answer)"
-				}
-				if p.Code != "" {
-					field += " [" + p.Code + "]"
-				}
-				out = append(out, fmt.Sprintf("- **%s** %s attempt %d: `%s` %s", b.ID, rej.Stage, rej.Attempt, field, clip(p.Message, 200)))
+				out = append(out, fmt.Sprintf("- **%s** %s attempt %d: `%s` %s", b.ID, rej.Stage, rej.Attempt, fieldOf(p), clip(p.Message, 200)))
 			}
 		}
 	}
