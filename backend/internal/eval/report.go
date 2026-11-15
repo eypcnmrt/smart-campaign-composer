@@ -15,7 +15,7 @@ import (
 // columns of the table: a short header for every check.
 var columnHeader = map[string]string{
 	CheckSegmentValid: "valid", CheckRequired: "required", CheckNoReversed: "no-reversed", CheckNoInvented: "no-invented",
-	CheckUnsupported: "unsupported", CheckWarnings: "warnings", CheckChannels: "channels",
+	CheckNoFiller: "no-filler", CheckUnsupported: "unsupported", CheckWarnings: "warnings", CheckChannels: "channels",
 	CheckContentValid: "c-valid", CheckNoCutoff: "c-no-cutoff", CheckNoForbidden: "c-no-forbidden",
 	CheckLanguage: "c-language",
 }

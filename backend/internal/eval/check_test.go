@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"testing"
@@ -191,7 +192,8 @@ func TestCheckSegment(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			checks := CheckSegment(ruleOf(t, tt.conditions, tt.unsupp, tt.chans), tt.aud, tt.expect)
+			rule := ruleOf(t, tt.conditions, tt.unsupp, tt.chans)
+			checks := CheckSegment(rule, tt.aud, aloneSome(rule), tt.expect)
 			got := failed(checks)
 			want := map[string]bool{}
 			for _, n := range tt.wantFailed {
@@ -211,6 +213,137 @@ func TestCheckSegment(t *testing.T) {
 				t.Errorf("%d checks, want %d (every check but segment_valid, which the runner adds)", len(checks), len(SegmentChecks)-1)
 			}
 		})
+	}
+}
+
+// aloneSome is the audience of every condition of the rule counted alone when each of them reaches only some users.
+func aloneSome(r segment.Rule) []campaign.Audience {
+	out := make([]campaign.Audience, len(unitsOf(r)))
+	for i := range out {
+		out[i] = someUsers
+	}
+	return out
+}
+
+// The filler check: a condition that selects every user by itself filters nothing, whatever the brief expects.
+func TestCheckSegment_filler(t *testing.T) {
+	t.Parallel()
+	izmir := Atom{Field: "city", Values: []string{"İzmir"}}
+	tests := []struct {
+		name       string
+		conditions string
+		alone      []campaign.Audience // nil: every condition alone reaches only some users
+		expect     Expect
+		wantFailed []string
+		wantDetail string
+	}{
+		{
+			name:       "a rule without a condition has nothing to be a filler",
+			conditions: `[]`, expect: Expect{FreeConditions: true},
+		},
+		{
+			name:       "a real condition alone reaches only some users",
+			conditions: `[` + cityIzmir + `]`, expect: Expect{Require: []Atom{izmir}},
+		},
+		{
+			name:       "the language fallback alone selects everyone",
+			conditions: `[{"type":"attribute","field":"language","op":"in","value":["tr","en"]}]`,
+			alone:      []campaign.Audience{everyone}, expect: Expect{FreeConditions: true},
+			wantFailed: []string{CheckNoFiller}, wantDetail: "language in",
+		},
+		{
+			name:       "a filler is found next to a real condition, and only it is named",
+			conditions: `[` + cityIzmir + `,` + `{"type":"attribute","field":"total_orders","op":"gte","value":0}]`,
+			alone:      []campaign.Audience{someUsers, everyone}, expect: Expect{Require: []Atom{izmir}, FreeConditions: true},
+			wantFailed: []string{CheckNoFiller}, wantDetail: "total_orders gte 0",
+		},
+		{
+			name:       "a filler is a filler even when the brief allows free conditions",
+			conditions: `[` + languageEN + `]`,
+			alone:      []campaign.Audience{everyone}, expect: Expect{FreeConditions: true},
+			wantFailed: []string{CheckNoFiller},
+		},
+		{
+			name:       "counts that are missing are reported, never skipped",
+			conditions: `[` + cityIzmir + `]`,
+			alone:      []campaign.Audience{}, expect: Expect{Require: []Atom{izmir}},
+			wantFailed: []string{CheckNoFiller}, wantDetail: "was not counted",
+		},
+		{
+			name:       "an empty database has no filler",
+			conditions: `[` + cityIzmir + `]`,
+			alone:      []campaign.Audience{{}}, expect: Expect{Require: []Atom{izmir}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			rule := ruleOf(t, tt.conditions, `[]`, `[]`)
+			alone := tt.alone
+			if alone == nil {
+				alone = aloneSome(rule)
+			}
+			checks := CheckSegment(rule, someUsers, alone, tt.expect)
+			got := failed(checks)
+			want := map[string]bool{}
+			for _, n := range tt.wantFailed {
+				want[n] = true
+			}
+			for n := range got {
+				if !want[n] {
+					t.Errorf("check %s failed: %s", n, detailOf(checks, n))
+				}
+			}
+			for n := range want {
+				if !got[n] {
+					t.Errorf("check %s passed, want it to fail", n)
+				}
+			}
+			if d := detailOf(checks, CheckNoFiller); tt.wantDetail != "" && !strings.Contains(d, tt.wantDetail) {
+				t.Errorf("no_filler detail = %q, want it to contain %q", d, tt.wantDetail)
+			}
+		})
+	}
+}
+
+// countingAuditor says what each rule it is asked about reaches, and what it was asked.
+type countingAuditor struct {
+	asked []segment.Rule
+	reach func(segment.Rule) campaign.Audience
+}
+
+func (c *countingAuditor) CountAudience(_ context.Context, r segment.Rule) (campaign.Audience, error) {
+	c.asked = append(c.asked, r)
+	return c.reach(r), nil
+}
+
+// Every top-level condition is counted by itself, in the order of the rule, and an OR group counts as one.
+func TestUnitAudiences_countsEachConditionAlone(t *testing.T) {
+	t.Parallel()
+	group := `{"type":"any_of","conditions":[` + cityIzmir + `,{"type":"attribute","field":"city","op":"eq","value":"Ankara"}]}`
+	rule := ruleOf(t, `[`+cityIzmir+`,`+cartNot30+`,`+group+`]`, `[]`, `[]`)
+	a := &countingAuditor{reach: func(r segment.Rule) campaign.Audience {
+		if len(r.Conditions) != 1 {
+			t.Errorf("asked about a rule with %d conditions, want 1", len(r.Conditions))
+			return campaign.Audience{}
+		}
+		if _, isEvent := r.Conditions[0].(*segment.Event); isEvent {
+			return everyone
+		}
+		return someUsers
+	}}
+	got, err := UnitAudiences(t.Context(), a, rule)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0] != someUsers || got[1] != everyone || got[2] != someUsers {
+		t.Errorf("UnitAudiences() = %+v, want [some, everyone, some]", got)
+	}
+	if _, isGroup := a.asked[2].Conditions[0].(*segment.AnyOf); !isGroup {
+		t.Errorf("the group was not counted as one condition: %T", a.asked[2].Conditions[0])
+	}
+	if got, err := UnitAudiences(t.Context(), a, ruleOf(t, `[]`, `[]`, `[]`)); err != nil || len(got) != 0 {
+		t.Errorf("a rule without a condition: %+v, %v; want nothing counted", got, err)
 	}
 }
 

@@ -262,7 +262,11 @@ func (r *Runner) runBrief(ctx context.Context, b Brief) (BriefResult, error) {
 		}
 		br.Audience = aud
 		br.Checks = append(br.Checks, Check{Name: CheckSegmentValid, Pass: true})
-		br.Checks = append(br.Checks, CheckSegment(seg.Rule, aud, b.Expect)...)
+		alone, err := UnitAudiences(ctx, r.auditor, seg.Rule)
+		if err != nil {
+			return BriefResult{}, err
+		}
+		br.Checks = append(br.Checks, CheckSegment(seg.Rule, aud, alone, b.Expect)...)
 
 		// The audience line is what the api passes, too: the rule's own one-sentence explanation.
 		cres, cerr := r.composer.Content(ctx, compose.ContentInput{Brief: b.Text, Audience: seg.Rule.Explanation}, nil)

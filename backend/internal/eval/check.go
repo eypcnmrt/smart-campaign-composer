@@ -1,6 +1,7 @@
 package eval
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +22,7 @@ const (
 	CheckRequired     = "required"
 	CheckNoReversed   = "no_reversed"
 	CheckNoInvented   = "no_invented"
+	CheckNoFiller     = "no_filler"
 	CheckUnsupported  = "unsupported"
 	CheckWarnings     = "warnings"
 	CheckChannels     = "channels"
@@ -32,7 +34,7 @@ const (
 
 // Names of the checks in report order.
 var (
-	SegmentChecks = []string{CheckSegmentValid, CheckRequired, CheckNoReversed, CheckNoInvented, CheckUnsupported, CheckWarnings, CheckChannels}
+	SegmentChecks = []string{CheckSegmentValid, CheckRequired, CheckNoReversed, CheckNoInvented, CheckNoFiller, CheckUnsupported, CheckWarnings, CheckChannels}
 	ContentChecks = []string{CheckContentValid, CheckNoCutoff, CheckNoForbidden, CheckLanguage}
 )
 
@@ -67,6 +69,17 @@ func unitsOf(r segment.Rule) []unit {
 		}
 	}
 	return out
+}
+
+// node is the unit as a condition of a rule, so that it can be counted alone.
+func (u unit) node() segment.Node {
+	switch {
+	case u.attr != nil:
+		return u.attr
+	case u.event != nil:
+		return u.event
+	}
+	return u.group
 }
 
 // names are the fields and events a unit is about.
@@ -319,9 +332,43 @@ func without(a, b []string) []string {
 	return out
 }
 
+// UnitAudiences counts the top-level conditions of a rule one at a time: element i is the audience of the rule that has only
+// the i-th condition (an any_of group counts as one), in the order CheckSegment reads them. A group that selects everyone as a
+// whole is caught there; one of its members selecting everyone makes the group do so too, so the members need no count of their own.
+func UnitAudiences(ctx context.Context, a Auditor, rule segment.Rule) ([]campaign.Audience, error) {
+	units := unitsOf(rule)
+	out := make([]campaign.Audience, len(units))
+	for i, u := range units {
+		aud, err := a.CountAudience(ctx, segment.Rule{Conditions: []segment.Node{u.node()}})
+		if err != nil {
+			return nil, fmt.Errorf("counting condition %d (%s) alone: %w", i, u, err)
+		}
+		out[i] = aud
+	}
+	return out, nil
+}
+
+// fillerProblems names the conditions that select every user by themselves. Such a condition filters nothing: it only looks like
+// one in the interface (the language fallback "tr or en", a minimum of 0 orders). Every brief is checked, whatever it expects.
+// alone must hold one audience per condition (UnitAudiences); anything else is reported rather than skipped, so a check that
+// could not run never passes as one that did.
+func fillerProblems(units []unit, alone []campaign.Audience) []string {
+	if len(alone) != len(units) {
+		return []string{fmt.Sprintf("the audience of each condition alone was not counted (%d counts for %d conditions)", len(alone), len(units))}
+	}
+	var out []string
+	for i, u := range units {
+		if a := alone[i]; a.TotalUsers > 0 && a.Matched == a.TotalUsers {
+			out = append(out, fmt.Sprintf("a filler condition: %s selects every user by itself (%d of %d)", u, a.Matched, a.TotalUsers))
+		}
+	}
+	return out
+}
+
 // CheckSegment scores a valid rule against what the brief expects. aud is the audience of the rule in the seeded database,
-// from which the warnings are computed exactly as the api computes them.
-func CheckSegment(rule segment.Rule, aud campaign.Audience, e Expect) []Check {
+// from which the warnings are computed exactly as the api computes them; alone is the audience of each condition counted by
+// itself (see UnitAudiences), for the filler check.
+func CheckSegment(rule segment.Rule, aud campaign.Audience, alone []campaign.Audience, e Expect) []Check {
 	m := &matcher{units: unitsOf(rule)}
 	m.used = make([]bool, len(m.units))
 	for _, a := range e.Require {
@@ -363,6 +410,7 @@ func CheckSegment(rule segment.Rule, aud campaign.Audience, e Expect) []Check {
 		check(CheckRequired, m.missing),
 		check(CheckNoReversed, dedupe(reversed)),
 		check(CheckNoInvented, invented),
+		check(CheckNoFiller, fillerProblems(m.units, alone)),
 		check(CheckUnsupported, unsupportedProblems(rule, e)),
 		check(CheckWarnings, warningProblems(rule, aud, e)),
 		check(CheckChannels, channelProblems(rule, e)),

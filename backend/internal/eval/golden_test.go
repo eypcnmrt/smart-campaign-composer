@@ -16,8 +16,8 @@ func TestGoldenSetIsValidAndCoversTheRequiredCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if n := len(briefs); n < 12 || n > 15 {
-		t.Errorf("%d briefs, want 12 to 15", n)
+	if n := len(briefs); n < 12 || n > 20 {
+		t.Errorf("%d briefs, want 12 to 20", n)
 	}
 	covers := strings.ToLower(func() string {
 		var sb strings.Builder
@@ -27,7 +27,7 @@ func TestGoldenSetIsValidAndCoversTheRequiredCases(t *testing.T) {
 		return sb.String()
 	}())
 	for _, want := range []string{"one criterion", "and", "or inside", "negative", "last 14 days", "beyond the vocabulary", "with a direction",
-		"without a direction", "does not have", "everyone", "instruction", "sms only", "email only", "both channels"} {
+		"without a direction", "does not have", "everyone", "a rule without a condition", "instruction", "sms only", "email only", "both channels"} {
 		if !strings.Contains(covers, want) {
 			t.Errorf("no brief covers %q", want)
 		}
@@ -40,6 +40,32 @@ func TestGoldenSetIsValidAndCoversTheRequiredCases(t *testing.T) {
 	}
 	if !injection || !everyone || !english {
 		t.Errorf("injection brief = %v, everyone brief = %v, English-text brief = %v", injection, everyone, english)
+	}
+}
+
+// The briefs found by hand in the browser: nothing in them can be expressed, so the right rule has no condition at all. They
+// expect nothing required, nothing optional and no free conditions (any condition is then invented, and a filler fails
+// no_filler too), what the rule could not express named, and the warning for a rule that selects everyone.
+func TestGoldenSet_theBriefsWithoutAnyExpressibleCriterion(t *testing.T) {
+	t.Parallel()
+	briefs, err := Load(goldenPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := 0
+	for _, b := range briefs {
+		if b.ID != "dogum-gunu" && b.ID != "magaza-ziyareti" {
+			continue
+		}
+		found++
+		e := b.Expect
+		if len(e.Require) > 0 || len(e.Optional) > 0 || e.FreeConditions || e.Unsupported != "nonempty" ||
+			!slicesContain(e.WarningsPresent, "matches_everyone") || !slicesContain(e.WarningsPresent, "unsupported_criteria") {
+			t.Errorf("%s expects %+v, want a rule without a condition, unsupported criteria and the matches_everyone warning", b.ID, e)
+		}
+	}
+	if found != 2 {
+		t.Errorf("%d of the 2 briefs are in the golden set", found)
 	}
 }
 

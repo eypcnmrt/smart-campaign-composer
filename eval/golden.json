@@ -120,14 +120,34 @@
   },
   {
     "id": "tutar-yonsuz",
-    "covers": "an amount without a direction: no total_spent condition, flagged as unsupported (the language fallback is allowed)",
+    "covers": "an amount without a direction: no total_spent condition and no substitute, a rule without a condition, flagged as unsupported",
     "brief": "1000 TL harcamış müşterilerimize e-posta ile bir kampanya duyuralım.",
     "expect": {
-      "optional": [{"field": "language", "values": ["tr", "en"]}],
       "forbid": [{"field": "total_spent"}],
       "unsupported": "nonempty",
-      "warnings_present": ["unsupported_criteria"],
+      "warnings_present": ["unsupported_criteria", "matches_everyone"],
       "channels": ["email"]
+    }
+  },
+  {
+    "id": "dogum-gunu",
+    "covers": "no criterion can be expressed (a birthday, a calendar week): a rule without a condition, never a made-up one; SMS only",
+    "brief": "Doğum günü bu hafta olan kullanıcılara kampanya SMS'i gönder.",
+    "expect": {
+      "unsupported": "nonempty",
+      "warnings_present": ["unsupported_criteria", "matches_everyone"],
+      "channels": ["sms"]
+    }
+  },
+  {
+    "id": "magaza-ziyareti",
+    "covers": "no criterion can be expressed (a store visit is not an event the data has): a rule without a condition and no event made of it; no channel named",
+    "brief": "Son 7 günde mağazamızı ziyaret eden kullanıcıları kasım indirimi hakkında bilgilendir.",
+    "expect": {
+      "forbid": [{"event": "cart_add"}, {"event": "purchase"}],
+      "unsupported": "nonempty",
+      "warnings_present": ["unsupported_criteria", "matches_everyone"],
+      "channels": []
     }
   },
   {
