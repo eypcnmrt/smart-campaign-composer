@@ -69,7 +69,7 @@ mock provider (idempotency key per delivery; fails, throttles and answers late o
 dashboard: counts per channel, rate chart against the cap, retries, outages
 ```
 
-One Go binary (`api`, `worker`, `seed` commands) plus a separate mock provider; Vue 3 + Vite + TypeScript for the web app;
+One Go binary (`api`, `worker`, `migrate`, `seed` commands) plus a separate mock provider; Vue 3 + Vite + TypeScript for the web app;
 PostgreSQL. Why each part is the way it is: [DECISIONS.md](DECISIONS.md).
 
 ## Security
