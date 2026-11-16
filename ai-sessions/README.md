@@ -30,8 +30,11 @@ Planning and prompt drafting were also discussed in a separate chat outside thes
 | [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criterion the rule cannot express must not replace one it can | 2026-11-15 |
 | [`20-belgeler.txt`](20-belgeler.txt) | the documents round: reviewing the README, DECISIONS and this folder's README | 2026-11-15 |
 | [`21-ci-temiz-klon.txt`](21-ci-temiz-klon.txt) | the CI workflow and a clean-clone run of the stack | 2026-11-16 |
+| `22-son-tarama.txt` (no link until the file is added) | the pre-publication sweep: history scan, address and key checks, links, Linux risks for CI | 2026-11-16 |
 
-The date is the day the file was added to the repository (`git log`). There is no model column on purpose: the header of an export names
+The date is the day the file was added to the repository (`git log`). Every export is scanned with `scripts/check-ai-sessions.cjs`
+in the session that follows it. The newest session's export is written by that session itself: once the session is over it is scanned
+with the same script and added, and only then does its row get a link. There is no model column on purpose: the header of an export names
 only the model the session started with, and the project uses a plan-then-execute model setting (`opusplan`: plan mode runs on Opus,
 normal mode on Sonnet), so the header does not show which model did the work. The decisions that came out of these sessions are in
 [`../DECISIONS.md`](../DECISIONS.md).

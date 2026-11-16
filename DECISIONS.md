@@ -1754,6 +1754,19 @@ without being downloaded into a quarantine folder first, scanned, and copied in 
     part, and the guard was not touched.
   - **No command was stopped** in the closing session, the eval close-out, the Sonnet transition, the filler-condition session and
     the olmayan-kriter session (exports 16 to 19); the sessions' reports say the guard was not asked anything it refused.
+  - **The CI and clean-clone session (export 21): five commands, three of them false alarms, and one retry in another shell.**
+    The guard stopped (1) in Git Bash, an `export MSYS_NO_PATHCONV=1; docker pull ...` line (read as dumping the environment);
+    (2) in PowerShell, a `docker image inspect ...` that was meant to read the digest of the same image (the guard treats
+    `docker inspect` as a way to see a container's environment); (3) in Git Bash, a directory listing filtered for dotenv file
+    names; (4) in PowerShell, a `Test-Path` of the dotenv file in the clone; (5) in PowerShell, a `Remove-Item Env:LLM_MODE`.
+    **A deviation, said plainly:** (1) and (2) are the same goal tried in two shells, and (3) and (4) are the same existence
+    check tried in two shells. The guard worked in both shells, each time, so nothing was bypassed; but after the first block the
+    session tried the blocked purpose again through the other shell instead of stopping, which is a way round a block even if the
+    guard held. The session's report calls the blocks "not worked around"; that is too generous for these two pairs. What was
+    then done is what a first reaction should have been: the digest was taken from the output of `docker pull`, the dotenv check
+    was made with the `Glob` tool (it listed only `.env.example`), and the variable was set with the form in `CLAUDE.md`
+    (`$env:LLM_MODE='mock'; ...`), which passes. Since then the session prompts say it outright: a blocked command is not tried
+    in another shell, only reported. Nothing in the guard, the hooks or `--no-verify` was touched, and no commit was stopped.
 - **Where a session went against an instruction** (each said so in its own report; the deviations are small and none touched a
   rule of the guard): the instruction was to edit files with the `Edit` tool, and twice a session edited with something else: in the
   eval close-out session (export 16) the first edit of `compose.go` was made with a `node` script, and in the Sonnet transition session

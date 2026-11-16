@@ -22,7 +22,8 @@ docker compose up
 ```
 
 Then open **http://127.0.0.1:3000** (the web app; it forwards `/api` to the API, which is also on `http://127.0.0.1:8080`).
-The first start builds the images. Postgres and the mock provider are not published outside the Compose network.
+The first `docker compose up` pulls the base images and builds the project's own, which can take a few minutes on a cold machine
+(the 19 s in "Commands" below was measured with a warm build cache). Postgres and the mock provider are not published outside the Compose network.
 
 **Without a key it runs in mock mode.** No API key is needed and nothing is sent to Anthropic: a small deterministic,
 keyword-based "demo model" answers instead. The header of the app shows a yellow **Mock LLM** badge and `Model: mock`. Try a brief
