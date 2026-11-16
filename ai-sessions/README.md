@@ -29,6 +29,7 @@ Planning and prompt drafting were also discussed in a separate chat outside thes
 | [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condition: a rule without a condition means every user | 2026-11-15 |
 | [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criterion the rule cannot express must not replace one it can | 2026-11-15 |
 | [`20-belgeler.txt`](20-belgeler.txt) | the documents round: reviewing the README, DECISIONS and this folder's README | 2026-11-15 |
+| [`21-ci-temiz-klon.txt`](21-ci-temiz-klon.txt) | the CI workflow and a clean-clone run of the stack | 2026-11-16 |
 
 The date is the day the file was added to the repository (`git log`). There is no model column on purpose: the header of an export names
 only the model the session started with, and the project uses a plan-then-execute model setting (`opusplan`: plan mode runs on Opus,
@@ -60,8 +61,8 @@ almost every session and in every path; reporting them would only bury a real fi
 
 What was masked in the committed files: the fake seed data that looked like contact data (the `+90000…` numbers and `example.com`
 addresses of exports 08 and 09, which are fake but trip the phone and e-mail rules) and a name of an environment variable that the
-key rule took for a value (`ANTH…[17 chars]` in the same exports). In export 20 two lines were masked: a diff line that showed the old made-up test key (which was in the shape of a real key) and the address pattern that an older version of this README quoted as an example. All the other exports were clean when scanned. No key-shaped
-string was found in any export: the key sits in the dotenv file only, and the guard hook stops a session from reading that file.
+key rule took for a value (`ANTH…[17 chars]` in the same exports). In export 20 two lines were masked: a diff line that showed the old made-up test key (which was in the shape of a real key) and the address pattern that an older version of this README quoted as an example. Export 21 quotes the same diff line and the same pattern again, so the same four lines (one key-shaped, three address-shaped) were masked the same way. All the other exports were clean when scanned. No real key
+was found in any export (the only key-shaped string is that old made-up test key, masked): the real key sits in the dotenv file only, and the guard hook stops a session from reading that file.
 Exports 15 to 19 were written after the real key was in use, and the tracked files were also checked by count (`sk-ant-` followed
 by 20 characters: 0 matches).
 

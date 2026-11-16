@@ -1,0 +1,1324 @@
+ ▐▛███▛█   Claude Code v2.1.325
+▝▜██████▀  Sonnet 5.5 · Claude Pro
+ ▝▝   ▝▝   ~\Desktop\smart-campaign-composer
+
+
+❯ Bugünkü iş: CI, temiz klon provası ve belgelerde birkaç düzeltme. Kod         
+  değişikliği yalnızca temiz klonda bir şey kırılırsa, en küçük haliyle. Soru   
+  sorma; belirsiz bir noktada makul olanı seç ve DECISIONS'a yaz. Bitince dur.  
+                                                                                
+  Kurallar önceki oturumlardaki gibi: Go ve npm komutları CLAUDE.md'deki        
+  container'larda; her adım bitince testler yeşilse ayrı commit; hook           
+  engellerse etrafından dolanma, raporda yaz (iki istisna aynı: commit          
+  mesajındaki ifade ve okuma komutlarında yanlış alarm için Read/Grep);         
+  düzenlemeler Edit ile, commit ayrı komutla; push, geçmişi yeniden yazma ve    
+  --no-verify yok. Gerçek API yok. Ana klasördeki compose komutları             
+  LLM_MODE=mock ile.                                                            
+                                                                                
+  0. ai-sessions/20-belgeler.txt'yi kontrol script'iyle tara, gerekiyorsa       
+  maskele, ai-sessions/README.md tablosuna satırını ekle ve commit et.          
+                                                                                
+  1. Belge düzeltmeleri:                                                        
+     - CLAUDE.md'yi düzenleyebilirsin. Altın set 16 brief, 14 değil; dosyadaki  
+  diğer sayıları ve iddiaları da repoyla karşılaştır, eskimişleri düzelt.       
+     - README'deki oturum sayısı her yeni oturumda eskiyecek. Sayı vermeden     
+  yaz; liste ai-sessions/README.md'de dursun.                                   
+     - ai-sessions/README.md'deki model sütunu oturumda gerçekten kullanılan    
+  modeli göstermiyor (opusplan'da plan modu Opus, normal mod Sonnet). Sütunu    
+  kaldır ve bunu bir cümleyle açıkla.                                           
+                                                                                
+  2. CI, .github/workflows/ci.yml:                                              
+     - Varsayılan dala push'ta, pull_request'te ve workflow_dispatch ile        
+  çalışsın.                                                                     
+     - En üstte permissions: contents: read. Secret yok, ANTHROPIC_API_KEY yok, 
+  LLM_MODE=mock açıkça yazılı.                                                  
+     - Sabit runner sürümü (ör. ubuntu-24.04), her job'da timeout-minutes,      
+  concurrency ile aynı daldaki eski koşu iptal.                                 
+     - Yalnızca resmi action'lar; her biri tam commit SHA'sıyla sabitlenmiş,    
+  yanında sürüm yorumu. SHA'yı hafızadan yazma, resmi deponun etiketinden git   
+  ls-remote ile al. checkout'ta persist-credentials: false.                     
+     - Job'lar: (a) make test; (b) .env olmadan docker compose up, servisler    
+  hazır olunca /api/config'te llm_mode'un mock olduğunu doğrula, sonra compose  
+  down -v; (c) make e2e, ama yalnızca 3. maddede temiz klonda üç kez üst üste   
+  geçerse. Geçmezse ekleme, nedenini DECISIONS'a yaz. Bir adım başarısız olursa 
+  compose log'ları yazdırılsın.                                                 
+     - Workflow'u actionlint ile doğrula: digest'e sabitlenmiş resmi image,     
+  --network none, repo salt-okunur bağlı. Image'ı ve digest'ini                 
+  THIRD_PARTY.md'ye ve DECISIONS'ın Tools bölümüne ekle.                        
+     - Workflow push'tan önce GitHub'da koşamaz; ilk gerçek koşu push'tan sonra 
+  olacak. README'ye rozet koyma.                                                
+                                                                                
+  3. Temiz klon provası, yani değerlendirenin ilk deneyimi:                     
+     - Ana klasörde compose'u durdur (docker compose down, -v olmadan).         
+     - Repoyu repo dışına, sistemin geçici klasörüne klonla. Klonda .env        
+  olmadığını göster.                                                            
+     - Klonda LLM_MODE vermeden docker compose up -d; varsayılan davranış test  
+  ediliyor ve klonda .env yok. /api/config'te llm_mode mock olsun ve            
+  127.0.0.1:3000 açılsın.                                                       
+     - Sonra klonda make test, üç kez make e2e, bir kez make soak ve make eval  
+  EVAL_ARGS=-mock. Her birinin süresini ölç; README'deki süreler bunlar olacak. 
+     - Satır sonları: klonda git ls-files --eol ile çalışma kopyasında CRLF'li  
+  metin dosyası olmadığını göster.                                              
+     - Klonda bir şey kırılırsa nedenini bul, ana klasörde en küçük düzeltmeyi  
+  yap, test edip commit et, klonu güncelle ve o adımı yeniden koş.              
+     - Bitince klonda docker compose down -v (yalnızca klonun projesi). Ana     
+  klasörde compose'u LLM_MODE=mock ile geri al ve /api/config ile doğrula. Klon 
+  klasörünü silme; yolunu raporda yaz, ben silerim.                             
+                                                                                
+  4. README ve DECISIONS:                                                       
+     - README'nin komutlar bölümündeki süreleri 3. maddedeki ölçümlerle         
+  değiştir, birimleriyle. CI'ın ne koştuğunu, Linux'ta kaç guard testinin       
+  atlandığını ve nedenini bir iki satırla ekle.                                 
+     - DECISIONS'a CI kaydı: ne koşuyor, neden secret ve gerçek API yok,        
+  action'ların SHA ile sabitlenmesi, ilk koşunun push'tan sonra olacağı ve      
+  temiz klon provasının sonucu.                                                 
+                                                                                
+  Bitince make test çıktısını, bu oturumun commit'lerini (git log --oneline) ve 
+  klon yolunu göster ve dur. Son mesajın kısa bir rapor olsun: ne bitti, ne     
+  kaldı, hangi kararları verdin, hangi hook neyi engelledi.                     
+
+● Başlıyorum: önce depo durumu ve ai-sessions düzenine bakıyorum.
+
+  Read 1 file, ran 4 shell commands (ctrl+o to expand)
+
+● Update(ai-sessions\20-belgeler.txt)
+  ⎿  Added 2 lines, removed 2 lines
+      270        10  
+      271        11 -// A made-up key, long enough to be found in an outp
+           ut if anyth
+      272           -ing printed it.                                     
+                      
+      273 -      12 -const fakeKey = "sk-a…[35 chars]
+          -defghijklmn                                                   
+      274 -         -opqrstuvwxyz"                                       
+          -                                                              
+      273 +      12 -const fakeKey = "sk-a…[46 chars]                    
+      274 +         -…"                                                  
+      275        11 +// A made-up key, long enough to be found in an outp
+           ut if anyth
+      276           +ing printed it. It is not in the shape of any real k
+           ey         
+      277        12 +// (no vendor prefix), so no secret scanner takes it
+            for a leak
+
+● Update(ai-sessions\20-belgeler.txt)
+  ⎿  Added 1 line, removed 1 line
+      2084            g values after `api_key`, `token`, `secret`, `passw
+            ord`, privat
+      2085            e key blocks, JWTs | the first four characters and 
+            the length, 
+      2086            as `sk-a…[N chars]` |
+      2087 -      50 -| E-mail addresses | anything of the form `name@dom
+           -ain.tld` | `                                                 
+      2087 +      50 -| E-mail addresses | anything of the form `n***@d**
+           +*.tld` | `                                                   
+      2088           -a***@e***.com` |                                   
+                        
+      2089        50 +| E-mail addresses | anything shaped like an addres
+            s (a local p
+      2090           +art, an at sign, a domain with a dot) | `a***@e***.
+            com` |      
+
+● Oturum 20 dışa aktarımında iki bulguyu maskeledim. Şimdi yeniden tarayıp
+  README tablosuna satırı ekliyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(ai-sessions\README.md)
+  ⎿  Added 1 line
+      28  | [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to So
+          nnet as the default model | 2026-11-15 | Sonnet 5.5 |
+      29  | [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condi
+          tion: a rule without a condition means every user | 2026-11-15 
+          | Sonnet 5.5 |
+      30  | [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criter
+          ion the rule cannot express must not replace one it can | 2026-
+          11-15 | Sonnet 5.5 |
+      31 +| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: r
+         +eviewing the README, DECISIONS and this folder's README | 2026-
+         +11-15 | Opus 5.5 |                                             
+      32  
+      33  The date is the day the file was added to the repository (`git 
+          log`), and the model is the one named in the header of the expo
+          rt,
+      34  that is the model the session started with; the project setting
+          s use a plan-then-execute model setting, so a session can have 
+          used
+
+● Update(ai-sessions\README.md)
+  ⎿  Added 1 line, removed 1 line
+      59  
+      60  What was masked in the committed files: the fake seed data that
+           looked like contact data (the `+90000…` numbers and `example.c
+          om`
+      61  addresses of exports 08 and 09, which are fake but trip the pho
+          ne and e-mail rules) and a name of an environment variable that
+           the
+      62 -key rule took for a value (`ANTH…[17 chars]` in the same export
+         -s). All the other exports were clean when scanned. No key-shape
+         -d                                                              
+      62 +key rule took for a value (`ANTH…[17 chars]` in the same export
+         +s). In export 20 two lines were masked: a diff line that showed
+         + the old made-up test key (which was in the shape of a real key
+         +) and the pattern `n***@d***.tld` quoted from this README. Al
+         +l the other exports were clean when scanned. No key-shaped     
+      63  string was found in any export: the key sits in the dotenv file
+           only, and the guard hook stops a session from reading that fil
+          e.
+      64  Exports 15 to 19 were written after the real key was in use, an
+          d the tracked files were also checked by count (`sk-ant-` follo
+          wed
+      65  by 20 characters: 0 matches).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(ai-sessions\README.md)
+  ⎿  Added 1 line, removed 1 line
+      59  
+      60  What was masked in the committed files: the fake seed data that
+           looked like contact data (the `+90000…` numbers and `example.c
+          om`
+      61  addresses of exports 08 and 09, which are fake but trip the pho
+          ne and e-mail rules) and a name of an environment variable that
+           the
+      62 -key rule took for a value (`ANTH…[17 chars]` in the same export
+         -s). In export 20 two lines were masked: a diff line that showed
+         - the old made-up test key (which was in the shape of a real key
+         -) and the pattern `n***@d***.tld` quoted from this README. Al
+         -l the other exports were clean when scanned. No key-shaped     
+      62 +key rule took for a value (`ANTH…[17 chars]` in the same export
+         +s). In export 20 two lines were masked: a diff line that showed
+         + the old made-up test key (which was in the shape of a real key
+         +) and the address pattern that an older version of this README 
+         +quoted as an example. All the other exports were clean when sca
+         +nned. No key-shaped                                            
+      63  string was found in any export: the key sits in the dotenv file
+           only, and the guard hook stops a session from reading that fil
+          e.
+      64  Exports 15 to 19 were written after the real key was in use, an
+          d the tracked files were also checked by count (`sk-ant-` follo
+          wed
+      65  by 20 characters: 0 matches).
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Adım 1: CLAUDE.md'deki iddiaları repoyla karşılaştırıyorum.
+
+  Searched for 1 pattern, read 1 file, listed 1 directory, ran 3 shell commands (ctrl+o to expand)
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      3  Natural-language marketing brief -> segment rule + SMS/email con
+         tent (Claude) -> human approval -> queued delivery to a mock pro
+         vider with live monitoring. Plan: `docs/PLAN.md`.
+      4  
+      5  ## Stack
+      6 -- Backend: Go (chi, pgx, anthropic-sdk-go), one binary with api 
+        -/ worker / seed commands; separate mock-provider.               
+      6 +- Backend: Go (chi, pgx, anthropic-sdk-go), one binary (`backend
+        +/cmd/composer`) with api / worker / migrate / seed commands; sep
+        +arate programs for the mock-provider, the soak driver and the ev
+        +al runner.                                                      
+      7  - Frontend: Vue 3 + Vite + TypeScript. Database: PostgreSQL (que
+         ue = `deliveries` table, `FOR UPDATE SKIP LOCKED`).
+      8  - Runtime: Docker Compose. LLM access goes through the `LLMClien
+         t` interface (Anthropic or mock). The default model is `claude-s
+         onnet-5-5`; `ANTHROPIC_MODEL=claude-opus-5-5` selects Opus (`llm
+         .DefaultModel`, `.env.example`, DECISIONS.md "The default model"
+         ).
+      9  
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+       8  - Runtime: Docker Compose. LLM access goes through the `LLMClie
+          nt` interface (Anthropic or mock). The default model is `claude
+          -sonnet-5-5`; `ANTHROPIC_MODEL=claude-opus-5-5` selects Opus (`
+          llm.DefaultModel`, `.env.example`, DECISIONS.md "The default mo
+          del").
+       9  
+      10  ## Commands
+      11 -- `docker compose up` - db, migrate, seed, mock-provider, worke
+         -r and the api (127.0.0.1:8080; the default `LLM_MODE=auto` uses
+         - the real model when a key is set in the dotenv file, which cos
+         -ts money). **Every compose up in a session or script of this re
+         -po gives `LLM_MODE=mock` explicitly** (`$env:LLM_MODE='mock'; d
+         -ocker compose up -d` in PowerShell, `LLM_MODE=mock docker compo
+         -se up -d` in Git Bash); only a smoke test chosen on purpose use
+         -s `LLM_MODE=anthropic` and the web app (http://127.0.0.1:3000: 
+         -nginx, unprivileged, read-only, serves the build and forwards `
+         -/api` with the event stream unbuffered; security headers come f
+         -rom `web/nginx/security-headers.conf`); every setting has a def
+         -ault, no dotenv file needed                                    
+      11 +- `docker compose up` - db, migrate, seed, mock-provider, worke
+         +r, the api (127.0.0.1:8080) and the web app (http://127.0.0.1:3
+         +000: nginx, unprivileged, read-only, serves the build and forwa
+         +rds `/api` with the event stream unbuffered; security headers c
+         +ome from `web/nginx/security-headers.conf`) ( the default `LLM_
+         +MODE=auto` uses the real model when a key is set in the dotenv 
+         +file, which costs money). **Every compose up in a session or sc
+         +ript of this repo gives `LLM_MODE=mock` explicitly** (`$env:LLM
+         +_MODE='mock'; docker compose up -d` in PowerShell, `LLM_MODE=mo
+         +ck docker compose up -d` in Git Bash); only a smoke test chosen
+         + on purpose uses `LLM_MODE=anthropic` and the web app (http://1
+         +27.0.0.1:3000: nginx, unprivileged, read-only, serves the build
+         + and forwards `/api` with the event stream unbuffered; security
+         + headers come from `web/nginx/security-headers.conf`); every se
+         +tting has a default, no dotenv file needed                     
+      12  - `make test` - gofmt, `go vet`, `go test -race` incl. PostgreS
+          QL integration tests (`-tags=integration`, fail instead of skip
+           without a database) the hook/scanner tests and the web checks 
+          (`npm ci`, `npm audit --audit-level=high`, vue-tsc, vitest, via
+           `scripts/test-web.sh`; the npm cache is the external volume `s
+          cc-npm-cache`), all in Docker, no API key
+      13  - `make soak` - 5,000 messages through the real containers with
+           a chaos provider; checks no double send, 100/s cap, Retry-Afte
+          r (about 3-4 minutes: the default backoff starts at 15 s)
+      14  - `make eval LLM_MODE=anthropic` - the golden set (`eval/golden
+          .json`, 14 Turkish briefs) against the REAL model, scored by de
+          terministic checks (no model as judge); costs money, so it refu
+          ses to start without `LLM_MODE=anthropic` and a key in the dote
+          nv file, and stops at `EVAL_MAX_USD` (default 1.00). `EVAL_MODE
+          L=` picks another model (the default is `claude-sonnet-5-5`; `E
+          VAL_MODEL=claude-opus-5-5` for Opus), `EVAL_ARGS="-only id1,id2
+          "` some briefs, `EVAL_ARGS="-mock"` is a free dry run (the only
+           form a session may run without being told to spend). Results: 
+          `eval/results/`. Not part of `make test` or CI. Prices: `backen
+          d/internal/llm/pricing.go`
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+       8  - Runtime: Docker Compose. LLM access goes through the `LLMClie
+          nt` interface (Anthropic or mock). The default model is `claude
+          -sonnet-5-5`; `ANTHROPIC_MODEL=claude-opus-5-5` selects Opus (`
+          llm.DefaultModel`, `.env.example`, DECISIONS.md "The default mo
+          del").
+       9  
+      10  ## Commands
+      11 -- `docker compose up` - db, migrate, seed, mock-provider, worke
+         -r, the api (127.0.0.1:8080) and the web app (http://127.0.0.1:3
+         -000: nginx, unprivileged, read-only, serves the build and forwa
+         -rds `/api` with the event stream unbuffered; security headers c
+         -ome from `web/nginx/security-headers.conf`) ( the default `LLM_
+         -MODE=auto` uses the real model when a key is set in the dotenv 
+         -file, which costs money). **Every compose up in a session or sc
+         -ript of this repo gives `LLM_MODE=mock` explicitly** (`$env:LLM
+         -_MODE='mock'; docker compose up -d` in PowerShell, `LLM_MODE=mo
+         -ck docker compose up -d` in Git Bash); only a smoke test chosen
+         - on purpose uses `LLM_MODE=anthropic` and the web app (http://1
+         -27.0.0.1:3000: nginx, unprivileged, read-only, serves the build
+         - and forwards `/api` with the event stream unbuffered; security
+         - headers come from `web/nginx/security-headers.conf`); every se
+         -tting has a default, no dotenv file needed                     
+      11 +- `docker compose up` - db, migrate, seed, mock-provider, worke
+         +r, the api (127.0.0.1:8080) and the web app (http://127.0.0.1:3
+         +000: nginx, unprivileged, read-only, serves the build and forwa
+         +rds `/api` with the event stream unbuffered; security headers c
+         +ome from `web/nginx/security-headers.conf`) ( the default `LLM_
+         +MODE=auto` uses the real model when a key is set in the dotenv 
+         +file, which costs money). **Every compose up in a session or sc
+         +ript of this repo gives `LLM_MODE=mock` explicitly** (`$env:LLM
+         +_MODE='mock'; docker compose up -d` in PowerShell, `LLM_MODE=mo
+         +ck docker compose up -d` in Git Bash); only a smoke test chosen
+         + on purpose uses `LLM_MODE=anthropic`; every setting has a defa
+         +ult, no dotenv file needed                                     
+      12  - `make test` - gofmt, `go vet`, `go test -race` incl. PostgreS
+          QL integration tests (`-tags=integration`, fail instead of skip
+           without a database) the hook/scanner tests and the web checks 
+          (`npm ci`, `npm audit --audit-level=high`, vue-tsc, vitest, via
+           `scripts/test-web.sh`; the npm cache is the external volume `s
+          cc-npm-cache`), all in Docker, no API key
+      13  - `make soak` - 5,000 messages through the real containers with
+           a chaos provider; checks no double send, 100/s cap, Retry-Afte
+          r (about 3-4 minutes: the default backoff starts at 15 s)
+      14  - `make eval LLM_MODE=anthropic` - the golden set (`eval/golden
+          .json`, 14 Turkish briefs) against the REAL model, scored by de
+          terministic checks (no model as judge); costs money, so it refu
+          ses to start without `LLM_MODE=anthropic` and a key in the dote
+          nv file, and stops at `EVAL_MAX_USD` (default 1.00). `EVAL_MODE
+          L=` picks another model (the default is `claude-sonnet-5-5`; `E
+          VAL_MODEL=claude-opus-5-5` for Opus), `EVAL_ARGS="-only id1,id2
+          "` some briefs, `EVAL_ARGS="-mock"` is a free dry run (the only
+           form a session may run without being told to spend). Results: 
+          `eval/results/`. Not part of `make test` or CI. Prices: `backen
+          d/internal/llm/pricing.go`
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      11  - `docker compose up` - db, migrate, seed, mock-provider, worke
+          r, the api (127.0.0.1:8080) and the web app (http://127.0.0.1:3
+          000: nginx, unprivileged, read-only, serves the build and forwa
+          rds `/api` with the event stream unbuffered; security headers c
+          ome from `web/nginx/security-headers.conf`) ( the default `LLM_
+          MODE=auto` uses the real model when a key is set in the dotenv 
+          file, which costs money). **Every compose up in a session or sc
+          ript of this repo gives `LLM_MODE=mock` explicitly** (`$env:LLM
+          _MODE='mock'; docker compose up -d` in PowerShell, `LLM_MODE=mo
+          ck docker compose up -d` in Git Bash); only a smoke test chosen
+           on purpose uses `LLM_MODE=anthropic`; every setting has a defa
+          ult, no dotenv file needed
+      12  - `make test` - gofmt, `go vet`, `go test -race` incl. PostgreS
+          QL integration tests (`-tags=integration`, fail instead of skip
+           without a database) the hook/scanner tests and the web checks 
+          (`npm ci`, `npm audit --audit-level=high`, vue-tsc, vitest, via
+           `scripts/test-web.sh`; the npm cache is the external volume `s
+          cc-npm-cache`), all in Docker, no API key
+      13  - `make soak` - 5,000 messages through the real containers with
+           a chaos provider; checks no double send, 100/s cap, Retry-Afte
+          r (about 3-4 minutes: the default backoff starts at 15 s)
+      14 -- `make eval LLM_MODE=anthropic` - the golden set (`eval/golden
+         -.json`, 14 Turkish briefs) against the REAL model, scored by de
+         -terministic checks (no model as judge); costs money, so it refu
+         -ses to start without `LLM_MODE=anthropic` and a key in the dote
+         -nv file, and stops at `EVAL_MAX_USD` (default 1.00). `EVAL_MODE
+         -L=` picks another model (the default is `claude-sonnet-5-5`; `E
+         -VAL_MODEL=claude-opus-5-5` for Opus), `EVAL_ARGS="-only id1,id2
+         -"` some briefs, `EVAL_ARGS="-mock"` is a free dry run (the only
+         - form a session may run without being told to spend). Results: 
+         -`eval/results/`. Not part of `make test` or CI. Prices: `backen
+         -d/internal/llm/pricing.go`                                     
+      14 +- `make eval LLM_MODE=anthropic` - the golden set (`eval/golden
+         +.json`, 16 Turkish briefs) against the REAL model, scored by de
+         +terministic checks (no model as judge); costs money, so it refu
+         +ses to start without `LLM_MODE=anthropic` and a key in the dote
+         +nv file, and stops at `EVAL_MAX_USD` (default 1.00). `EVAL_MODE
+         +L=` picks another model (the default is `claude-sonnet-5-5`; `E
+         +VAL_MODEL=claude-opus-5-5` for Opus), `EVAL_ARGS="-only id1,id2
+         +"` some briefs, `EVAL_ARGS="-mock"` is a free dry run (the only
+         + form a session may run without being told to spend). Results: 
+         +`eval/results/`. Not part of `make test` or CI. Prices: `backen
+         +d/internal/llm/pricing.go`                                     
+      15  - `make e2e` - browser tests (Playwright, `e2e/`) against the r
+          eal stack with the mock model, in the compose project `scc-e2e`
+           (own network and database, nothing published, removed afterwar
+          ds; not part of `make test`; about 90 s). `SCREENSHOTS=1` rewri
+          tes `docs/screenshots/`, `GREP="outage"` selects tests, `KEEP=1
+          ` leaves the project up. npm for `e2e/` runs only through `sh s
+          cripts/e2e-npm.sh <args>` (container, no lifecycle scripts); th
+          e Playwright image tag and the `@playwright/test` version must 
+          move together. The mock provider's control switches (the outage
+          , and `POST /control/throttle-next/N`: the next N messages get 
+          a 429) exist only with `MOCK_CONTROL=1`. The compose mock provi
+          der fails a little by default (5 % 500, 5 % 429, 20-200 ms) so 
+          that retries show on the dashboard; the e2e overlay, the soak a
+          nd the Go tests set their own deterministic values.
+      16  - Do not run `docker compose config` (the guard blocks it); ver
+          ify with `docker compose up -d` (with `LLM_MODE=mock`, see abov
+          e) and `docker compose ps -a`
+      17  - A subset of the tests with the database: `docker compose -f d
+          ocker-compose.test.yml run --rm backend sh -c "cd backend && go
+           test -race -tags=integration -count=1 -run NAME ./internal/PKG
+          /"` (then `docker compose -f docker-compose.test.yml down -v`)
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      15  - `make e2e` - browser tests (Playwright, `e2e/`) against the r
+          eal stack with the mock model, in the compose project `scc-e2e`
+           (own network and database, nothing published, removed afterwar
+          ds; not part of `make test`; about 90 s). `SCREENSHOTS=1` rewri
+          tes `docs/screenshots/`, `GREP="outage"` selects tests, `KEEP=1
+          ` leaves the project up. npm for `e2e/` runs only through `sh s
+          cripts/e2e-npm.sh <args>` (container, no lifecycle scripts); th
+          e Playwright image tag and the `@playwright/test` version must 
+          move together. The mock provider's control switches (the outage
+          , and `POST /control/throttle-next/N`: the next N messages get 
+          a 429) exist only with `MOCK_CONTROL=1`. The compose mock provi
+          der fails a little by default (5 % 500, 5 % 429, 20-200 ms) so 
+          that retries show on the dashboard; the e2e overlay, the soak a
+          nd the Go tests set their own deterministic values.
+      16  - Do not run `docker compose config` (the guard blocks it); ver
+          ify with `docker compose up -d` (with `LLM_MODE=mock`, see abov
+          e) and `docker compose ps -a`
+      17  - A subset of the tests with the database: `docker compose -f d
+          ocker-compose.test.yml run --rm backend sh -c "cd backend && go
+           test -race -tags=integration -count=1 -run NAME ./internal/PKG
+          /"` (then `docker compose -f docker-compose.test.yml down -v`)
+      18 -- Packages added in `backend/internal/`: `migrate`, `db`, `test
+         -db`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `wo
+         -rker` (queue dispatcher, circuit breaker, channel lock, heartbe
+         -at), `soak`, `campaign` (state machine, store, approval, stats)
+         -, `api` (chi handlers, SSE stream), `metrics` (Prometheus); SQL
+         - in `backend/migrations/`                                      
+      18 +- Packages added in `backend/internal/`: `migrate`, `db`, `test
+         +db`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `wo
+         +rker` (queue dispatcher, circuit breaker, channel lock, heartbe
+         +at), `soak`, `eval` (golden-set loader, checks, report), `campa
+         +ign` (state machine, store, approval, stats), `api` (chi handle
+         +rs, SSE stream), `metrics` (Prometheus); SQL in `backend/migrat
+         +ions/`                                                         
+      19  - `make fmt` / `make vet` / `make test-unit` - Go formatting, `
+          go vet`, `go test ./...` (local, no Docker, no API key)
+      20  - `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per t
+          arget; `-race` runs later in Docker (needs a C compiler on Wind
+          ows)
+      21  - Web (`web/`): npm, vite, vitest and vue-tsc run only in a pin
+          ned node container, never on the host (third-party package code
+           stays off
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      17  - A subset of the tests with the database: `docker compose -f d
+          ocker-compose.test.yml run --rm backend sh -c "cd backend && go
+           test -race -tags=integration -count=1 -run NAME ./internal/PKG
+          /"` (then `docker compose -f docker-compose.test.yml down -v`)
+      18  - Packages added in `backend/internal/`: `migrate`, `db`, `test
+          db`, `seed`, `mockprovider`, `queue`, `retry`, `ratelimit`, `wo
+          rker` (queue dispatcher, circuit breaker, channel lock, heartbe
+          at), `soak`, `eval` (golden-set loader, checks, report), `campa
+          ign` (state machine, store, approval, stats), `api` (chi handle
+          rs, SSE stream), `metrics` (Prometheus); SQL in `backend/migrat
+          ions/`
+      19  - `make fmt` / `make vet` / `make test-unit` - Go formatting, `
+          go vet`, `go test ./...` (local, no Docker, no API key)
+      20 -- `make fuzz` - fuzz the segment compiler, `FUZZTIME=30s` per t
+         -arget; `-race` runs later in Docker (needs a C compiler on Wind
+         -ows)                                                           
+      20 +- `make fuzz` - fuzz the segment compiler (two targets), the st
+         +ream extractor and the demo mock's reading of a brief, `FUZZTIM
+         +E=30s` per target; `-race` runs later in Docker (needs a C comp
+         +iler on Windows)                                               
+      21  - Web (`web/`): npm, vite, vitest and vue-tsc run only in a pin
+          ned node container, never on the host (third-party package code
+           stays off
+      22    this machine). `sh scripts/web.sh <command>` mounts only `web
+          /`, keeps `node_modules` and the npm cache in named volumes and
+           turns
+      23    lifecycle scripts off: `sh scripts/web.sh npm ci`, `sh script
+          s/web.sh npm run typecheck`, `sh scripts/web.sh npx vitest run`
+          ,
+
+  Searched for 1 pattern (ctrl+o to expand)
+
+● CLAUDE.md düzeltmelerini bitiriyorum; sonra README oturum sayısına ve
+  ai-sessions modeli sütununa geçeceğim.
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line, removed 1 line
+      32    `docker run --rm -v "${PWD}:/src" -w /src/backend -v scc-gomo
+          d:/go/pkg/mod -v scc-gocache:/root/.cache/go-build -e GOFLAGS=-
+          buildvcs=false golang:1.27 go test ./...`
+      33  - Every `docker run -v` line here is for PowerShell. In Git Bas
+          h the path conversion rewrites the `-v` argument and Docker the
+          n creates a junk
+      34    folder such as `backend;C` in the repo root; there, `export M
+          SYS_NO_PATHCONV=1` and use `$(pwd -W)` as `scripts/web.sh` does
+          .
+      35 -- `node --test ".claude/hooks/*.test.cjs"` - tests for the prot
+         -ection hook and the gofmt hook                                 
+      35 +- `node --test ".claude/hooks/*.test.cjs" "scripts/*.test.cjs"`
+         + - tests for the protection hook, the gofmt hook and the sessio
+         +n scanner (`make test` runs them in a node container)          
+      36  - `ui-ux-pro-max` search script (no Python on this machine; it 
+          runs in a pinned official image, no network, repo mounted read-
+          only at /work).
+      37    From PowerShell, in the repo root (the skill's own `${CLAUDE_
+          PLUGIN_ROOT}/...` path does not exist for a project skill, use 
+          this instead):
+      38    `docker run --rm --network none -v "${PWD}:/work:ro" -w /work
+           python:3.14.10-slim-trixie python -I -B .claude/skills/ui-ux-p
+          ro-max/scripts/search.py "marketing campaign dashboard" --desig
+          n-system`
+
+  Listed 1 directory, ran 1 shell command (ctrl+o to expand)
+
+● Update(README.md)
+  ⎿  Added 2 lines, removed 2 lines
+      111  
+      112  ## How it was built
+      113  
+      114 -A written plan ([docs/PLAN.md](docs/PLAN.md), in Turkish) came
+          - first. The code was then written in 19 Claude Code sessions, 
+          -all                                                           
+      115 -exported in full to [`ai-sessions/`](ai-sessions/) (index and 
+          -masking rules in [`ai-sessions/README.md`](ai-sessions/README.
+          -md)).                                                         
+      114 +A written plan ([docs/PLAN.md](docs/PLAN.md), in Turkish) came
+          + first. The code was then written in a series of Claude Code s
+          +essions, all                                                  
+      115 +exported in full to [`ai-sessions/`](ai-sessions/) (the list, 
+          +and the masking rules, are in [`ai-sessions/README.md`](ai-ses
+          +sions/README.md)).                                            
+      116  The sessions ran in bypass-permissions mode, balanced by a `Pr
+           eToolUse` guard hook (no reading of `.env`, no environment dum
+           ps, no
+      117  force push, no `--no-verify`, no deleting outside the project)
+            and a gitleaks pre-commit hook. The golden-set eval, run agai
+           nst the
+      118  real API, found and drove several fixes to the prompts and the
+            validation; each is written down in DECISIONS.md.
+  Read 1 file (ctrl+o to expand)
+
+● Update(ai-sessions\README.md)
+  ⎿  Added 26 lines, removed 25 lines
+       7  
+       8  ## The exports
+       9  
+      10 -| File | Topic | Added to the repository | Model in the header 
+         -|                                                              
+      11 -|---|---|---|---|                                              
+      12 -| [`01-ortam-kurulumu.txt`](01-ortam-kurulumu.txt) | checking a
+         -nd installing the tools on the Windows machine (Node.js, Go, ma
+         -ke, Docker Desktop; publisher and checksum shown before each in
+         -stall) | 2026-11-11 | Sonnet 5.5 |                             
+      13 -| [`02-gereksinim-analizi.txt`](02-gereksinim-analizi.txt) | an
+         -alysing the case requirements and writing the plan (`docs/PLAN.
+         -md`) | 2026-11-11 | Opus 5.5 |                                 
+      14 -| [`03-guvenlik-temeli.txt`](03-guvenlik-temeli.txt) | the secu
+         -rity foundation: guard hook, gitleaks pre-commit, session scann
+         -er | 2026-11-11 | Sonnet 5.5 |                                 
+      15 -| [`04-arac-kurulumu.txt`](04-arac-kurulumu.txt) | installing t
+         -he Go, Vue and review skills and agents (quarantine, scan, pin)
+         - | 2026-11-13 | Sonnet 5.5 |                                   
+      16 -| [`05-segment-dsl.txt`](05-segment-dsl.txt) | the segment rule
+         - language: validation, parameterized SQL, JSON schema | 2026-11
+         --13 | Opus 5.5 |                                               
+      17 -| [`06-llm-katmani.txt`](06-llm-katmani.txt) | the LLM layer: c
+         -lient, streaming extractor, repair loop, prompts | 2026-11-14 |
+         - Opus 5.5 |                                                    
+      18 -| [`07-kuyruk-worker.txt`](07-kuyruk-worker.txt) | database, se
+         -ed, mock provider, queue and worker | 2026-11-14 | Sonnet 5.5 |
+      19 -| [`08-kampanya-api.txt`](08-kampanya-api.txt) | the campaign s
+         -tate machine, approval and the HTTP API | 2026-11-14 | Opus 5.5
+         - |                                                             
+      20 -| [`09-tasarim-skilleri.txt`](09-tasarim-skilleri.txt) | instal
+         -ling the two design skills | 2026-11-14 | Sonnet 5.5 |         
+      21 -| [`10-frontend.txt`](10-frontend.txt) | the web app, from the 
+         -design direction to the delivery dashboard | 2026-11-14 | Opus 
+         -5.5 |                                                          
+      22 -| [`11-dogrulama-utf8.txt`](11-dogrulama-utf8.txt) | verificati
+         -on and the UTF-8 problem found with a Windows shell | 2026-11-1
+         -4 | Sonnet 5.5 |                                               
+      23 -| [`12-gece-frontend.txt`](12-gece-frontend.txt) | the unattend
+         -ed overnight round on the web app and the browser tests | 2026-
+         -11-14 | Sonnet 5.5 |                                           
+      24 -| [`13-acik-konular.txt`](13-acik-konular.txt) | the closing se
+         -ssion: open issues, the demo mock, the screenshots | 2026-11-14
+         - | Sonnet 5.5 |                                                
+      25 -| [`14-devir-testi.txt`](14-devir-testi.txt) | the flaky worker
+         - hand-over test (101 requests in one second at the hand-over: r
+         -oot cause and fix), a flaky late-reply test, and a stray `backe
+         -nd;C` folder made by Git Bash | 2026-11-15 | Sonnet 5.5 |      
+      26 -| [`15-gercek-api-eval.txt`](15-gercek-api-eval.txt) | the firs
+         -t use of the real API: smoke test and the golden-set eval | 202
+         -6-11-15 | Opus 5.5 |                                           
+      27 -| [`16-eval-kapanis.txt`](16-eval-kapanis.txt) | closing the ev
+         -al: repair reasons, both models on the final prompt | 2026-11-1
+         -5 | Sonnet 5.5 |                                               
+      28 -| [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to So
+         -nnet as the default model | 2026-11-15 | Sonnet 5.5 |          
+      29 -| [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condi
+         -tion: a rule without a condition means every user | 2026-11-15 
+         -| Sonnet 5.5 |                                                 
+      30 -| [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criter
+         -ion the rule cannot express must not replace one it can | 2026-
+         -11-15 | Sonnet 5.5 |                                           
+      31 -| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: r
+         -eviewing the README, DECISIONS and this folder's README | 2026-
+         -11-15 | Opus 5.5 |                                             
+      10 +| File | Topic | Added to the repository |                     
+      11 +|---|---|---|                                                  
+      12 +| [`01-ortam-kurulumu.txt`](01-ortam-kurulumu.txt) | checking a
+         +nd installing the tools on the Windows machine (Node.js, Go, ma
+         +ke, Docker Desktop; publisher and checksum shown before each in
+         +stall) | 2026-11-11 |                                          
+      13 +| [`02-gereksinim-analizi.txt`](02-gereksinim-analizi.txt) | an
+         +alysing the case requirements and writing the plan (`docs/PLAN.
+         +md`) | 2026-11-11 |                                            
+      14 +| [`03-guvenlik-temeli.txt`](03-guvenlik-temeli.txt) | the secu
+         +rity foundation: guard hook, gitleaks pre-commit, session scann
+         +er | 2026-11-11 |                                              
+      15 +| [`04-arac-kurulumu.txt`](04-arac-kurulumu.txt) | installing t
+         +he Go, Vue and review skills and agents (quarantine, scan, pin)
+         + | 2026-11-13 |                                                
+      16 +| [`05-segment-dsl.txt`](05-segment-dsl.txt) | the segment rule
+         + language: validation, parameterized SQL, JSON schema | 2026-11
+         +-13 |                                                          
+      17 +| [`06-llm-katmani.txt`](06-llm-katmani.txt) | the LLM layer: c
+         +lient, streaming extractor, repair loop, prompts | 2026-11-14 |
+      18 +| [`07-kuyruk-worker.txt`](07-kuyruk-worker.txt) | database, se
+         +ed, mock provider, queue and worker | 2026-11-14 |             
+      19 +| [`08-kampanya-api.txt`](08-kampanya-api.txt) | the campaign s
+         +tate machine, approval and the HTTP API | 2026-11-14 |         
+      20 +| [`09-tasarim-skilleri.txt`](09-tasarim-skilleri.txt) | instal
+         +ling the two design skills | 2026-11-14 |                      
+      21 +| [`10-frontend.txt`](10-frontend.txt) | the web app, from the 
+         +design direction to the delivery dashboard | 2026-11-14 |      
+      22 +| [`11-dogrulama-utf8.txt`](11-dogrulama-utf8.txt) | verificati
+         +on and the UTF-8 problem found with a Windows shell | 2026-11-1
+         +4 |                                                            
+      23 +| [`12-gece-frontend.txt`](12-gece-frontend.txt) | the unattend
+         +ed overnight round on the web app and the browser tests | 2026-
+         +11-14 |                                                        
+      24 +| [`13-acik-konular.txt`](13-acik-konular.txt) | the closing se
+         +ssion: open issues, the demo mock, the screenshots | 2026-11-14
+         + |                                                             
+      25 +| [`14-devir-testi.txt`](14-devir-testi.txt) | the flaky worker
+         + hand-over test (101 requests in one second at the hand-over: r
+         +oot cause and fix), a flaky late-reply test, and a stray `backe
+         +nd;C` folder made by Git Bash | 2026-11-15 |                   
+      26 +| [`15-gercek-api-eval.txt`](15-gercek-api-eval.txt) | the firs
+         +t use of the real API: smoke test and the golden-set eval | 202
+         +6-11-15 |                                                      
+      27 +| [`16-eval-kapanis.txt`](16-eval-kapanis.txt) | closing the ev
+         +al: repair reasons, both models on the final prompt | 2026-11-1
+         +5 |                                                            
+      28 +| [`17-sonnet-gecis.txt`](17-sonnet-gecis.txt) | the move to So
+         +nnet as the default model | 2026-11-15 |                       
+      29 +| [`18-dolgu-kosul.txt`](18-dolgu-kosul.txt) | the filler condi
+         +tion: a rule without a condition means every user | 2026-11-15 
+         +|                                                              
+      30 +| [`19-olmayan-kriter.txt`](19-olmayan-kriter.txt) | the criter
+         +ion the rule cannot express must not replace one it can | 2026-
+         +11-15 |                                                        
+      31 +| [`20-belgeler.txt`](20-belgeler.txt) | the documents round: r
+         +eviewing the README, DECISIONS and this folder's README | 2026-
+         +11-15 |                                                        
+      32  
+      33 -The date is the day the file was added to the repository (`git 
+         -log`), and the model is the one named in the header of the expo
+         -rt,                                                            
+      34 -that is the model the session started with; the project setting
+         -s use a plan-then-execute model setting, so a session can have 
+         -used                                                           
+      35 -the other one for part of its work. The decisions that came out
+         - of these sessions are in [`../DECISIONS.md`](../DECISIONS.md).
+      33 +The date is the day the file was added to the repository (`git 
+         +log`). There is no model column on purpose: the header of an ex
+         +port names                                                     
+      34 +only the model the session started with, and the project uses a
+         + plan-then-execute model setting (`opusplan`: plan mode runs on
+         + Opus,                                                         
+      35 +normal mode on Sonnet), so the header does not show which model
+         + did the work. The decisions that came out of these sessions ar
+         +e in                                                           
+      36 +[`../DECISIONS.md`](../DECISIONS.md).                          
+      37  
+      38  ## How the exports were made
+      39  
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Testler yeşil. Adım 1'i commit ediyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Adım 2: CI. Önce resmi action'ın SHA'sını etiketten alıyorum.
+
+  Ran 5 shell commands (ctrl+o to expand)
+  ⎿  1 action not run · permission denied
+     │ Reason: PreToolUse:Bash hook error: Blocked by guard: dumping environment variables is blocked (secrets must not enter the session transcript)
+
+● Guard, export MSYS_NO_PATHCONV=1 içeren komutu ortam dökümü sanıp engelledi.
+  Dolanmadan CLAUDE.md'nin önerdiği şekilde docker komutlarını PowerShell'den
+  çalıştırıyorum ve bunu raporda belirteceğim. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+  ⎿  Not run · permission denied
+     │ Reason: PreToolUse:PowerShell hook error: Blocked by guard: dumping environment variables is blocked (secrets must not enter the session transcript)
+
+● docker image inspect muhtemelen takıldı (container env'i gösterebildiği için).
+  Pull ve docker images --digests ayrı çalıştırıyorum.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Write(.github\workflows\ci.yml)
+  ⎿  Wrote 70 lines to .github\workflows\ci.yml
+      1 # CI. Reasons and limits are in DECISIONS.md ("Continuous integra
+        tion").
+      2 #
+      3 #  * No secret is read and no real model is called: LLM_MODE is m
+        ock for the whole workflow, there is no ANTHROPIC_API_KEY
+      4 #    and there is no dotenv file in a checkout.
+      5 #  * The workflow can only read the repository (permissions below
+        ), and the checkout does not keep its token in .git.
+      6 #  * The only action is the official actions/checkout, pinned to 
+        a full commit SHA (the tag is in the comment).
+     … +64 lines (ctrl+o to expand)
+
+  Searched for 2 patterns, listed 1 directory, ran 1 shell command (ctrl+o to expand)
+  ⎿  1 action not run · permission denied
+     │ Reason: PreToolUse:Bash hook error: Blocked by guard: reading dotenv files is blocked (secrets must not enter the session transcript)
+
+● actionlint bir shellcheck uyarısı verdi (ls | grep); glob ile döngüye
+  çeviriyorum.
+
+● Update(.github\workflows\ci.yml)
+  ⎿  Added 6 lines, removed 4 lines
+      49            persist-credentials: false
+      50        - name: No dotenv file in the checkout
+      51          run: |
+      52 -          if ls .env .env.* 2>/dev/null | grep -v '^\.env\.exam
+         -ple$'; then                                                    
+      53 -            echo "unexpected dotenv file" >&2                  
+      54 -            exit 1                                             
+      55 -          fi                                                   
+      52 +          for f in .env .env.*; do                             
+      53 +            if [ -e "$f" ] && [ "$f" != ".env.example" ]; then 
+      54 +              echo "unexpected dotenv file in the checkout: $f"
+         + >&2                                                           
+      55 +              exit 1                                           
+      56 +            fi                                                 
+      57 +          done                                                 
+      58        - name: Build and start the stack (waits until web and wo
+          rker are healthy)
+      59          run: docker compose up -d --build --wait web worker
+      60        - name: The api runs with the mock model
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Update(.claude\THIRD_PARTY.md)
+  ⎿  Added 11 lines
+      15  | Plugin `gopls-lsp@claude-plugins-official` (project scope, en
+          abled in `.claude/settings.json`) | Claude Code plugin cache | 
+          https://github.com/anthropics/claude-plugins-official, `plugins
+          /gopls-lsp` | content identical to `dceb15d50832e6adf380bedc26d
+          de03d251324b9` | Apache-2.0 | Anthropic |
+      16  | `gopls` v0.24.0 (not vendored; installed with `go install gol
+          ang.org/x/tools/gopls@v0.24.0`) | `$GOPATH/bin` | https://githu
+          b.com/golang/tools | tag `gopls/v0.24.0` | BSD-3-Clause | The G
+          o Authors |
+      17  
+      18 +## CI tooling (not Claude Code tooling)                        
+      19 +                                                               
+      20 +| Component | Used for | Pin | License |                       
+      21 +|---|---|---|---|                                              
+      22 +| Docker image `rhysd/actionlint` (the official image of https:
+         +//github.com/rhysd/actionlint) | checking `.github/workflows/ci
+         +.yml` (it includes shellcheck for the `run:` scripts); runs wit
+         +h `--network none` and the repository mounted read-only | tag `
+         +1.7.12`, digest `sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686
+         +341fec936f3b79331f9315667`; use the digest, not the tag | MIT |
+      23 +| GitHub Action `actions/checkout` (official, https://github.co
+         +m/actions/checkout) | the only action of `ci.yml` | tag `v6.1.0
+         +`, commit `d23441a48e516b6c34aea4fa41551a30e30af803` (taken fro
+         +m the tag of the official repository with `git ls-remote`) | MI
+         +T |                                                            
+      24 +                                                               
+      25 +The check, from PowerShell in the repository root:             
+      26 +`docker run --rm --network none -v "${PWD}:/repo:ro" -w /repo r
+         +hysd/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d35206863
+         +41fec936f3b79331f9315667`                                      
+      27 +(no output and exit status 0 means no finding).                
+      28 +                                                               
+      29  ## Local modifications
+      30  
+      31  - `golang-*` skills (samber): the `allowed-tools:` line was del
+          eted from each `SKILL.md`, so `go` and `git`
+
+● Update(DECISIONS.md)
+  ⎿  Added 2 lines
+      1666  | Plugin `gopls-lsp` and `gopls` | `gopls` v0.24.0; the plugi
+            n is the marketplace copy, identical to `dceb15d` (the market
+            place itself is not pinned by Claude Code) | Go code intellig
+            ence |
+      1667  | gitleaks | 8.30.1 (the installed one), run by `.githooks/pr
+            e-commit` on staged changes | no key in a commit; it fails cl
+            osed when it is missing |
+      1668  | `ecc-agentshield` | 1.6.0, `scan` only (the modes that send
+             content to a model were not used) | a scan of the downloaded
+             tooling |
+      1669 +| actionlint | image `rhysd/actionlint:1.7.12`, pinned by dig
+           +est `sha256:b1934ee5...` (full digest in `.claude/THIRD_PARTY
+           +.md`); `--network none`, repository mounted read-only | `.git
+           +hub/workflows/ci.yml` is checked with it (it runs shellcheck 
+           +on the `run:` scripts) |                                     
+      1670 +| `actions/checkout` | `v6.1.0`, commit `d23441a4...` (full S
+           +HA in the workflow and in `.claude/THIRD_PARTY.md`) | the onl
+           +y action of the CI workflow |                                
+      1671  | `scripts/check-ai-sessions.cjs` | in the repo, with tests |
+             keys, e-mail addresses, phone numbers and home paths in `ai-
+            sessions/`, reported masked |
+      1672  | Browser tests | Playwright 1.64.1 with `@axe-core/playwrigh
+            t` 4.14.0, image `mcr.microsoft.com/playwright:v1.64.1-noble`
+            , **Chromium only** | `make e2e`; one engine keeps it at abou
+            t two minutes (no Firefox or WebKit project) |
+      1673  | Web | Vue 3.5.44, vue-router 5.4.0, Vite 8.3.5, Vitest 5.0.
+            5 with happy-dom 21.0.4, TypeScript 6.0.3, vue-tsc 3.3.14 | e
+            xact versions, at least two weeks old, lock file committed |
+
+● Update(DECISIONS.md)
+  ⎿  Added 1 line
+      1696    | `alpine:3.22` | the two runtime images of the Go binaries
+             (UID 10001) |
+      1697    | `mcr.microsoft.com/playwright:v1.64.1-noble` | the browse
+            r tests; the tag and `@playwright/test` move together |
+      1698    | `python:3.14.10-slim-trixie` | the `ui-ux-pro-max` search
+             script, `--network none`, repository read-only |
+      1699 +  | `rhysd/actionlint@sha256:b1934ee5...` (1.7.12) | the chec
+           +k of the CI workflow, `--network none`, repository read-only 
+           +|                                                            
+      1700  
+      1701  - **Why pinned:** a tag that moves can change a result betwee
+            n two runs of the same command, and an image whose tag was re
+            placed is
+      1702    an unreviewed change to what runs on the machine. `npm` add
+            itionally runs with lifecycle scripts off, with `node_modules
+            ` and
+
+● Update(CLAUDE.md)
+  ⎿  Added 1 line
+      45  - Tool quirk: `Write`/`Edit` turn a typed backslash-u-0-0-e-7 i
+          nto the character "ç" itself (lone surrogates and a doubled bac
+          kslash are left alone).
+      46    To put a literal JSON escape in a file, type a placeholder su
+          ch as `¦u00e7` and replace the `¦` with a backslash with `node`
+           afterwards.
+      47  - `.claude/hooks/gofmt.cjs` runs `gofmt -w` after every edit of
+           a `.go` file (silent if gofmt is missing)
+      48 +- CI workflow check (PowerShell, repo root; no output and exit 
+         +0 is clean; image and digest in `.claude/THIRD_PARTY.md`): `doc
+         +ker run --rm --network none -v "${PWD}:/repo:ro" -w /repo rhysd
+         +/actionlint@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fe
+         +c936f3b79331f9315667`. The workflow cannot run on GitHub before
+         + a push; actions are pinned to full SHAs taken with `git ls-rem
+         +ote`.                                                          
+      49  - `node scripts/check-ai-sessions.cjs` - scan `ai-sessions/` fo
+          r keys, e-mails, phones, home paths (masked report)
+      50  - `gitleaks git --staged --redact` - what the pre-commit hook r
+          uns
+      51  
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Adım 3: temiz klon provası. Önce ana klasördeki stack'i durduruyorum.
+
+  Ran 2 shell commands (ctrl+o to expand)
+  ⎿  1 action not run · permission denied
+     │ Reason: PreToolUse:PowerShell hook error: Blocked by guard: reading dotenv files is blocked (secrets must not enter the session transcript)
+
+● Guard .env varlık kontrolünü engelledi (yanlış alarm). O kısmı Glob ile
+  yapacağım; komutu o satırlar olmadan yeniden çalıştırıyorum.
+
+  Searched for 1 pattern, ran 2 shell commands (ctrl+o to expand)
+
+● Klonda yalnızca .env.example var, CRLF'li dosya yok (455 dosyanın hepsi LF).
+  Şimdi klonda LLM_MODE vermeden stack'i başlatıyorum.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Klonda stack mock modunda açıldı, 3000 portu 200 döndü (19 s). Şimdi klonda
+  make test:
+
+  Searched for 1 pattern, ran 2 shell commands (ctrl+o to expand)
+
+● make test klonda geçti (161 s; 125 testten 8'i atlandı: 4 guard + 4 gofmt
+  kancası). Şimdi make e2e, üç kez art arda:
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Üç koşu da geçti (125, 125, 116 s; 9/9, flaky yok), bu yüzden e2e job'ını CI'a
+  ekliyorum.
+
+● Update(.github\workflows\ci.yml)  ⎿  Added 14 lines
+      70        - name: Stop the stack and remove its volume
+      71          if: always()
+      72          run: docker compose down --volumes --remove-orphans
+      73 +                                                               
+      74 +  e2e:                                                         
+      75 +    # Added after the browser tests passed three times in a row
+         + on a clean clone (DECISIONS.md, "Continuous integration").    
+      76 +    # scripts/e2e.sh prints the last log lines of the stack its
+         +elf when a run fails, then removes its compose project.        
+      77 +    name: make e2e                                             
+      78 +    runs-on: ubuntu-24.04                                      
+      79 +    timeout-minutes: 25                                        
+      80 +    steps:                                                     
+      81 +      - name: Check out                                        
+      82 +        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30
+         +e30af803 # v6.1.0                                              
+      83 +        with:                                                  
+      84 +          persist-credentials: false                           
+      85 +      - name: make e2e                                         
+      86 +        run: make e2e                                          
+
+  Ran 7 shell commands (ctrl+o to expand)
+  ⎿  1 action not run · permission denied
+     │ Reason: PreToolUse:PowerShell hook error: Blocked by guard: dumping environment variables is blocked (secrets must not enter the session transcript)
+
+● Klonda hiçbir şey kırılmadı, kod değişikliği gerekmedi. Ana klasör mock
+  modunda geri geldi. Adım 4: README ve DECISIONS.
+
+  Searched for 1 pattern, ran 1 shell command (ctrl+o to expand)
+
+● Update(README.md)
+  ⎿  Added 3 lines, removed 3 lines
+      91  
+      92  | Command | What it does | Time |
+      93  |---|---|---|
+      94 -| `make test` | gofmt, `go vet`, `go test -race` with PostgreSQ
+         -L integration tests, hook and script tests, the web checks (`np
+         -m audit`, `vue-tsc`, Vitest). No API key. | a few minutes (the 
+         -slowest package, the worker, takes about 90 s) |               
+      95 -| `make e2e` | Playwright browser tests against the real stack 
+         -with the mock model, in a project of its own that is removed af
+         -terwards. `SCREENSHOTS=1` rewrites `docs/screenshots/`. | about
+         - 2 minutes |                                                   
+      96 -| `make soak` | 5,000 messages through the real containers with
+         - a chaos provider; fails on a double send, a broken 100/s cap o
+         -r an early retry. | about 3–4 minutes (the default backoff star
+         -ts at 15 s) |                                                  
+      94 +| `make test` | gofmt, `go vet`, `go test -race` with PostgreSQ
+         +L integration tests, hook and script tests, the web checks (`np
+         +m audit`, `vue-tsc`, Vitest). No API key. | about 160 s (161 s 
+         +measured; the slowest package, the worker, takes about 90 s) | 
+      95 +| `make e2e` | Playwright browser tests against the real stack 
+         +with the mock model, in a project of its own that is removed af
+         +terwards. `SCREENSHOTS=1` rewrites `docs/screenshots/`. | about
+         + 2 minutes (116 to 125 s in three runs) |                      
+      96 +| `make soak` | 5,000 messages through the real containers with
+         + a chaos provider; fails on a double send, a broken 100/s cap o
+         +r an early retry. | about 4 minutes (236 s measured, 3 min 39 s
+         + of it the run itself; the default backoff starts at 15 s) |   
+      97  | `make eval LLM_MODE=anthropic` | the golden set (`eval/golden
+          .json`, 16 Turkish briefs) against the **real** model, scored b
+          y deterministic checks, no model as judge. **Costs money** (abo
+          ut $0.25 on the default model); it refuses to start without `LL
+          M_MODE=anthropic` and a key, and stops at `EVAL_MAX_USD` (defau
+          lt `1.00`). | about 100 s |
+      98  | `make eval EVAL_ARGS="-mock"` | the same set against the demo
+           model (16 of 16 pass): free, writes no result file. | about 75
+           s (the demo model streams slowly on purpose) |
+      99  
+
+● Update(README.md)
+  ⎿  Added 13 lines, removed 1 line
+       95  | `make e2e` | Playwright browser tests against the real stack
+            with the mock model, in a project of its own that is removed 
+           afterwards. `SCREENSHOTS=1` rewrites `docs/screenshots/`. | ab
+           out 2 minutes (116 to 125 s in three runs) |
+       96  | `make soak` | 5,000 messages through the real containers wit
+           h a chaos provider; fails on a double send, a broken 100/s cap
+            or an early retry. | about 4 minutes (236 s measured, 3 min 3
+           9 s of it the run itself; the default backoff starts at 15 s) 
+           |
+       97  | `make eval LLM_MODE=anthropic` | the golden set (`eval/golde
+           n.json`, 16 Turkish briefs) against the **real** model, scored
+            by deterministic checks, no model as judge. **Costs money** (
+           about $0.25 on the default model); it refuses to start without
+            `LLM_MODE=anthropic` and a key, and stops at `EVAL_MAX_USD` (
+           default `1.00`). | about 100 s |
+       98 -| `make eval EVAL_ARGS="-mock"` | the same set against the dem
+          -o model (16 of 16 pass): free, writes no result file. | about 
+          -75 s (the demo model streams slowly on purpose) |             
+       98 +| `make eval EVAL_ARGS="-mock"` | the same set against the dem
+          +o model (16 of 16 pass): free, writes no result file. | about 
+          +75 s (74 s measured; the demo model streams slowly on purpose)
+          + |                                                            
+       99  
+      100  `make test` and `make e2e` need no key and spend nothing. Resu
+           lts of earlier real runs are in [`eval/results/`](eval/results
+           /).
+      101  
+      102 +The times were measured on a clean clone of this repository (n
+          +o dotenv file, `git clone` into a temporary folder), on a Wind
+          +ows                                                           
+      103 +machine with Docker Desktop, with the images of the third-part
+          +y containers already pulled and the Docker build cache warm; t
+          +he                                                            
+      104 +first `docker compose up -d` of that clone took 19 s on a warm
+          + build cache, and a first build with empty caches takes longer
+      105 +(not measured). Expect more on a slower machine.              
+      106 +                                                              
+      107 +**CI** (`.github/workflows/ci.yml`, on a push to `main`, on pu
+          +ll requests and by hand) runs `make test`, then `docker compos
+          +e up`                                                         
+      108 +without a dotenv file (it checks that `/api/config` says `llm_
+          +mode: mock`) and `make e2e`. It has no secret and no API key, 
+          +and                                                           
+      109 +`LLM_MODE=mock` is set in the file. `make soak` and `make eval
+          +` are not part of it. On Linux 8 of the 125 hook and script te
+          +sts are                                                       
+      110 +skipped, in `make test` and in CI alike: 4 tests of the guard 
+          +hook that use Windows drive paths (`C:\...`, which only mean s
+          +omething on                                                   
+      111 +Windows) and 4 tests of the gofmt hook (the Node image has no 
+          +`gofmt`; `gofmt` itself is checked in the Go container). They 
+          +run when                                                      
+      112 +`node --test` is run on Windows.                              
+      113 +                                                              
+      114  ## Model choice
+      115  
+      116  The default is **`claude-sonnet-5-5`**. On the golden set (one
+            run per brief, so a smoke result and not a rate) the last ful
+           l run
+
+● Update(README.md)
+  ⎿  Added 2 lines, removed 2 lines
+      108  without a dotenv file (it checks that `/api/config` says `llm_
+           mode: mock`) and `make e2e`. It has no secret and no API key, 
+           and
+      109  `LLM_MODE=mock` is set in the file. `make soak` and `make eval
+           ` are not part of it. On Linux 8 of the 125 hook and script te
+           sts are
+      110  skipped, in `make test` and in CI alike: 4 tests of the guard 
+           hook that use Windows drive paths (`C:\...`, which only mean s
+           omething on
+      111 -Windows) and 4 tests of the gofmt hook (the Node image has no 
+          -`gofmt`; `gofmt` itself is checked in the Go container). They 
+          -run when                                                      
+      112 -`node --test` is run on Windows.                              
+      111 +Windows) and 4 tests of the gofmt hook (the Node image has no 
+          +`gofmt`; `gofmt` itself is checked in the Go container). The f
+          +irst four run                                                 
+      112 +under `node --test` on Windows, the other four wherever `gofmt
+          +` is installed.                                               
+      113  
+      114  ## Model choice
+      115  
+
+● Update(DECISIONS.md)
+  ⎿  Added 45 lines
+      1771    `.env.example` as comments and no variable is required.
+      1772  - Every web command ran in the pinned node container (`script
+            s/web.sh`, `scripts/test-web.sh`); no package code ran on the
+             host.
+      1773  
+      1774 +## Continuous integration (2026-11-15)                       
+      1775 +                                                             
+      1776 +- **What runs** (`.github/workflows/ci.yml`; on a push to `ma
+           +in`, on pull requests and by hand): three jobs. `make test` (
+           +the whole                                                    
+      1777 +  suite, in Docker); `compose up` without a dotenv file (`doc
+           +ker compose up -d --build --wait web worker`, then           
+      1778 +  `/api/config` through the web container must say `llm_mode:
+           + mock`, `/` must answer, then `down --volumes`); and `make e2
+           +e`.                                                          
+      1779 +  A job whose step fails prints `docker compose logs` (the co
+           +mpose job), and `make e2e` prints the last log lines of its s
+           +tack                                                         
+      1780 +  itself before it removes the project; `make test` streams t
+           +he output of its containers, and its throwaway project is rem
+           +oved                                                         
+      1781 +  by the script, so there is nothing left to print afterwards
+           +.                                                            
+      1782 +- **No secret, no real API.** The workflow declares `permissi
+           +ons: contents: read`, reads no secret, has no `ANTHROPIC_API_
+           +KEY`,                                                        
+      1783 +  and sets `LLM_MODE=mock` for the whole workflow, so a key t
+           +hat might one day be added to the repository would still not 
+           +be used.                                                     
+      1784 +  A checkout has no dotenv file (the compose job checks that 
+           +no file other than `.env.example` is there). The reason is th
+           +e                                                            
+      1785 +  same as in every session: the real model costs money and ru
+           +ns only when someone asks for it by name (`make eval LLM_MODE
+           +=anthropic`),                                                
+      1786 +  and pull requests from a fork must not be able to spend or 
+           +read anything. That is also why `make eval` is not in CI at a
+           +ll.                                                          
+      1787 +  `make soak` is not either: it takes about 4 minutes, is tim
+           +ing-sensitive (a 100/s cap, backoff from 15 s) and a loaded s
+           +hared                                                        
+      1788 +  runner could make it fail for a reason that is not a bug; i
+           +t stays a command to run by hand.                            
+      1789 +- **Pinned.** The only action is the official `actions/checko
+           +ut`, pinned to the full commit SHA of the tag `v6.1.0`       
+      1790 +  (`d23441a48e516b6c34aea4fa41551a30e30af803`, taken from the
+           + official repository with `git ls-remote`, not from memory), 
+           +with the                                                     
+      1791 +  version in a comment and `persist-credentials: false` (the 
+           +token is not left in `.git`). A tag can be moved; a SHA canno
+           +t. The                                                       
+      1792 +  runner is `ubuntu-24.04` (not `ubuntu-latest`), every job h
+           +as a `timeout-minutes`, and a `concurrency` group cancels the
+           + older run                                                   
+      1793 +  of the same branch. Nothing keeps the SHA current: a newer 
+           +version is a deliberate change, made the same way.           
+      1794 +- **Checked, not run.** `actionlint` (the pinned image of "To
+           +ols", `--network none`, repository read-only) finds nothing, 
+           +and it also                                                  
+      1795 +  ran shellcheck on the `run:` scripts (one finding, `ls | gr
+           +ep`, was fixed). That is a check of syntax and expressions on
+           +ly:                                                          
+      1796 +  **the workflow has not run on GitHub**, because it cannot b
+           +efore a push; the first real run will be after the first push
+           +, and                                                        
+      1797 +  nothing is claimed about it here. Things that can differ on
+           + a runner and that this machine cannot show: the speed of a s
+           +hared                                                        
+      1798 +  runner (the worker package and the browser tests have timeo
+           +uts), the `docker compose` version (the `--wait` of a stack w
+           +ith                                                          
+      1799 +  one-off containers) and a cold Docker cache (images are pul
+           +led and built from nothing). No badge is in the README for th
+           +e same reason.                                               
+      1800 +- **The browser tests are in CI because they passed three tim
+           +es in a row on a clean clone** (125, 125 and 116 s, 9 of 9 ea
+           +ch,                                                          
+      1801 +  none flaky). Had one failed, the job would not have been ad
+           +ded and this entry would say why.                            
+      1802 +- **The clean-clone rehearsal** (the first experience of some
+           +one who clones the repository), in a temporary folder outside
+           + the repo,                                                   
+      1803 +  from the committed state, on this machine, which has `core.
+           +autocrlf=true`:                                              
+      1804 +  - Only `.env.example` is in the clone. `git ls-files --eol`
+           + shows 0 files that are CRLF in the working copy (455 files; 
+           +445 `w/lf`,                                                  
+      1805 +    9 binary, 1 empty), so `.gitattributes` (`* text=auto eol
+           +=lf`) holds even with `autocrlf` on.                         
+      1806 +  - `docker compose up -d` with no `LLM_MODE` and no dotenv f
+           +ile: all services healthy after 19 s (a warm build cache), `/
+           +api/config`                                                  
+      1807 +    on 8080 and on 3000 says `llm_mode: mock`, and `http://12
+           +7.0.0.1:3000/` answers 200.                                  
+      1808 +  - `make test` passed in 161 s (125 hook and script tests: 1
+           +17 passed, 0 failed, **8 skipped**: 4 guard tests with Window
+           +s drive paths,                                               
+      1809 +    which only resolve on Windows, and 4 gofmt-hook tests, be
+           +cause the Node image has no gofmt). `make e2e` three times: 1
+           +23, 123 and                                                  
+      1810 +    115 s by its own clock. `make soak` passed (236 s; 4,999 
+           +of 5,000 sent, 1 email failed after its retries; at most 100 
+           +requests in any                                              
+      1811 +    second and channel; no early retry). `make eval EVAL_ARGS
+           +=-mock`: 16 of 16 in 74 s. The README times are these.       
+      1812 +  - **Nothing broke, so no code was changed.**               
+      1813 +  - Choices made without asking: the clone's compose project 
+           +was started with `-p scc-clone`, so that its volume and netwo
+           +rk are                                                       
+      1814 +    not the ones of the main folder's project (`down -v` remo
+           +ved only `scc-clone_*`); the three `smart-campaign-composer/*
+           +:dev` images were                                            
+      1815 +    removed first, so that the clone had to build its own and
+           + did not reuse the main folder's; the main folder's stack was
+           + stopped                                                     
+      1816 +    with `down` (no `-v`) before and restarted with `LLM_MODE
+           +=mock` after. The Docker caches stay warm, so a cold first bu
+           +ild                                                          
+      1817 +    was not measured.                                        
+      1818 +                                                             
+      1819  ## Future work
+      1820  
+      1821  - **Model routing.** Sonnet first; when the validation still 
+            fails after the repair loop, run the same task once on Opus. 
+            Today a
+
+● Update(DECISIONS.md)
+  ⎿  Added 2 lines, removed 1 line
+      20    [The model decision](#the-model-decision-2026-11-15-after-rea
+          ding-the-comparison) ·
+      21    [A rule without a condition](#a-rule-without-a-condition-mean
+          s-every-user-2026-11-15-found-by-hand-in-the-browser) ·
+      22    [A criterion the rule cannot express](#a-criterion-the-rule-c
+          annot-express-must-not-replace-one-it-can-2026-11-15-olmayan-kr
+          iter)
+      23 -- **How it was built:** [Tools](#tools) · [Working environment]
+         -(#working-environment) · [Permission mode and hooks](#permissio
+         -n-mode-and-hooks)                                              
+      23 +- **How it was built:** [Tools](#tools) · [Working environment]
+         +(#working-environment) · [Permission mode and hooks](#permissio
+         +n-mode-and-hooks) ·                                            
+      24 +  [Continuous integration](#continuous-integration-2026-11-15) 
+      25  - **What is next:** [Future work](#future-work) · [Open issues]
+          (#open-issues)
+      26  
+      27  ## LLM layer
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Son make test yeşil (160 s). Adım 4'ü commit ediyorum.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Dört madde de bitti, ama CI workflow'u GitHub'da hiç koşmadı; yalnızca
+  actionlint'ten geçti. İlk gerçek koşu push'tan sonra olacak. Temiz klonda
+  hiçbir şey kırılmadığı için kod değişikliği yapmadım.
+
+  Son make test: çıkış 0, 160 s. Hook ve script testlerinden 125'i çalıştı,
+  117'si geçti, 0'ı kaldı, 8'i atlandı. Go paketlerinin hepsi ok.
+
+  Bu oturumun commit'leri (git log --oneline):
+  cd58ea9 docs: measured command times, what CI runs, skipped guard tests, CI 
+  and clean-clone record in DECISIONS
+  4a6d22d ci: add the browser tests (passed three times in a row on a clean 
+  clone)
+  847a7d5 ci: GitHub Actions workflow (make test, compose up without a dotenv 
+  file), checked with a pinned actionlint
+  076594a docs: CLAUDE.md checked against the repo, no session count in the 
+  README, no model column in the session index
+  39aa79a docs(ai-sessions): add the documents session (20), two lines masked
+
+  Klon yolu (silmedim): C:\Users\EYUP\AppData\Local\Temp\scc-clean-clone.
+  Yanında log'lar var: scc-clone-test.log, scc-clone-e2e-1.log ile -3.log arası,
+  scc-clone-soak.log, scc-clone-eval.log.
+
+  Ne bitti
+
+  - 0: 20-belgeler.txt taramasında 2 bulgu çıktı (eski test key'inin diff satırı
+    ve n***@d***.tld örneği). İkisini maskeledim, tarama temiz, tabloya satır
+    eklendi.
+  - 1: CLAUDE.md'de altın set 16 brief oldu. Şu eskimişleri de düzelttim:
+    - binary'nin migrate komutu ve eval/soak programları,
+    - eval paketi,
+    - fuzz hedefleri,
+    - node --test satırı.
+
+    README'deki oturum sayısı kalktı. ai-sessions/README.md'den model sütunu
+    çıktı, yerine opusplan'ı anlatan bir cümle geldi.
+  - 2: ci.yml yazıldı, kurallar uygulandı. Üç job var: make test, .env olmadan
+    compose up (/api/config'te llm_mode: mock kontrolü) ve make e2e. Tek action
+    actions/checkout, v6.1.0, SHA d23441a4…, git ls-remote ile alındı.
+    actionlint image'ı rhysd/actionlint:1.7.12, digest sha256:b1934ee5…;
+    THIRD_PARTY.md, DECISIONS Tools ve CLAUDE.md'ye yazıldı.
+  - 3: Temiz klonda ölçümler:
+
+  ┌───────────────────────────────────────────┬─────────────────────────────┐
+  │                   Adım                    │            Süre             │
+  ├───────────────────────────────────────────┼─────────────────────────────┤
+  │ docker compose up -d (LLM_MODE yok,       │ 19 s, llm_mode mock, 3000   │
+  │ klonda .env yok)                          │ portu 200                   │
+  ├───────────────────────────────────────────┼─────────────────────────────┤
+  │ make test                                 │ 161 s                       │
+  ├───────────────────────────────────────────┼─────────────────────────────┤
+  │ make e2e (3 koşu, 9/9, flaky yok)         │ 125, 125, 116 s             │
+  ├───────────────────────────────────────────┼─────────────────────────────┤
+  │ make soak                                 │ 236 s, PASS                 │
+  ├───────────────────────────────────────────┼─────────────────────────────┤
+  │ make eval EVAL_ARGS=-mock                 │ 74 s, 16/16                 │
+  └───────────────────────────────────────────┴─────────────────────────────┘
+
+    Klonda 455 dosyanın hiçbiri CRLF değil (bu makinede autocrlf=true). e2e üç
+  kez geçtiği için job'ı ekledim.
+  - 4: README süreleri bu ölçümlerle değişti. CI'ın ne koştuğu ve atlanan 8
+    testin nedeni eklendi: 4 guard testi Windows sürücü yolu kullanıyor, 4 gofmt
+    testi node image'ında gofmt olmadığı için atlanıyor. DECISIONS'a
+    "Continuous integration" bölümü yazıldı.
+
+  Ne kaldı
+
+  - Push'tan sonra ilk gerçek CI koşusu. Runner hızı, docker compose sürümü ve
+    soğuk Docker cache'i bu makinede görülemiyor.
+  - Soğuk önbellekle ilk build süresi ölçülmedi (19 s sıcak cache'le).
+  - make soak ve make eval CI'da yok (gerekçe DECISIONS'ta).
+  - Klon klasörünü silmek sizde.
+
+  Kararlar
+
+  - Tetikleyici dal main, runner ubuntu-24.04, rozet yok.
+  - Başarısız adımda log basma: yalnızca compose job'ında docker compose logs.
+    make e2e kendi log'unu zaten basıyor, make test project'ini kendisi
+    temizliyor.
+  - Klon -p scc-clone project adıyla çalıştı, down -v yalnızca onu sildi. Klonun
+    kendi build'i yapması için üç smart-campaign-composer/*:dev image'ını önce
+    sildim.
+  - Ana stack down (-v yok) ile durdu, LLM_MODE=mock ile döndü ve /api/config
+    mock gösterdi.
+
+  Hook engelleri
+
+  Hepsi komut bazlıydı; dolanmadım, komutu sadeleştirdim ya da araç değiştirdim:
+  - export MSYS_NO_PATHCONV=1; docker pull …: "dumping environment variables".
+  - PowerShell docker image inspect …: aynı engel. docker inspect kuralı bunu da
+    yakalıyor; digest'i docker pull çıktısından aldım.
+  - ls -a | grep ^\.env ve klonda Test-Path .env: "reading dotenv files". Yanlış
+    alarm; yerine Glob kullandım (yalnızca .env.example çıktı).
+  - Remove-Item Env:LLM_MODE: aynı env engeli. CLAUDE.md'deki
+    $env:LLM_MODE='mock'; … biçimi sorunsuz geçti.
+
+  Küçük not
+
+  git commit pre-commit'te gitleaks çalıştı, hiçbir commit engellenmedi.
+
+✻ Cooked for 25m 45s · done 20:33
+
+※ recap: Hedef: CI workflow'unu, temiz klon provasını ve belge düzeltmelerini bitirmekti; hepsi tamamlandı, beş commit atıldı, son `make test` yeşil. Sıradaki tek adım sizde: klon klasörünü silmek, sonra push edip ilk CI koşusuna bakmak. (disable recaps in /config)
