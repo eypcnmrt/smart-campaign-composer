@@ -7,6 +7,8 @@
 #   sh scripts/web.sh npx vue-tsc -p tsconfig.app.json --noEmit
 #   sh scripts/web.sh npx vitest run
 #   sh scripts/web.sh dev                          dev server on http://127.0.0.1:5173 (proxies /api to the host's :8080)
+#                                                  (for Docker Desktop: on Linux host.docker.internal does not resolve, and the
+#                                                  API is published on 127.0.0.1 only; run `npm run dev` another way there)
 #
 # Only web/ is mounted, plus the shared test fixtures of the backend (read-only, JSON only, at the same relative place:
 # web/src/domain/x.test.ts reaches ../../../backend/internal/content/testdata, which is /backend/... in the container).

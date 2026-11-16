@@ -1824,6 +1824,31 @@ without being downloaded into a quarantine folder first, scanned, and copied in 
     115 s by its own clock. `make soak` passed (236 s; 4,999 of 5,000 sent, 1 email failed after its retries; at most 100 requests in any
     second and channel; no early retry). `make eval EVAL_ARGS=-mock`: 16 of 16 in 74 s. The README times are these.
   - **Nothing broke, so no code was changed.**
+- **A read for what breaks on Linux** (before the first CI run; every command above ran on Windows with Docker Desktop, and only the
+  first CI run can prove anything). The containers are Linux in both places, so what can differ is the host side: the scripts, the
+  bind mounts, the file modes and the case of names. Found by reading the Makefile, the compose files, the Dockerfiles and
+  `scripts/`, and by a small check over all tracked text files:
+  - **Shell:** the scripts are POSIX `sh` (no `[[`, arrays, `local`, `pipefail`, `echo -e`); `$(($(date +%s) - started))` is POSIX.
+    The Git-Bash helpers are guarded: `export MSYS_NO_PATHCONV=1` does nothing on Linux, and `pwd -W 2>/dev/null || pwd`
+    falls back to `pwd` (`-W` is an illegal option there, which the `||` absorbs). No `cygpath`, `winpty`, `cmd //c`, `.exe` or drive
+    letter is used by any script, compose file, Dockerfile or the workflow.
+  - **Execute bit:** 455 of 456 tracked files are `100644`; only `.githooks/pre-commit` is `100755`. Nothing needs the bit:
+    the Makefile and the docs call `sh scripts/x.sh`, the compose files run `sh scripts/...`, `sh /src/scripts/...` or `node --test`, and the Dockerfiles
+    copy no script. (A script called as `./scripts/x.sh` would fail on Linux; none is.)
+  - **Case:** no two tracked paths differ only in case, and no path in code, compose files, Dockerfiles, scripts or the workflow
+    differs only in case from a tracked file or folder (Go import paths and extension-less TypeScript imports included). The check
+    was tried first on a copy of the file list with one folder renamed in capitals, and it found the 30 references to it.
+  - **`host.docker.internal`** is used in one place, `scripts/web.sh dev` (the Vite dev server, `API_PROXY_TARGET`). It is not in CI
+    and not in any compose file. On Linux it does not resolve without `--add-host=host.docker.internal:host-gateway`, and even then
+    the API is published on `127.0.0.1` only, which the bridge gateway cannot reach. So adding the flag alone would not make the dev
+    server work on Linux; it was **left as it is** and the header of `scripts/web.sh` now says that the dev server is for Docker Desktop.
+    Everything else in `scripts/web.sh` (`npm ci`, `vue-tsc`, `vitest`) does not use it.
+  - **Not decidable by reading** (so not claimed): the speed of a shared runner against the timeouts, the `docker compose` version on
+    the runner (`!reset` in `docker-compose.e2e.yml` needs Compose 2.24 or later; `ubuntu-24.04` images ship a newer one, but this
+    was not looked up), pulls of the base images from an empty cache, and the empty `e2e/node_modules` mount point that Docker leaves
+    in the checkout as root (untracked, harmless).
+  - **Nothing was changed for Linux except one comment** (the header of `scripts/web.sh`). Nothing found is certain to break CI; the
+    first run will show.
   - Choices made without asking: the clone's compose project was started with `-p scc-clone`, so that its volume and network are
     not the ones of the main folder's project (`down -v` removed only `scc-clone_*`); the three `smart-campaign-composer/*:dev` images were
     removed first, so that the clone had to build its own and did not reuse the main folder's; the main folder's stack was stopped
